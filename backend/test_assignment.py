@@ -1,5 +1,5 @@
 """
-Quick manual test for coordinator_assignment.py against the seeded data.
+Quick manual test for app/events/coordinator_service.py against the seeded data.
 
 Run from backend/ with your venv active (after running seed.py or
 seed.sql at least once):

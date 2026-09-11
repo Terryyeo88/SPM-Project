@@ -10,7 +10,7 @@ Safe to re-run: it looks up existing rows by email/name before creating
 duplicates, so running it twice won't double up your data.
 
 NOTE: this uses the Supabase Admin API (auth.admin.create_user), which
-requires the SERVICE ROLE key — exactly what supabase_client.py already
+requires the SERVICE ROLE key — exactly what app/extensions.py already
 loads. These are throwaway local-dev accounts with a shared dummy
 password; never reuse this pattern for real user signups.
 """
