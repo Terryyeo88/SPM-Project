@@ -13,17 +13,20 @@ network failure, etc.) to the caller.
 
 from flask import Blueprint, current_app, jsonify
 
+from app.auth.context import public
 from app.extensions import supabase
 
 health_bp = Blueprint("health", __name__, url_prefix="/health")
 
 
 @health_bp.route("", methods=["GET"])
+@public
 def health():
     return jsonify({"status": "ok"}), 200
 
 
 @health_bp.route("/db", methods=["GET"])
+@public
 def health_db():
     try:
         supabase.table("profiles").select("id").limit(1).execute()

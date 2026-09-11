@@ -5,6 +5,7 @@ Flask application factory.
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from app.auth.context import register_auth_hooks
 from app.config import Config
 from app.shared.errors import AppError
 
@@ -20,6 +21,7 @@ def create_app(config_override=None):
     CORS(app, origins=[_VUE_DEV_ORIGIN], supports_credentials=True)
 
     _register_error_handlers(app)
+    register_auth_hooks(app)
     _register_blueprints(app)
 
     return app

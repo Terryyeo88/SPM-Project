@@ -11,19 +11,27 @@ from __future__ import annotations
 
 class AppError(Exception):
     """Base for every error the API is allowed to expose to a caller.
-    Subclasses fix a status_code and a machine-readable code; `message`
-    is the human-readable detail, defaulting to the code itself."""
+    Subclasses fix a status_code and a default machine-readable code;
+    `message` is the human-readable detail, defaulting to the code
+    itself. A call site can override `code` per-instance (e.g.
+    AuthenticationError has several distinct rejection reasons that all
+    share one status_code but need different codes for the frontend to
+    branch on) -- pass `code=` explicitly when that's needed."""
 
     status_code = 500
     code = "internal_error"
 
-    def __init__(self, message: str | None = None):
+    def __init__(self, message: str | None = None, code: str | None = None):
+        if code is not None:
+            self.code = code
         self.message = message or self.code
         super().__init__(self.message)
 
 
 class AuthenticationError(AppError):
-    """The caller didn't present a valid session at all."""
+    """The caller didn't present a valid session at all. Several distinct
+    rejection reasons share this status_code but carry different `code`
+    values -- see app/auth/jwt.py's module docstring for the full list."""
 
     status_code = 401
     code = "authentication_required"
