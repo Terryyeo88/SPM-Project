@@ -15,7 +15,7 @@ loads. These are throwaway local-dev accounts with a shared dummy
 password; never reuse this pattern for real user signups.
 """
 
-from supabase_client import supabase
+from app.extensions import supabase
 
 SEED_PASSWORD = "Password123!"
 

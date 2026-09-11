@@ -6,7 +6,7 @@ for the variables this expects — SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY).
 Import `supabase` from this module anywhere in the backend instead of
 creating a new client per-file.
 
-    from supabase_client import supabase
+    from app.extensions import supabase
 
     supabase.table("events").select("*").execute()
 
@@ -23,7 +23,7 @@ from supabase import create_client, Client
 
 # Always resolve the repo-root .env, regardless of the current working
 # directory the Flask app happens to be started from.
-_ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
+_ROOT_ENV = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(dotenv_path=_ROOT_ENV)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")

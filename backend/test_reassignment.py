@@ -13,8 +13,8 @@ since her only booking is on a different date -- and the audit log shows
 both the old and new coordinator for that change.
 """
 
-from supabase_client import supabase
-from coordinator_assignment import reassign_coordinator, NoCoordinatorAvailableError
+from app.extensions import supabase
+from app.events.coordinator_service import reassign_coordinator, NoCoordinatorAvailableError
 
 
 def main():

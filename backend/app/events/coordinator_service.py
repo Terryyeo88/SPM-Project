@@ -39,7 +39,7 @@ from __future__ import annotations
 from datetime import time
 from typing import Optional
 
-from supabase_client import supabase
+from app.extensions import supabase
 
 # Statuses that count as "this coordinator is actively on the hook for
 # this event" -- draft/rejected/cancelled/completed don't block a slot.

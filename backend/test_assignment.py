@@ -16,8 +16,8 @@ Expected behaviour:
     exercised, not just the happy path.
 """
 
-from supabase_client import supabase
-from coordinator_assignment import assign_initial_coordinator, NoCoordinatorAvailableError
+from app.extensions import supabase
+from app.events.coordinator_service import assign_initial_coordinator, NoCoordinatorAvailableError
 
 
 def run(event_name: str):
