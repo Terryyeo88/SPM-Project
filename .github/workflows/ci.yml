@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to 3.13 to match the version this backend was developed
+      # and tested against (3.13.3, confirmed via `python --version` in
+      # the dev venv) -- not the newest available, the one actually used.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check .
+
+      # No .env exists in a fresh checkout -- it's gitignored and never
+      # committed -- so SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are
+      # genuinely unset here, the same condition verified locally by
+      # temporarily removing .env. This is NOT simulated by unsetting
+      # env vars in this workflow; it's the real, unavoidable state of a
+      # checkout that never had the file. The 9 integration tests skip
+      # themselves (see backend/tests/conftest.py); nothing here needs to
+      # know which tests those are.
+      - name: Test with coverage
+        run: pytest --cov=app --cov-report=term-missing
