@@ -53,6 +53,48 @@ def test_rejection_cases_produce_specific_codes(signing_key, make_header, expect
     assert excinfo.value.code == expected_code
 
 
+def test_small_clock_skew_on_iat_is_tolerated(signing_key):
+    """Regression test for a real bug found running against the live
+    project: PyJWT rejects an `iat` that appears to be in the future
+    with zero tolerance by default, and ordinary clock skew between this
+    machine and Supabase's server intermittently put real, otherwise-
+    valid tokens a few seconds into the "future" by the verifying
+    machine's clock. verify_token must tolerate small skew (see
+    _CLOCK_SKEW_LEEWAY_SECONDS in app/auth/jwt.py)."""
+    token = signing_key.make_token(iat_delta_seconds=5)
+    claims = verify_token(f"Bearer {token}")
+    assert claims["sub"] == "user-1"
+
+
+def test_large_clock_skew_on_iat_is_still_rejected(signing_key):
+    """The leeway is a tolerance for real clock skew, not a blank
+    exemption -- an `iat` far in the future must still fail."""
+    token = signing_key.make_token(iat_delta_seconds=3600)
+    with pytest.raises(AuthenticationError) as excinfo:
+        verify_token(f"Bearer {token}")
+    assert excinfo.value.code == "auth_malformed_token"
+
+
+def test_token_missing_kid_header_is_rejected(signing_key):
+    token = signing_key.make_token(omit_kid=True)
+    with pytest.raises(AuthenticationError) as excinfo:
+        verify_token(f"Bearer {token}")
+    assert excinfo.value.code == "auth_malformed_token"
+
+
+def test_token_missing_required_claim_falls_through_to_malformed(signing_key):
+    """A claim PyJWT itself requires (here: sub) being absent raises
+    MissingRequiredClaimError, a subclass of InvalidTokenError that
+    isn't ExpiredSignatureError/InvalidAudienceError/InvalidIssuerError/
+    InvalidSignatureError -- exercises verify_token's generic
+    `except jwt.InvalidTokenError` fallback specifically, not one of the
+    named branches above it."""
+    token = signing_key.make_token(omit_sub=True)
+    with pytest.raises(AuthenticationError) as excinfo:
+        verify_token(f"Bearer {token}")
+    assert excinfo.value.code == "auth_malformed_token"
+
+
 def test_bad_signature_is_rejected(signing_key):
     # Signed by a DIFFERENT, unrelated private key, but claiming the same
     # kid -- this is what a forged token looks like: right shape, wrong

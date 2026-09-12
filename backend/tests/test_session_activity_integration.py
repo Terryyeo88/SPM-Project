@@ -10,6 +10,14 @@ a response object with `.data = None`) on zero rows, which
 _get_last_active's first version got wrong and crashed on. These tests
 exist so that class of bug can't silently come back.
 
+Also covers _load_profile_with_roles -- found uncovered entirely (not
+just by unit tests, by ANY test) during the Phase 5 criterion audit. It
+was exercised manually once, live, during the Phase 3 end-to-end proof,
+but had no automated regression test; its nested-relationship select
+(`user_roles(role)`) is exactly the kind of postgrest-py-specific
+behaviour the maybe_single() bug above already showed unit mocks can't
+verify.
+
 Skipped automatically (see conftest.py's pytest_collection_modifyitems)
 unless SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are both set -- never
 true in CI.
@@ -22,7 +30,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.auth.context import _get_last_active, _touch_session_activity
+from app.auth.context import _get_last_active, _load_profile_with_roles, _touch_session_activity
 from app.extensions import supabase
 
 pytestmark = pytest.mark.integration
@@ -75,3 +83,18 @@ def test_touch_twice_upserts_rather_than_duplicating(real_coordinator_id, throwa
 
     last_active = _get_last_active(throwaway_session_id)
     assert abs((last_active - second).total_seconds()) < 2
+
+
+def test_load_profile_with_roles_against_real_seeded_coordinator():
+    result = (
+        supabase.table("profiles").select("id").eq("email", "coordinator1@example.com").execute()
+    )
+    if not result.data:
+        pytest.skip("seed data not present (coordinator1@example.com not found)")
+    user_id = result.data[0]["id"]
+
+    name, email, roles = _load_profile_with_roles(user_id)
+
+    assert name == "Alice Tan"
+    assert email == "coordinator1@example.com"
+    assert "event_coordinator" in roles

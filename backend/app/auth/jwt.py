@@ -58,6 +58,16 @@ _JWKS_PATH = "/auth/v1/.well-known/jwks.json"
 _ISSUER_PATH = "/auth/v1"
 _EXPECTED_AUDIENCE = "authenticated"
 
+# PyJWT checks `iat` is not in the future using the LOCAL clock, with zero
+# tolerance by default -- found live, the hard way: verifying real tokens
+# from the real project intermittently raised ImmatureSignatureError ("the
+# token is not yet valid (iat)") with no leeway, purely from ordinary clock
+# skew between this machine and Supabase's server (the claims were otherwise
+# completely valid every time it happened -- same token, re-verified a moment
+# later, passed). 10 seconds is the standard tolerance for this class of
+# skew; it does not weaken expiry enforcement, which is checked separately.
+_CLOCK_SKEW_LEEWAY_SECONDS = 10
+
 # Matches Supabase's own edge cache lifetime for this endpoint (per their
 # docs: cached 10 minutes there, and caching longer client-side risks
 # missing a legitimate key rotation for a while).
@@ -165,6 +175,7 @@ def verify_token(authorization_header: str | None) -> dict[str, Any]:
             issuer=expected_issuer,
             audience=_EXPECTED_AUDIENCE,
             options={"require": ["exp", "iat", "sub"]},
+            leeway=_CLOCK_SKEW_LEEWAY_SECONDS,
         )
     except jwt.ExpiredSignatureError:
         raise AuthenticationError("Token has expired.", code="auth_token_expired")

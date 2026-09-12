@@ -88,8 +88,11 @@ class SigningKey:
         issuer: str = "https://test-project.supabase.co/auth/v1",
         audience: str = "authenticated",
         exp_delta_seconds: int = 3600,
+        iat_delta_seconds: int = 0,
         kid: str | None = None,
         omit_session_id: bool = False,
+        omit_kid: bool = False,
+        omit_sub: bool = False,
         private_key=None,
     ) -> str:
         now = int(time.time())
@@ -97,16 +100,19 @@ class SigningKey:
             "sub": sub,
             "iss": issuer,
             "aud": audience,
-            "iat": now,
+            "iat": now + iat_delta_seconds,
             "exp": now + exp_delta_seconds,
         }
+        if omit_sub:
+            del payload["sub"]
         if not omit_session_id:
             payload["session_id"] = session_id
+        headers = {} if omit_kid else {"kid": kid or self.kid}
         return pyjwt.encode(
             payload,
             private_key or self._private_key,
             algorithm="ES256",
-            headers={"kid": kid or self.kid},
+            headers=headers,
         )
 
 

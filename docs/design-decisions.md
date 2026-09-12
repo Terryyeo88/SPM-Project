@@ -86,3 +86,22 @@ a finished event answers a different question than this story asks.
 Recorded here as a decision, not an inference: `docs/open-questions.md` has
 a line asking the customer to confirm "after approval" was meant as a range,
 not as a request to re-derive the set from scratch.
+
+## JWT verification tolerates 10 seconds of clock skew on `iat`
+
+Found in Phase 5, live, the hard way: `verify_token` intermittently rejected
+genuinely valid tokens from the real project with `ImmatureSignatureError`
+("the token is not yet valid (iat)"). PyJWT checks `iat` isn't in the future
+using this machine's local clock, with zero tolerance by default — so any
+moment where ordinary clock drift between this machine and Supabase's auth
+server put a token's `iat` a few seconds "ahead" of local time caused an
+otherwise perfectly valid, freshly-issued token to fail. Reproduced directly:
+the same live sign-in call, repeated in a tight loop with no code changes,
+failed roughly 1 in 2 times before the fix and 0 in 15 after it. Fixed with
+`leeway=10` seconds on the `jwt.decode()` call in `app/auth/jwt.py` — standard
+practice for exactly this class of skew, and it does not weaken `exp`
+enforcement, which is a separate check. This was never visible to the unit
+tests in `test_auth_jwt.py` because they sign tokens with Python's own
+`time.time()` at verification time, so there's no skew to trigger — only
+`test_jwt_integration.py`, calling the real Supabase auth server, could ever
+have found it.

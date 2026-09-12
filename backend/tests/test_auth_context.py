@@ -146,3 +146,20 @@ def test_protected_route_rejects_without_token(app, client):
     response = client.get("/_test/whoami")
     assert response.status_code == 401
     assert response.get_json()["error"]["code"] == "auth_missing_token"
+
+
+def test_current_user_raises_if_called_on_a_public_route(app, client):
+    """current_user() must never return None -- if somehow called where
+    the before_request hook didn't attach a user (a @public route that
+    mistakenly calls it), it raises AuthenticationError rather than
+    handing back None for the caller to forget to check."""
+
+    @app.route("/_test/misused-public-route")
+    @context_module.public
+    def misused_public_route():
+        context_module.current_user()  # should raise -- g.current_user was never set
+        return {"should": "not reach here"}
+
+    response = client.get("/_test/misused-public-route")
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "auth_missing_token"

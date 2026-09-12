@@ -3,4 +3,5 @@ flask-cors==6.0.5
 python-dotenv==1.2.3
 supabase==2.31.0
 pytest==9.1.1
+pytest-cov==7.1.0
 PyJWT[crypto]==2.13.0

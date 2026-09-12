@@ -140,6 +140,14 @@ def test_coordinator_denied_reject_on_event_assigned_to_someone_else():
     assert can(user, actions.EVENT_REJECT, event) is False
 
 
+def test_coordinator_denied_reject_from_status_other_than_under_review():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-1", status="approved")
+    assert can(user, actions.EVENT_REJECT, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_REJECT, event)
+
+
 def test_coordinator_allowed_reject_on_own_assigned_event_under_review():
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status="under_review")
@@ -159,6 +167,14 @@ def test_coordinator_denied_request_clarification_on_unassigned_event():
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-2", status="under_review")
     assert can(user, actions.EVENT_REQUEST_CLARIFICATION, event) is False
+
+
+def test_coordinator_denied_request_clarification_from_status_other_than_under_review():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-1", status="approved")
+    assert can(user, actions.EVENT_REQUEST_CLARIFICATION, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_REQUEST_CLARIFICATION, event)
 
 
 # -- event.cancel ---------------------------------------------------------
