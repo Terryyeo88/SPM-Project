@@ -45,13 +45,19 @@ def load_event(event_id: str) -> SimpleNamespace:
 
 
 @events_bp.route("/<event_id>/reassign-coordinator", methods=["POST"])
-@require(EVENT_REASSIGN_COORDINATOR, loader=load_event)
+@require(EVENT_REASSIGN_COORDINATOR, loader=lambda event_id: load_event(event_id))
 def reassign_coordinator_route(event, event_id):
     # `@require`'s wrapper forwards the route's own URL kwargs (event_id)
     # to the view alongside the loaded resource -- see
     # tests/test_authz_decorators.py's edit_event example, which is the
     # tested contract. `event_id` isn't needed here (event.id covers it)
     # but the parameter has to exist or Flask can't call this view at all.
+    #
+    # The loader is wrapped in a lambda (per decorators.py's own docstring
+    # example) rather than passed as `loader=load_event` directly -- that
+    # would bind this module's *current* `load_event` function object once,
+    # at import time, so a test's `monkeypatch.setattr(routes_module,
+    # "load_event", ...)` would never be seen by the decorator at all.
     body = request.get_json(silent=True) or {}
     new_coordinator_id = body.get("new_coordinator_id")
     if not new_coordinator_id:
