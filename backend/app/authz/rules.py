@@ -56,16 +56,25 @@ HOLE: there is no single resource to evaluate a relationship against --
 "list" operates over a whole collection, and "create" happens before any
 row exists. Both rules below answer a narrower question than usual:
 "does this role get to attempt this kind of operation at all", NOT "does
-this user get to see this specific row". The actual per-row scoping for
-EVENT_LIST (an organiser's list query must filter to their own
-organizer_id; a future coordinator listing would filter to their own
-coordinator_id) lives in the CALLER's query, not here -- app.authz has
-no way to see a query the caller hasn't written yet. Whoever builds the
-event-listing route MUST apply that filter themselves; can() passing is
-necessary but not sufficient for that endpoint. This is the same
-division of responsibility as the field-visibility decision (see
+this user get to see this specific row". This is the same division of
+responsibility as the field-visibility decision (see
 docs/design-decisions.md): can() answers yes/no questions about actions,
 it was never meant to reach into a query or a serialiser on your behalf.
+
+    *** READ THIS BEFORE WIRING UP EVENT_LIST ***
+    can(user, EVENT_LIST) passing means "this role is allowed to list
+    SOMETHING" -- it does NOT mean "show them every event". The per-row
+    scoping is entirely the CALLER's responsibility, applied to the
+    query itself, BEFORE rows reach the response:
+        - an organiser's list query must filter to `organizer_id ==
+          user.id`
+        - a coordinator's list query must filter to `coordinator_id ==
+          user.id`
+    app.authz has no way to see a query the caller hasn't written yet,
+    so it cannot enforce this for you. Forgetting this filter is not a
+    degraded experience, it is every event in the table leaked to
+    whoever asks -- this is the one place in this module where passing
+    can() is necessary but nowhere near sufficient.
 """
 
 from __future__ import annotations
@@ -114,16 +123,20 @@ def rule_event_view(user: Any, event: Any) -> Decision:
     return Decision.DENY_NOT_FOUND
 
 
-# -- event.list (role-only -- see module docstring) --------------------------
-# Source: View Event Requests story -- "can view all the event requests
-# that have been created or drafted by him or her". That story is
-# organiser-specific; it does NOT establish a coordinator listing right,
-# so this is organiser-only until a story says otherwise (flagged in the
-# Phase 4 report, not assumed here).
+# -- event.list (role-only -- see *** warning *** in module docstring) -------
+# Source: organiser grant from the View Event Requests story -- "can view
+# all the event requests that have been created or drafted by him or
+# her". Coordinator grant from the View Assigned Event Requests story --
+# a coordinator can view a list of event requests assigned to them. Two
+# different stories, two different roles, same role-only shape -- see the
+# module docstring's warning: EACH of these two roles depends on the
+# CALLER filtering by a DIFFERENT column (organizer_id for the organiser,
+# coordinator_id for the coordinator). Forgetting either filter leaks
+# every event to that caller.
 
 
 def rule_event_list(user: Any, event: Any = None) -> Decision:
-    if _has_role(user, "event_organizer"):
+    if _has_role(user, "event_organizer") or _has_role(user, "event_coordinator"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
 
@@ -155,20 +168,56 @@ def rule_event_submit(user: Any, event: Any) -> Decision:
 
 
 # -- event.edit --------------------------------------------------------------
-# Source: "an organiser cannot edit directly after submission; changes go
-# via the coordinator" -- status precondition (draft only) taken
-# directly from that criterion. Same precondition as event.submit by
-# coincidence of the criteria, not because the two actions are secretly
-# one thing -- kept as separate functions so either can change
-# independently if a future clarification splits them.
+# Two sources, one action, by explicit decision (not a second action) --
+# it's the same verb (change the event's own fields) on the same
+# resource, just gated by a different role-dependent status window:
+#
+#   organiser:   draft only. Source: "an organiser cannot edit directly
+#                after submission; changes go via the coordinator".
+#   coordinator: assigned, AND status == "planning". Source: the Event
+#                Information Management story, which has the coordinator
+#                updating event information during planning, read
+#                together with the migration's own lifecycle ordering
+#                (... approved -> planning -> confirmed ...) to pin down
+#                which single status that is. This is a direct match to
+#                the story's literal wording ("during planning"), not an
+#                inference the way event.cancel's status set is -- no
+#                open-questions.md entry needed for this one.
+#
+# A second action (e.g. event.update_planning) was the alternative and
+# was rejected: the rule below is two clearly separate branches (check
+# one relationship, check one status, independently of the other
+# branch), not a tangle, and "what can change this event's fields" stays
+# answerable by one action name instead of two. This does mean
+# event.edit and event.submit, byte-identical until this change, no
+# longer are -- which is the retroactive justification for having kept
+# them as separate functions even when they were identical: the moment
+# one criterion applies to only one of them, a shared implementation
+# would have had to split apart anyway.
 
 
 def rule_event_edit(user: Any, event: Any) -> Decision:
-    if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
-        return Decision.DENY_NOT_FOUND
-    if not _event_status_in(event, "draft"):
+    # Checks BOTH branches rather than returning on the first matching
+    # relationship, unlike the simpler rules above -- this is the one
+    # rule in this module where a single user could plausibly satisfy
+    # both relationships on the SAME event (e.g. a coordinator who is
+    # also its organiser), each with its OWN status window. Returning
+    # early on the first relationship found, regardless of its status
+    # outcome, would deny a union-eligible multi-role user who'd have
+    # been allowed via the other branch -- exactly the "special case
+    # that breaks the union" the module docstring says not to write.
+    has_relationship = False
+    if _has_role(user, "event_organizer") and _owns_event(user, event):
+        has_relationship = True
+        if _event_status_in(event, "draft"):
+            return Decision.ALLOW
+    if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
+        has_relationship = True
+        if _event_status_in(event, "planning"):
+            return Decision.ALLOW
+    if has_relationship:
         return Decision.DENY_FORBIDDEN
-    return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
 
 
 # -- event.approve / event.reject ----------------------------------------
@@ -213,17 +262,17 @@ def rule_event_request_clarification(user: Any, event: Any) -> Decision:
 
 # -- event.cancel -------------------------------------------------------
 # Source: Cancelled Status story -- "Coordinator can change status to
-# cancelled after approval of the event request". The literal quote only
-# says "approved"; FLAGGED (not invented silently): the set below also
-# includes "planning" and "confirmed", inferred from the migration
-# comment's own lifecycle ordering (approved -> planning -> confirmed ->
-# completed) on the reasoning that "after approval" describes the whole
-# span of the post-approval lifecycle, not only the single "approved"
-# status, and matches coordinator_service.py's own ACTIVE_STATUSES minus
-# under_review. "completed" is deliberately excluded -- cancelling a
-# finished event doesn't match "after approval of the request", it's a
-# different (and unasked-for) lifecycle question. Confirm this reading
-# if it's wrong; it's an inference, not a quote.
+# cancelled after approval of the event request". DECIDED (see
+# docs/design-decisions.md) that this covers approved, planning, AND
+# confirmed -- not literally just "approved". Reasoning: the Cancelled
+# Status story is explicitly about a coordinator who cannot secure a
+# venue or equipment, which happens during planning, not at the instant
+# approval is granted; a literal approved-only reading would make that
+# story's own scenario unimplementable. "completed" is still excluded --
+# cancelling a finished event is a different, unasked-for lifecycle
+# question. "after approval" as a range (not a single status) is noted
+# in docs/open-questions.md for customer confirmation -- that's a request
+# to confirm a decision already made, not an open implementation gap.
 
 _CANCELLABLE_STATUSES = ("approved", "planning", "confirmed")
 

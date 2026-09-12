@@ -56,6 +56,59 @@ def test_organiser_allowed_edit_while_draft():
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
+def test_coordinator_allowed_edit_assigned_event_in_planning():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-1", status="planning")
+    assert can(user, actions.EVENT_EDIT, event) is True
+
+
+def test_coordinator_denied_edit_assigned_event_outside_planning():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-1", status="approved")
+    assert can(user, actions.EVENT_EDIT, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_EDIT, event)
+
+
+def test_coordinator_denied_edit_on_event_assigned_to_someone_else():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-2", status="planning")
+    assert can(user, actions.EVENT_EDIT, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(user, actions.EVENT_EDIT, event)
+
+
+def test_organiser_edit_behaviour_unchanged_by_coordinator_window():
+    """Regression guard: adding the coordinator branch to rule_event_edit
+    must not change what an organiser can or can't do."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    assert can(user, actions.EVENT_EDIT, FakeEvent(organizer_id="org-1", status="draft")) is True
+    assert can(user, actions.EVENT_EDIT, FakeEvent(organizer_id="org-1", status="planning")) is False
+    assert can(user, actions.EVENT_EDIT, FakeEvent(organizer_id="org-2", status="draft")) is False
+
+
+def test_multi_role_union_on_same_event_for_edit():
+    """A user who is BOTH the organiser AND the assigned coordinator of
+    the SAME event (the schema permits organizer_id == coordinator_id ==
+    one person) must be allowed via EITHER branch independently -- not
+    denied just because the first-checked branch's status window
+    happened to fail. This is the exact bug rule_event_edit's early
+    multi-branch structure exists to avoid."""
+    user = make_user(["event_organizer", "event_coordinator"], user_id="user-1")
+
+    # Status fails the organiser window (draft) but satisfies the
+    # coordinator window (planning) -- must still be ALLOW.
+    event = FakeEvent(organizer_id="user-1", coordinator_id="user-1", status="planning")
+    assert can(user, actions.EVENT_EDIT, event) is True
+
+    # Neither window satisfied -- must be DENY_FORBIDDEN (403), since a
+    # relationship exists (both, in fact), not DENY_NOT_FOUND (404).
+    event_wrong_status = FakeEvent(organizer_id="user-1", coordinator_id="user-1", status="submitted")
+    assert can(user, actions.EVENT_EDIT, event_wrong_status) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_EDIT, event_wrong_status)
+
+
 # -- event.approve / event.reject ----------------------------------------
 
 
@@ -155,6 +208,15 @@ def test_event_list_denied_for_role_with_no_listing_rights():
 
 def test_organiser_allowed_event_list():
     user = make_user(["event_organizer"], user_id="org-1")
+    assert can(user, actions.EVENT_LIST) is True
+
+
+def test_coordinator_allowed_event_list():
+    """Ruling: event.list extends to coordinators (View Assigned Event
+    Requests story). Passing this only means the role may list
+    something -- see rule_event_list's module-docstring warning about
+    caller-applied scoping."""
+    user = make_user(["event_coordinator"], user_id="coord-1")
     assert can(user, actions.EVENT_LIST) is True
 
 

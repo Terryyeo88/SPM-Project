@@ -66,3 +66,23 @@ that whoever actually writes the serialiser will have to redo anyway once
 they know what the response needs to contain. Whoever builds the event
 routes should add their own serialisation-layer mechanism then, informed by
 the real response shape, not by a guess made here.
+
+## event.cancel covers approved, planning, AND confirmed
+
+The Cancelled Status story says a coordinator "can change status to
+cancelled after approval of the event request", and the literal wording
+names only "approved". Decided that the cancellable set is nonetheless
+`approved, planning, confirmed` — not narrowed to the single word "approved"
+— because the same story is explicitly about a coordinator who cannot secure
+a venue or equipment, and that failure mode happens during planning, not at
+the instant approval is granted. Reading "after approval" as the single
+status `approved` would make the story's own scenario impossible to
+implement: a coordinator who discovers the venue fell through a week into
+planning would have no way to cancel. Reading it instead as "anywhere in
+the post-approval lifecycle, up to but not including completion" makes the
+story implementable and matches the migration's own ordering (`approved ->
+planning -> confirmed -> completed`). `completed` stays excluded — cancelling
+a finished event answers a different question than this story asks.
+Recorded here as a decision, not an inference: `docs/open-questions.md` has
+a line asking the customer to confirm "after approval" was meant as a range,
+not as a request to re-derive the set from scratch.
