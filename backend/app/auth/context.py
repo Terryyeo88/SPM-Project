@@ -86,6 +86,13 @@ def current_user() -> CurrentUser:
 def register_auth_hooks(app: Flask) -> None:
     @app.before_request
     def _authenticate() -> None:
+        if request.method == "OPTIONS":
+            # CORS preflight -- browsers never send credentials/Authorization
+            # on these, so there's nothing to authenticate. Let Flask/
+            # Flask-CORS answer it normally; if we fall through to
+            # verify_token() below, every preflight to a protected route
+            # gets a 401 and the browser blocks the real request.
+            return
         if request.endpoint in (None, "static"):
             # None: Flask hasn't matched a route yet (e.g. a 404) --
             # nothing to authenticate, the routing layer handles it.

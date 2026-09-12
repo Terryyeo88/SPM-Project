@@ -46,8 +46,10 @@ def _register_error_handlers(app: Flask) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
+    from app.events.routes import events_bp
     from app.health.routes import health_bp
     from app.me.routes import me_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(me_bp)
+    app.register_blueprint(events_bp)

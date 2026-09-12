@@ -1,0 +1,40 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import LoginView from '../views/LoginView.vue'
+import DashboardView from '../views/DashboardView.vue'
+import EventsPlaceholder from '../views/events/EventsPlaceholder.vue'
+import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
+import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
+
+const routes = [
+  { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
+  { path: '/', name: 'dashboard', component: DashboardView },
+  { path: '/events', name: 'events', component: EventsPlaceholder },
+  { path: '/events/reassign', name: 'reassign-coordinator', component: ReassignCoordinatorView },
+  { path: '/venues', name: 'venues', component: VenuesPlaceholder },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+
+  // On a hard refresh, Pinia's state is empty even though Supabase still
+  // has a valid session sitting in local storage -- restore it once
+  // before making any auth decisions.
+  if (!auth.restored) {
+    await auth.restoreSession()
+  }
+
+  if (!to.meta.public && !auth.isLoggedIn) {
+    return { name: 'login' }
+  }
+  if (to.name === 'login' && auth.isLoggedIn) {
+    return { name: 'dashboard' }
+  }
+})
+
+export default router
