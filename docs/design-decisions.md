@@ -23,3 +23,46 @@ the frontend does or doesn't do. The frontend is still free to add its own
 inactivity detection on top, as UX polish (faster, friendlier logout, less
 wasted refresh traffic), but that's optional and doesn't change what actually
 enforces the timeout.
+
+## 403 vs 404: decided by relationship, not by caller judgement
+
+Phase 2 ruled that a 403 and a 404 must be indistinguishable to a caller who
+isn't entitled to know a resource exists, without saying exactly how that
+gets decided case by case. The rule landed on in Phase 4: every authorisation
+rule checks the caller's *relationship* to the resource before anything
+else. No relationship at all (not your event, not the event you're assigned
+to coordinate) means you aren't entitled to know it exists, full stop — 404.
+A relationship that exists, blocked by some other condition (wrong status,
+wrong coordinator-of-record, event already past the stage where this action
+applies) means you already legitimately know the resource is there — 403
+leaks nothing a 404 would have hidden, and is the more honest answer. This
+is encoded once, inside each rule in `app/authz/rules.py`, as a `Decision`
+(`ALLOW` / `DENY_NOT_FOUND` / `DENY_FORBIDDEN`) — not left to whoever calls
+`authorise()` to decide per call site. The alternative (a caller-side
+judgement call) is how the same action ends up 403 in one route and 404 in
+another for what's actually the same underlying reason. Two categories fall
+outside that relationship test because there's no resource to have a
+relationship with at all: an unregistered/unknown action (a wiring bug, not
+an access decision — always 403, loudly, so the gap doesn't get mistaken for
+a real denial) and role-only actions like creating or listing events (always
+403 when denied — there's nothing to hide, only permission to withhold).
+
+## Field-level visibility is deliberately NOT part of can()
+
+"An attendee sees no internal planning information" sounds like an
+authorisation rule, but it isn't one: `can()` answers exactly one kind of
+question — may this user perform this action on this resource, yes or no —
+and "which fields of an event are in the response body" isn't that kind of
+question, it's a serialisation decision. Bolting it on would mean either
+`can()` starts returning something richer than a boolean (breaking every
+other caller's mental model of what it does) or rules.py starts knowing
+about response shapes (breaking the purity that makes rules testable with
+no Flask/DB at all — see `app/authz/rules.py`'s docstring). Decided to defer
+this entirely rather than half-build a `visible_fields()` helper now: no
+event route or serialiser exists yet to call it, and "internal planning
+information" isn't tied to specific named columns anywhere in the schema or
+a quoted story — building the helper now means guessing at a field list
+that whoever actually writes the serialiser will have to redo anyway once
+they know what the response needs to contain. Whoever builds the event
+routes should add their own serialisation-layer mechanism then, informed by
+the real response shape, not by a guess made here.
