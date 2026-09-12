@@ -110,7 +110,11 @@ def register_auth_hooks(app: Flask) -> None:
 
 
 def _idle_timeout_minutes() -> int:
-    return int(os.environ.get("SESSION_IDLE_TIMEOUT_MINUTES", str(_DEFAULT_IDLE_TIMEOUT_MINUTES)))
+    # os.environ.get's default only applies when the key is ABSENT -- a
+    # key present but empty (e.g. a teammate copied .env.example and left
+    # this blank) would otherwise reach int("") and raise. `or` catches
+    # both cases.
+    return int(os.environ.get("SESSION_IDLE_TIMEOUT_MINUTES") or _DEFAULT_IDLE_TIMEOUT_MINUTES)
 
 
 def _check_and_update_session_activity(session_id: str, user_id: str) -> None:
@@ -135,7 +139,10 @@ def _get_last_active(session_id: str) -> datetime | None:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    # maybe_single().execute() returns None itself (not a response object
+    # with .data = None) when zero rows match -- confirmed against the
+    # real table, not assumed.
+    if result is None or not result.data:
         return None
     return datetime.fromisoformat(result.data["last_active_at"])
 

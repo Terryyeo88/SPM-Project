@@ -27,5 +27,8 @@ class Config:
     SUPABASE_URL: str | None = os.environ.get("SUPABASE_URL")
     SUPABASE_SERVICE_ROLE_KEY: str | None = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     SUPABASE_JWT_SECRET: str | None = os.environ.get("SUPABASE_JWT_SECRET")
-    SESSION_IDLE_TIMEOUT_MINUTES: int = int(os.environ.get("SESSION_IDLE_TIMEOUT_MINUTES", "30"))
+    # `or` (not the dict-style default) because os.environ.get's default
+    # only applies when the key is absent -- present-but-empty must also
+    # fall back to 30, or int("") raises.
+    SESSION_IDLE_TIMEOUT_MINUTES: int = int(os.environ.get("SESSION_IDLE_TIMEOUT_MINUTES") or "30")
     TESTING: bool = False
