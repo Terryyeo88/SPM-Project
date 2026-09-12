@@ -26,7 +26,7 @@ true in CI.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -58,7 +58,7 @@ def test_get_last_active_returns_none_for_unknown_session(throwaway_session_id):
 
 
 def test_touch_then_get_round_trips(real_coordinator_id, throwaway_session_id):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _touch_session_activity(throwaway_session_id, real_coordinator_id, now)
 
     last_active = _get_last_active(throwaway_session_id)
@@ -68,9 +68,9 @@ def test_touch_then_get_round_trips(real_coordinator_id, throwaway_session_id):
 
 
 def test_touch_twice_upserts_rather_than_duplicating(real_coordinator_id, throwaway_session_id):
-    first = datetime.now(timezone.utc)
+    first = datetime.now(UTC)
     _touch_session_activity(throwaway_session_id, real_coordinator_id, first)
-    second = datetime.now(timezone.utc)
+    second = datetime.now(UTC)
     _touch_session_activity(throwaway_session_id, real_coordinator_id, second)
 
     rows = (

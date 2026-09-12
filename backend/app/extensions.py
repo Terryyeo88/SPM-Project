@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 # Repo layout: backend/app/extensions.py -> parent=app/, parent.parent=
 # backend/, parent.parent.parent=repo root. app/config.py imports this

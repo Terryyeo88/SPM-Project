@@ -11,7 +11,7 @@ conftest.py, which is likewise fully in-memory.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import app.auth.context as context_module
 
@@ -76,7 +76,7 @@ def test_idle_session_rejected_with_auth_session_idle(app, client, signing_key, 
     _register_protected_route(app)
     monkeypatch.setenv("SESSION_IDLE_TIMEOUT_MINUTES", "30")
 
-    long_ago = datetime.now(timezone.utc) - timedelta(minutes=45)
+    long_ago = datetime.now(UTC) - timedelta(minutes=45)
     monkeypatch.setattr(context_module, "_get_last_active", lambda session_id: long_ago)
 
     touch_calls = []

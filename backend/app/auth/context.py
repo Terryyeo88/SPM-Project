@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from flask import Flask, g, request
@@ -118,7 +118,7 @@ def _idle_timeout_minutes() -> int:
 
 
 def _check_and_update_session_activity(session_id: str, user_id: str) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     last_active = _get_last_active(session_id)
 
     if last_active is not None and (now - last_active) > timedelta(minutes=_idle_timeout_minutes()):

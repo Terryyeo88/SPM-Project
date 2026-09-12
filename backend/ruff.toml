@@ -1,0 +1,13 @@
+target-version = "py313"
+line-length = 120
+
+[lint]
+# Sensible defaults, not exhaustive: pycodestyle errors, pyflakes,
+# import sorting, pyupgrade (modern syntax), bugbear (common real bugs).
+select = ["E", "F", "I", "UP", "B"]
+
+[lint.per-file-ignores]
+# app/events/coordinator_service.py is Justin's -- not reformatted here.
+# UP045 wants every `Optional[X]` rewritten as `X | None`; left as a
+# note for him rather than an edit, per this ticket's ground rules.
+"app/events/coordinator_service.py" = ["UP045"]

@@ -10,12 +10,11 @@ and a plain dataclass do the same job with ordinary function calls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from app.auth.context import CurrentUser
 
 
-def make_user(roles, user_id: str = "user-1", email: Optional[str] = None, name: str = "Test User") -> CurrentUser:
+def make_user(roles, user_id: str = "user-1", email: str | None = None, name: str = "Test User") -> CurrentUser:
     return CurrentUser(
         id=user_id,
         email=email or f"{user_id}@example.com",
@@ -33,5 +32,5 @@ class FakeEvent:
 
     id: str = "event-1"
     organizer_id: str = "organizer-1"
-    coordinator_id: Optional[str] = None
+    coordinator_id: str | None = None
     status: str = "draft"

@@ -40,14 +40,15 @@ request (routes are protected by default anyway; see app/auth/context.py).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any
 
 from app.auth.context import current_user
 from app.authz.policy import authorise
 
 
-def require(action: str, loader: Optional[Callable[..., Any]] = None):
+def require(action: str, loader: Callable[..., Any] | None = None):
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(*args, **kwargs):

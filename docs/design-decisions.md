@@ -4,6 +4,59 @@ Short entries for choices made on IS-1 (User Authorisation and Authentication)
 that aren't obvious from the code alone. One paragraph each, written to defend
 out loud, not as a changelog.
 
+## Flask is the authoritative authorisation layer; RLS is defence-in-depth only
+
+This was a fixed architecture decision going into the project, not one made
+mid-ticket, but it's the premise everything else here stands on, so it's
+worth stating with its reasoning. Supabase gives you two places to enforce
+access control: Postgres RLS policies, and whatever the backend checks
+before it ever issues a query. We chose the backend (this module,
+`app.authz`) as the real decision-maker, and left RLS on every table as a
+permissive Sprint-1 placeholder (`auth.role() = 'authenticated'`, nothing
+row-scoped) — see the comments in `supabase/migrations/20260911120000_init_
+users_events.sql`. Why not make RLS the real mechanism instead: RLS policies
+are SQL predicates evaluated per-row by Postgres, with no access to things
+like "is this action currently permitted given the event's status" without
+duplicating that logic in SQL, separately from the Python logic that also
+needs it for non-DB decisions (e.g. `EVENT_CREATE`, which has no row to
+evaluate a policy against at all). Keeping one authoritative place — this
+module, tested the way `app/authz/rules.py` is tested — avoids two
+implementations of the same rules silently drifting apart. Flask uses the
+service role key precisely so it can bypass RLS and be that one place; RLS
+stays on as a safety net in case a future bug ever lets an unintended client
+query Postgres directly.
+
+## Supabase client construction is lazy, not eager at import time
+
+`app/extensions.py`'s `supabase` object used to build the real client (and
+validate `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are set) the moment the
+module was imported — which meant importing ANYTHING that touched it, even
+transitively, required real credentials to even load, let alone run. That
+directly blocks Phase 6's CI requirement: unit tests must import the whole
+app with zero secrets configured. Fixed by making `supabase` a thin proxy
+(`_LazySupabaseClient`) that builds the real client on first actual use
+(`.table(...)`, `.auth`, etc.), not on import or construction. Validation
+still happens, still fails fast, still names the missing variable — just at
+the moment something would have genuinely needed credentials, not before.
+This is also why `/health` can return 200 with no `.env` at all: importing
+the app factory never forces that validation to run.
+
+## Roles are looked up per request, not embedded as JWT claims
+
+Supabase supports a Custom Access Token Hook that can stamp extra claims
+(like roles) directly into the JWT at sign-in, so the backend could read
+roles off the token itself instead of querying `user_roles` on every
+request. Chose the per-request DB lookup instead, for one concrete reason:
+roles can change between sign-in and the token's expiry (a coordinator could
+be granted `event_organizer` mid-session), and a claim baked into the token
+at sign-in time doesn't see that change until the user re-authenticates —
+the access token's own lifetime becomes a window where the system enforces
+stale permissions. A per-request lookup is always current. The cost is
+explicitly paid for, not ignored: `app/auth/context.py`'s before_request
+hook does exactly ONE query for profile+roles per request (a joined
+`profiles` + `user_roles` select, not N+1), the same "one query, not one per
+policy check" constraint the idle-timeout check also follows.
+
 ## Idle timeout: server-side tracking, not short-lived tokens
 
 The acceptance criterion is "given a user session, when it's been idle beyond
@@ -86,6 +139,31 @@ a finished event answers a different question than this story asks.
 Recorded here as a decision, not an inference: `docs/open-questions.md` has
 a line asking the customer to confirm "after approval" was meant as a range,
 not as a request to re-derive the set from scratch.
+
+## Coordinator edit window is one action, two role-dependent status windows
+
+`event.edit` was originally organiser-only, gated to `draft` — which meant
+no rule anywhere let a coordinator edit anything, contradicting the Event
+Information Management story (coordinator updates event information during
+planning). Two ways to close that: add a second action (e.g.
+`event.update_planning`), or extend `rule_event_edit` with a second,
+independently-gated branch for the coordinator. Chose the second: it's the
+same verb (change the event's own fields) on the same resource, just with a
+different role and a different status window, and a second action would
+only move the real complexity into "why are there two actions for editing
+one resource" instead of removing it. The coordinator's window is `planning`
+only — a direct match to the story's literal wording ("during planning"),
+not an inference the way `event.cancel`'s range is, so there's no
+open-questions.md entry for this one. One real bug came out of building
+this: the first version of the rule returned on whichever relationship
+(organiser or coordinator) it found FIRST, regardless of that branch's own
+status outcome — which would wrongly deny a user who happens to be both the
+organiser and the assigned coordinator of the same event (the schema allows
+`organizer_id == coordinator_id`) if the first-checked branch's status
+window failed, even when the second branch's would have allowed it. Fixed
+by checking both branches before deciding, exactly the failure mode the
+multi-role union principle exists to prevent. Regression test:
+`test_multi_role_union_on_same_event_for_edit`.
 
 ## JWT verification tolerates 10 seconds of clock skew on `iat`
 

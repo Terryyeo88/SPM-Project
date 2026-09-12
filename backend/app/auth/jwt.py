@@ -153,8 +153,8 @@ def verify_token(authorization_header: str | None) -> dict[str, Any]:
 
     try:
         header = jwt.get_unverified_header(token)
-    except jwt.DecodeError:
-        raise AuthenticationError("Token is not a parseable JWT.", code="auth_malformed_token")
+    except jwt.DecodeError as err:
+        raise AuthenticationError("Token is not a parseable JWT.", code="auth_malformed_token") from err
 
     kid = header.get("kid")
     if not kid:
@@ -177,14 +177,16 @@ def verify_token(authorization_header: str | None) -> dict[str, Any]:
             options={"require": ["exp", "iat", "sub"]},
             leeway=_CLOCK_SKEW_LEEWAY_SECONDS,
         )
-    except jwt.ExpiredSignatureError:
-        raise AuthenticationError("Token has expired.", code="auth_token_expired")
-    except (jwt.InvalidAudienceError, jwt.InvalidIssuerError):
-        raise AuthenticationError("Token issuer/audience does not match this project.", code="auth_wrong_audience")
-    except jwt.InvalidSignatureError:
-        raise AuthenticationError("Token signature is invalid.", code="auth_invalid_signature")
-    except jwt.InvalidTokenError:
-        raise AuthenticationError("Token is malformed.", code="auth_malformed_token")
+    except jwt.ExpiredSignatureError as err:
+        raise AuthenticationError("Token has expired.", code="auth_token_expired") from err
+    except (jwt.InvalidAudienceError, jwt.InvalidIssuerError) as err:
+        raise AuthenticationError(
+            "Token issuer/audience does not match this project.", code="auth_wrong_audience"
+        ) from err
+    except jwt.InvalidSignatureError as err:
+        raise AuthenticationError("Token signature is invalid.", code="auth_invalid_signature") from err
+    except jwt.InvalidTokenError as err:
+        raise AuthenticationError("Token is malformed.", code="auth_malformed_token") from err
 
     if not claims.get("session_id"):
         raise AuthenticationError("Token is missing required 'session_id' claim.", code="auth_malformed_token")
