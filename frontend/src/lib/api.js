@@ -28,10 +28,29 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000
 //        the real message instead of hiding it behind a login screen.
 const _AUTH_REDIRECT_CODES = new Set(['auth_session_idle', 'auth_token_expired', 'auth_missing_token'])
 
+// De-dupes concurrent/re-entrant calls to _handleAuthRedirect -- without
+// this, two API calls failing at once (or restoreSession's own /me call
+// racing against its own triggered redirect re-entering the router
+// guard -- see router/index.js's comment on this) would each
+// independently re-import the store/router, clear state again, and call
+// signOut()/push() again. Holding the SAME in-flight promise instead
+// means a second caller just awaits the first one's outcome.
+let _redirectInFlight = null
+
 /**
  * Signs the caller out and sends them to /login. Called only for the
- * three codes above.
- *
+ * three codes above -- see _AUTH_REDIRECT_CODES' own comment.
+ */
+function _handleAuthRedirect() {
+  if (!_redirectInFlight) {
+    _redirectInFlight = _doHandleAuthRedirect().finally(() => {
+      _redirectInFlight = null
+    })
+  }
+  return _redirectInFlight
+}
+
+/**
  * Uses dynamic import() for the auth store and router, not a top-level
  * import -- stores/auth.js imports apiGet from this module already, so a
  * static top-level import here (of the store directly, or of router,
@@ -41,20 +60,31 @@ const _AUTH_REDIRECT_CODES = new Set(['auth_session_idle', 'auth_token_expired',
  * entirely instead of relying on bundler-specific circular-import
  * resolution behaviour.
  */
-async function _handleAuthRedirect() {
+async function _doHandleAuthRedirect() {
   const [{ useAuthStore }, { default: router }] = await Promise.all([
     import('../stores/auth'),
     import('../router'),
   ])
 
   const auth = useAuthStore()
-  // Calls clearLocalState() directly rather than auth.signOut(), so a
-  // Supabase network error/delay can't block clearing local state -- the
-  // caller is being force-logged-out because the backend already
-  // rejected them; local state must clear regardless of whether the
-  // signOut round trip to Supabase itself succeeds.
+  // Cleared first, before the (awaited) Supabase call below -- so any
+  // reactive code watching auth.isLoggedIn reflects the forced logout
+  // immediately, not after a network round trip.
   auth.clearLocalState()
-  supabase.auth.signOut().catch(() => {})
+
+  // AWAITED, not fire-and-forget -- a caller who gets force-logged-out
+  // here and immediately signs back in (see stores/auth.js::signIn())
+  // must not have that fresh sign-in silently undone by THIS call's
+  // signOut() resolving late and clearing Supabase's own session storage
+  // out from under it. try/catch so a slow/failing Supabase round trip
+  // still lets the redirect below happen -- the caller is being
+  // force-logged-out regardless of whether Supabase's own signOut
+  // network call succeeds; local state (cleared above) is authoritative.
+  try {
+    await supabase.auth.signOut()
+  } catch {
+    // best-effort only, see comment above
+  }
 
   // Also reached from router/index.js's own beforeEach guard (via
   // restoreSession -> loadProfile -> this module, see stores/auth.js) --
@@ -87,26 +117,26 @@ async function request(path, options = {}) {
     // Backend error shape: {"error": {"code": "...", "message": "..."}}
     // -- see backend/app/shared/errors.py.
     const code = body?.error?.code
-
-    if (_AUTH_REDIRECT_CODES.has(code)) {
-      // Deliberately does NOT throw after this. The caller is about to
-      // be navigated to /login regardless of what this specific request
-      // was for, so surfacing "Session has been idle too long" as a
-      // component-level error (e.g. in ReassignCoordinatorView's
-      // `error` ref) right as the page changes underneath it would be
-      // confusing, not helpful. Resolving to `undefined` instead of
-      // throwing is safe for every current caller: auth.js's
-      // loadProfile() just assigns it to `profile` (about to be
-      // discarded on redirect anyway), and every apiPost() caller
-      // already tears its own component down on navigation.
-      await _handleAuthRedirect()
-      return undefined
-    }
-
     const message = body?.error?.message || `Request failed with status ${response.status}`
     const error = new Error(message)
     error.status = response.status
     error.code = code
+
+    if (_AUTH_REDIRECT_CODES.has(code)) {
+      // Fires the redirect, but still throws below -- every
+      // apiGet/apiPost caller gets ONE error contract (always throws on
+      // failure, never silently resolves), so a future call site can't
+      // be surprised by an `undefined` it didn't ask for. The component
+      // whose request failed may briefly show this error's message
+      // before the redirect takes it off-screen (e.g.
+      // ReassignCoordinatorView's own `error` ref) -- that's acceptable,
+      // and more honest than hiding it. stores/auth.js's restoreSession()
+      // is the one caller that specifically needs to tell this case
+      // apart from the "something's actually broken" codes below; it
+      // does so via `error.code`, not by this function's return shape.
+      await _handleAuthRedirect()
+    }
+
     throw error
   }
 

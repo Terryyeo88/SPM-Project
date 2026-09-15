@@ -1,5 +1,9 @@
 /**
- * Role constants and the role -> nav-link mapping used by DashboardView.
+ * Role constants and the role -> nav-link mapping used by both
+ * DashboardView.vue (which links to show) and router/index.js (which
+ * routes to allow) -- a single shared table so the two can never drift
+ * apart from each other (see router/index.js's own comment on why it
+ * imports NAV_LINKS rather than declaring its own role list).
  *
  * Role strings MUST match the backend's `app_role` enum exactly (see
  * supabase/migrations/20260911120000_init_users_events.sql) -- these are
@@ -43,27 +47,38 @@ export function hasAnyRole(userRoles, allowedRoles) {
 }
 
 /**
- * Which nav links each role can see, and why. This mapping is a
- * judgement call: the acceptance criteria say access should depend on
- * role, but never say which role owns which of these three placeholder
- * sections. Reasoning used per link, so it can be checked/disputed:
+ * Which route each role can reach, and why. `routeName` is the ONLY
+ * pointer to the route -- deliberately NOT also carrying the route's
+ * `path` here, which would be a second, independently-maintainable copy
+ * of what router/index.js's own route table already owns and could
+ * silently go stale against (e.g. a renamed path). Both DashboardView
+ * (`<router-link :to="{ name: link.routeName }">`) and router/index.js
+ * (its own `meta.roles`, keyed by this same routeName) resolve the
+ * actual path from vue-router's live route table instead.
  *
- *   Events              -- Event Request Creation is organiser-only, and
+ * This mapping itself is a judgement call: the acceptance criteria say
+ * access should depend on role, but never say which role owns which of
+ * these three placeholder sections. Reasoning used per link, so it can
+ * be checked/disputed:
+ *
+ *   events              -- Event Request Creation is organiser-only, and
  *                           View Assigned Event Requests is
  *                           coordinator-only (both named in the Week 4
  *                           instructions), so both roles get this entry
  *                           point.
- *   Venues              -- Week 4 instructions, Venue Catalogue: "needed
+ *   venues              -- Week 4 instructions, Venue Catalogue: "needed
  *                           by Event Coordinators and Venue Staff when
  *                           planning events" -- quoted directly, not
  *                           inferred.
- *   Reassign Coordinator -- app/authz/rules.py::
+ *   reassign-coordinator -- app/authz/rules.py::
  *                           rule_event_reassign_coordinator only ever
  *                           allows the currently-assigned coordinator;
- *                           showing this link to a role that could never
- *                           pass that check would be misleading, so it's
- *                           gated to event_coordinator here too. The
- *                           backend still re-checks per-event -- this is
+ *                           showing/serving this to a role that could
+ *                           never pass that check would be misleading,
+ *                           so it's gated to event_coordinator here too.
+ *                           The backend still re-checks per-event -- the
+ *                           gate here (both the nav link AND, via
+ *                           router/index.js, the route itself) is
  *                           belt-and-braces, not the real enforcement.
  *
  * Attendee and Technical Support Staff intentionally unlock nothing yet:
@@ -72,23 +87,27 @@ export function hasAnyRole(userRoles, allowedRoles) {
  * now, not a bug -- DashboardView shows a fallback message rather than a
  * blank/broken-looking nav for these roles.
  */
-export const NAV_LINKS = Object.freeze([
-  {
-    to: '/events',
-    routeName: 'events',
-    label: 'Events',
-    roles: [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR],
-  },
-  {
-    to: '/venues',
-    routeName: 'venues',
-    label: 'Venues',
-    roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
-  },
-  {
-    to: '/events/reassign',
-    routeName: 'reassign-coordinator',
-    label: 'Reassign Coordinator',
-    roles: [ROLES.EVENT_COORDINATOR],
-  },
-])
+export const NAV_LINKS = Object.freeze(
+  [
+    {
+      routeName: 'events',
+      label: 'Events',
+      roles: [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR],
+    },
+    {
+      routeName: 'venues',
+      label: 'Venues',
+      roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+    },
+    {
+      routeName: 'reassign-coordinator',
+      label: 'Reassign Coordinator',
+      roles: [ROLES.EVENT_COORDINATOR],
+    },
+    // Object.freeze() on the outer array is shallow -- it stops entries
+    // being added/removed/reordered, but without also freezing (and
+    // freezing each entry's own `roles` array) each element, a caller
+    // could still mutate e.g. NAV_LINKS[0].roles.push(...) and silently
+    // change what any importer sees.
+  ].map((link) => Object.freeze({ ...link, roles: Object.freeze(link.roles) })),
+)
