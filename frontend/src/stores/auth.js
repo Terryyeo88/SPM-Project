@@ -24,6 +24,19 @@ export const useAuthStore = defineStore('auth', {
 
     async signOut() {
       await supabase.auth.signOut()
+      this.clearLocalState()
+    },
+
+    /** Just the local half of signing out (no Supabase network call).
+     * Used by signOut() above, and by api.js's own force-logout on
+     * auth_session_idle/auth_token_expired/auth_missing_token -- that
+     * path fires supabase.auth.signOut() itself, without awaiting it
+     * (see api.js's _handleAuthRedirect), so it needs this piece
+     * separately rather than going through signOut() and blocking the
+     * redirect on a network round trip that doesn't need to finish
+     * first. Kept here, not duplicated in api.js, so there's exactly one
+     * place that defines what "locally signed out" means. */
+    clearLocalState() {
       this.session = null
       this.profile = null
     },
@@ -39,7 +52,19 @@ export const useAuthStore = defineStore('auth', {
       const { data } = await supabase.auth.getSession()
       this.session = data.session
       if (this.session) {
-        await this.loadProfile()
+        try {
+          await this.loadProfile()
+        } catch {
+          // loadProfile() -> apiGet('/me') can throw if the stored
+          // session's token has expired since the last page load --
+          // api.js's own handler (see _handleAuthRedirect there) already
+          // clears session/profile and redirects to /login for that
+          // case, so there's nothing left to do here except NOT let this
+          // propagate. An uncaught rejection here would reach the router
+          // guard's own `await auth.restoreSession()` and fail the
+          // in-flight navigation instead of the clean login redirect
+          // api.js already triggered.
+        }
       }
       this.restored = true
     },
