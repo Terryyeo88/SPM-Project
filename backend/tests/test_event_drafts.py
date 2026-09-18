@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.events.event_service import DRAFT_NAME, _draft_payload
-from app.shared.errors import ValidationError
 
 
 def test_draft_payload_accepts_one_partial_field():
