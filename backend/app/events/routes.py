@@ -1,7 +1,7 @@
 """
 HTTP routes for the events resource -- currently just coordinator
 reassignment (Justin's Sprint 1 ticket). Aaralyn's event CRUD/submit
-routes belong in this same module/blueprint once they exist.
+routes belong in this same module/blueprint.
 
 NOT here: an endpoint for assign_initial_coordinator. Per the story ("the
 system automatically assigns"), initial assignment isn't a discrete
@@ -22,15 +22,42 @@ from types import SimpleNamespace
 from flask import Blueprint, jsonify, request
 
 from app.auth.context import current_user
-from app.authz.actions import EVENT_REASSIGN_COORDINATOR
+from app.authz.actions import EVENT_CREATE, EVENT_EDIT, EVENT_REASSIGN_COORDINATOR, EVENT_SUBMIT
 from app.authz.decorators import require
 from app.events.coordinator_service import NoCoordinatorAvailableError, reassign_coordinator
+from app.events.event_service import create_event_request, edit_event_request, submit_event_request
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
 events_bp = Blueprint("events", __name__, url_prefix="/events")
 
+@events_bp.route("", methods=["POST"])
+@require(EVENT_CREATE)
+def create_event():
+    event = create_event_request(current_user().id, request.get_json(silent=True) or {})
+    return jsonify(event), 201
 
+
+@events_bp.route("/<event_id>", methods=["POST"])
+@require(EVENT_EDIT, loader=lambda event_id: load_event(event_id))
+def edit_event(event, event_id):
+    updated_event = edit_event_request(event_id, event, request.get_json(silent=True) or {})
+    return jsonify(updated_event), 200
+
+# event is a SimpleNamespace object representing the loaded event, and event_id is the string
+# SimpleNamespace is a small built-in Python object that lets you access dictionary values using dot notation.
+# It is only a convenient Python wrapper around the event data.
+@events_bp.route("/<event_id>/submit", methods=["POST"])
+@require(EVENT_SUBMIT, loader=lambda event_id: load_event(event_id))
+def submit_event(event, event_id):
+    submitted_event = submit_event_request(event_id, event)
+    return jsonify(submitted_event), 200
+
+# The `load_event` function is a loader for the `@require` decorator.
+# It fetches the event from the database and exposes it as an EventLike object (SimpleNamespace)
+# so that the policy rule can read it.
+# SimpleNamespace(**result.data) makes a SimpleNamespace object from the event data returned by the database query.
+# Thus, able to access the event's attributes using dot notation (e.g., event.name, event.description, etc.).
 def load_event(event_id: str) -> SimpleNamespace:
     """Loader for @require -- fetches the event and exposes it as an
     EventLike (see app.authz.protocol) so the policy rule can read it.

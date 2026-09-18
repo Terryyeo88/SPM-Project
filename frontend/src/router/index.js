@@ -3,13 +3,15 @@ import { useAuthStore } from '../stores/auth'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import EventsPlaceholder from '../views/events/EventsPlaceholder.vue'
+import EventsListPlaceholder from '../views/events/EventsListPlaceholder.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   { path: '/', name: 'dashboard', component: DashboardView },
-  { path: '/events', name: 'events', component: EventsPlaceholder },
+  { path: '/events', name: 'events', component: EventsListPlaceholder },
+  { path: '/create-event', name: 'create-event', component: EventsPlaceholder, meta: { roles: ['event_organizer'] } },
   { path: '/events/reassign', name: 'reassign-coordinator', component: ReassignCoordinatorView },
   { path: '/venues', name: 'venues', component: VenuesPlaceholder },
 ]
@@ -31,6 +33,9 @@ router.beforeEach(async (to) => {
 
   if (!to.meta.public && !auth.isLoggedIn) {
     return { name: 'login' }
+  }
+  if (to.meta.roles && !to.meta.roles.some((role) => auth.roles.includes(role))) {
+    return { name: 'dashboard' }
   }
   if (to.name === 'login' && auth.isLoggedIn) {
     return { name: 'dashboard' }

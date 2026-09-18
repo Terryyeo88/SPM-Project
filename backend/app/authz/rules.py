@@ -209,7 +209,7 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
     has_relationship = False
     if _has_role(user, "event_organizer") and _owns_event(user, event):
         has_relationship = True
-        if _event_status_in(event, "draft"):
+        if _event_status_in(event, "draft", "rejected"):
             return Decision.ALLOW
     if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
         has_relationship = True
