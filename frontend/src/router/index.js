@@ -1,16 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
-import EventsPlaceholder from '../views/events/EventsPlaceholder.vue'
+import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListPlaceholder from '../views/events/EventsListPlaceholder.vue'
+import EventsPlaceholder from '../views/events/EventsPlaceholder.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
+import LoginView from '../views/LoginView.vue'
 import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   { path: '/', name: 'dashboard', component: DashboardView },
   { path: '/events', name: 'events', component: EventsListPlaceholder },
+  { path: '/events/:eventId', name: 'event-details', component: EventDetailsView },
   { path: '/create-event', name: 'create-event', component: EventsPlaceholder, meta: { roles: ['event_organizer'] } },
   { path: '/events/reassign', name: 'reassign-coordinator', component: ReassignCoordinatorView },
   { path: '/venues', name: 'venues', component: VenuesPlaceholder },

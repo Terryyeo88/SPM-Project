@@ -1,6 +1,8 @@
 <script setup>
-import { reactive, ref } from 'vue'
-import { apiPost } from '../../lib/api'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { apiGet, apiPost } from '../../lib/api'
+
+const draftStorageKey = 'connectsphere-event-draft-id'
 
 const roomLayouts = ['theatre', 'classroom', 'boardroom', 'seminar', 'banquet', 'networking']
 const equipment = [
@@ -26,6 +28,9 @@ const error = ref('')
 const errors = reactive({})
 const success = ref(false)
 const submitting = ref(false)
+const savingDraft = ref(false)
+const draftId = ref(null)
+const draftSaved = ref(false)
 
 function localDateString(date) {
   const offset = date.getTimezoneOffset()
@@ -33,6 +38,40 @@ function localDateString(date) {
 }
 
 const minimumDate = localDateString(new Date(Date.now() + 24 * 60 * 60 * 1000))
+
+function timeInputValue(value) {
+  return value ? value.slice(0, 5) : ''
+}
+
+async function loadSavedDraft() {
+  const savedDraftId = localStorage.getItem(draftStorageKey)
+  if (!savedDraftId) return
+
+  try {
+    const event = await apiGet(`/events/${savedDraftId}`)
+    if (!['draft', 'rejected'].includes(event.status)) {
+      localStorage.removeItem(draftStorageKey)
+      return
+    }
+    draftId.value = event.id
+    form.name = event.name === 'Untitled event request' ? '' : event.name || ''
+    form.description = event.description || ''
+    form.purpose = event.purpose || ''
+    form.preferred_date = event.preferred_date || ''
+    form.preferred_start_time = timeInputValue(event.preferred_start_time)
+    form.preferred_end_time = timeInputValue(event.preferred_end_time)
+    form.expected_attendance = event.expected_attendance || ''
+    form.accessibility_needs = event.accessibility_needs || []
+    form.room_layout = event.room_layout || ''
+    form.equipment = event.equipment_needed?.equipment || []
+    form.registration_needs = event.registration_needs || false
+    form.special_requests = event.special_requests || ''
+  } catch (requestError) {
+    localStorage.removeItem(draftStorageKey)
+  }
+}
+
+onMounted(loadSavedDraft)
 
 function findItem(field, value) {
   return form[field].find((entry) => entry.item === value)
@@ -66,6 +105,51 @@ function payload() {
   }
 }
 
+const hasDraftData = computed(() => [
+  form.name,
+  form.description,
+  form.purpose,
+  form.preferred_date,
+  form.preferred_start_time,
+  form.preferred_end_time,
+  form.expected_attendance,
+  form.room_layout,
+  form.special_requests,
+].some((value) => String(value ?? '').trim() !== '')
+  || form.registration_needs
+  || form.accessibility_needs.length > 0
+  || form.equipment.length > 0)
+
+const canSubmit = computed(() => {
+  const hasRequiredFields = [form.name, form.description, form.purpose, form.preferred_date, form.room_layout]
+    .every((value) => String(value ?? '').trim() !== '')
+  const hasAttendance = Number(form.expected_attendance) > 0
+  const hasValidDate = form.preferred_date >= minimumDate
+  const hasValidTimes = !form.preferred_start_time
+    || !form.preferred_end_time
+    || form.preferred_start_time < form.preferred_end_time
+  const hasValidQuantities = form.equipment.every((entry) => entry.quantity >= 1)
+    && form.accessibility_needs.every((entry) => entry.quantity === undefined || entry.quantity >= 1)
+  return hasRequiredFields && hasAttendance && hasValidDate && hasValidTimes && hasValidQuantities
+})
+
+const hasInvalidInput = computed(() => {
+  const hasInvalidAttendance = form.expected_attendance !== '' && Number(form.expected_attendance) <= 0
+  const hasInvalidDate = form.preferred_date && form.preferred_date < minimumDate
+  const hasInvalidTimes = form.preferred_start_time
+    && form.preferred_end_time
+    && form.preferred_start_time >= form.preferred_end_time
+  const hasInvalidEquipmentQuantity = form.equipment.some((entry) => entry.quantity < 1)
+  const hasInvalidAccessibilityQuantity = form.accessibility_needs.some(
+    (entry) => entry.quantity !== undefined && entry.quantity < 1,
+  )
+  return hasInvalidAttendance
+    || hasInvalidDate
+    || hasInvalidTimes
+    || hasInvalidEquipmentQuantity
+    || hasInvalidAccessibilityQuantity
+})
+
 function validateDate() {
   delete errors.preferred_date
   if (!form.preferred_date) {
@@ -81,6 +165,13 @@ function validateTimeRange() {
   if (form.preferred_start_time && form.preferred_end_time && form.preferred_start_time >= form.preferred_end_time) {
     errors.preferred_start_time = 'Start time must be before the end time.'
     errors.preferred_end_time = 'End time must be after the start time.'
+  }
+}
+
+function validateAttendance() {
+  delete errors.expected_attendance
+  if (form.expected_attendance !== '' && Number(form.expected_attendance) <= 0) {
+    errors.expected_attendance = 'Expected attendance must be greater than zero.'
   }
 }
 
@@ -100,9 +191,7 @@ function validateForm() {
 
   validateDate()
 
-  if (!form.expected_attendance || Number(form.expected_attendance) <= 0) {
-    errors.expected_attendance = 'Expected attendance must be greater than zero.'
-  }
+  validateAttendance()
   validateTimeRange()
 
   form.equipment.forEach((entry) => {
@@ -120,13 +209,38 @@ async function submitRequest() {
   if (!validateForm()) return
   submitting.value = true
   try {
-    const draft = await apiPost('/events', payload())
+    const draft = draftId.value
+      ? await apiPost(`/events/${draftId.value}/draft`, payload())
+      : await apiPost('/events', payload())
+    draftId.value = draft.id
     await apiPost(`/events/${draft.id}/submit`, {})
+    // localStorage is to store data locally on a user's machine
+    localStorage.removeItem(draftStorageKey)
     success.value = true
   } catch (requestError) {
     error.value = requestError.message
   } finally {
     submitting.value = false
+  }
+}
+
+async function saveDraft() {
+  error.value = ''
+  success.value = false
+  draftSaved.value = false
+  if (!hasDraftData.value) return
+  savingDraft.value = true
+  try {
+    const draft = draftId.value
+      ? await apiPost(`/events/${draftId.value}/draft`, payload())
+      : await apiPost('/events/draft', payload())
+    draftId.value = draft.id
+    localStorage.setItem(draftStorageKey, draft.id)
+    draftSaved.value = true
+  } catch (requestError) {
+    error.value = requestError.message
+  } finally {
+    savingDraft.value = false
   }
 }
 </script>
@@ -145,7 +259,7 @@ async function submitRequest() {
         <label :class="{ invalid: errors.purpose }">Purpose of the event <textarea v-model.trim="form.purpose" /> <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span></label>
         <div class="grid">
           <label :class="{ invalid: errors.preferred_date }">Preferred date <input v-model="form.preferred_date" type="date" :min="minimumDate" @input="validateDate" /> <span v-if="errors.preferred_date" class="field-error">{{ errors.preferred_date }}</span></label>
-          <label :class="{ invalid: errors.expected_attendance }">Expected attendance <input v-model="form.expected_attendance" type="number" min="1" /> <span v-if="errors.expected_attendance" class="field-error">{{ errors.expected_attendance }}</span></label>
+          <label :class="{ invalid: errors.expected_attendance }">Expected attendance <input v-model="form.expected_attendance" type="number" min="1" @input="validateAttendance" /> <span v-if="errors.expected_attendance" class="field-error">{{ errors.expected_attendance }}</span></label>
           <label :class="{ invalid: errors.preferred_start_time }">Start time <input v-model="form.preferred_start_time" type="time" @input="validateTimeRange" /> <span v-if="errors.preferred_start_time" class="field-error">{{ errors.preferred_start_time }}</span></label>
           <label :class="{ invalid: errors.preferred_end_time }">End time <input v-model="form.preferred_end_time" type="time" :min="form.preferred_start_time || undefined" @input="validateTimeRange" /> <span v-if="errors.preferred_end_time" class="field-error">{{ errors.preferred_end_time }}</span></label>
         </div>
@@ -191,8 +305,14 @@ async function submitRequest() {
       </fieldset>
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="draftSaved" class="success" role="status">Draft saved.</p>
       <p v-if="success" class="success" role="status">Event request submitted for review.</p>
-      <button type="submit" :disabled="submitting">{{ submitting ? 'Submitting...' : 'Submit request' }}</button>
+      <div class="actions">
+        <button type="button" class="draft-button" :disabled="!hasDraftData || hasInvalidInput || savingDraft || submitting" @click="saveDraft">
+          {{ savingDraft ? 'Saving...' : 'Save as Draft' }}
+        </button>
+        <button type="submit" :disabled="!canSubmit || submitting || savingDraft">{{ submitting ? 'Submitting...' : 'Submit request' }}</button>
+      </div>
     </form>
   </main>
 </template>
@@ -210,7 +330,9 @@ textarea { min-height: 5rem; resize: vertical; }
 .check { display: block; }
 .check input { width: auto; margin-right: .5rem; }
 button { width: fit-content; padding: .7rem 1.1rem; border: 0; border-radius: 4px; background: #0f766e; color: white; font: inherit; cursor: pointer; }
-button:disabled { opacity: .6; cursor: wait; }
+button:disabled { opacity: .6; cursor: not-allowed; }
+.actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+.draft-button { background: #475569; }
 .error { color: #b42318; }
 .invalid input, .invalid textarea, .invalid select { border-color: #b42318; }
 .field-error { color: #b42318; font-size: .85rem; }
