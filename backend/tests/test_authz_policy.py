@@ -56,6 +56,13 @@ def test_organiser_allowed_edit_while_draft():
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
+def test_organiser_allowed_edit_after_rejection():
+    """A rejected request returns to the organizer for corrections."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", status="rejected")
+    assert can(user, actions.EVENT_EDIT, event) is True
+
+
 def test_coordinator_allowed_edit_assigned_event_in_planning():
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status="planning")

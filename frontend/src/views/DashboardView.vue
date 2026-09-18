@@ -27,6 +27,7 @@ async function handleSignOut() {
 
     <nav>
       <router-link to="/events">Events</router-link>
+      <router-link v-if="auth.roles.includes('event_organizer')" to="/create-event">Create event</router-link>
       <router-link to="/venues">Venues</router-link>
       <router-link to="/events/reassign">Reassign Coordinator</router-link>
     </nav>
