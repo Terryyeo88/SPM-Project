@@ -92,7 +92,8 @@ def test_submit_event_route_rejects_incomplete_draft(client, signing_key, monkey
     """Verify submission is blocked when a required field is blank."""
     # an HTTP/integration-level test
     # Going through Flask client with POST /events/<event_id>/submit
-    # Exercises the whole request pipeline: auth, routing, loading the event, calling validation, and error-to-JSON serialization.
+    # Exercises the whole request pipeline: auth, routing, loading the event,
+    # calling validation, and error-to-JSON serialization.
     _mock_profile(monkeypatch, ["event_organizer"])
     event = _complete_draft()
     event.purpose = ""
