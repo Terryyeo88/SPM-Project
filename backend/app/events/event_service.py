@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, time
 from types import SimpleNamespace
 
+from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
@@ -234,4 +235,17 @@ def submit_event_request(event_id: str, event: SimpleNamespace):
         .select("*")
         .execute()
     )
-    return _first_row(result)
+    submitted_event = _first_row(result)
+
+    # Per Customer Briefing Step 3 / Event Status Management: submission
+    # should trigger coordinator auto-assignment, moving the event to
+    # "under_review". If nobody's available, it stays "submitted" and
+    # unassigned -- an intentionally open case per coordinator_service's
+    # own docstring, not an error here.
+    try:
+        assign_initial_coordinator(event_id)
+    except NoCoordinatorAvailableError:
+        return submitted_event
+
+    result = supabase.table("events").select("*").eq("id", event_id).single().execute()
+    return result.data

@@ -90,6 +90,10 @@ def test_submit_event_route_sets_submitted_for_organizer(client, signing_key, mo
 
 def test_submit_event_route_rejects_incomplete_draft(client, signing_key, monkeypatch):
     """Verify submission is blocked when a required field is blank."""
+    # an HTTP/integration-level test
+    # Going through Flask client with POST /events/<event_id>/submit
+    # Exercises the whole request pipeline: auth, routing, loading the event,
+    # calling validation, and error-to-JSON serialization.
     _mock_profile(monkeypatch, ["event_organizer"])
     event = _complete_draft()
     event.purpose = ""
@@ -120,7 +124,10 @@ def test_submit_event_route_rejects_incomplete_draft(client, signing_key, monkey
 )
 def test_submission_rejects_each_missing_required_field(missing_field):
     """Verify every required event field prevents submission when missing."""
+    # a unit-level test
     payload = _complete_payload()
+    # 7 test cases each removing (popping) a different key from the payload dict
+    # Checks only that validation logic itself raises
     payload.pop(missing_field)
 
     with pytest.raises(ValidationError):
