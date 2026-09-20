@@ -19,8 +19,8 @@ const accessibilityNeeds = [
 ]
 
 const form = reactive({
-  name: '', description: '', purpose: '', preferred_date: '', preferred_start_time: '',
-  preferred_end_time: '', expected_attendance: '', accessibility_needs: [],
+  name: '', description: '', purpose: '', preferred_start_datetime: '', preferred_end_datetime: '',
+  expected_attendance: '', accessibility_needs: [],
   room_layout: '', equipment: [],
   registration_needs: false, special_requests: '',
 })
@@ -43,6 +43,31 @@ function timeInputValue(value) {
   return value ? value.slice(0, 5) : ''
 }
 
+// The two DB fields (a date column + a time column) are combined into one
+// <input type="datetime-local"> value ("YYYY-MM-DDTHH:mm") for display, and
+// split back apart in payload() before anything is sent to the backend --
+// the backend only ever knows about the separate date/time columns.
+function combineDateTime(datePart, timePart) {
+  if (!datePart) return ''
+  return `${datePart}T${timeInputValue(timePart) || '00:00'}`
+}
+
+function splitDateTime(value) {
+  if (!value) return { date: '', time: '' }
+  const [date, time] = value.split('T')
+  return { date: date || '', time: time || '' }
+}
+
+// Mirrors event_service.py's MAX_EVENT_DURATION -- an event's total span,
+// start to end, may not exceed 24 hours. Both values are datetime-local
+// strings, parsed as local time by `new Date()` (no timezone conversion,
+// same wall-clock interpretation the rest of this form already uses).
+const MAX_EVENT_DURATION_MS = 24 * 60 * 60 * 1000
+
+function exceedsMaxDuration(startValue, endValue) {
+  return new Date(endValue) - new Date(startValue) > MAX_EVENT_DURATION_MS
+}
+
 async function loadSavedDraft() {
   const savedDraftId = localStorage.getItem(draftStorageKey)
   if (!savedDraftId) return
@@ -57,9 +82,8 @@ async function loadSavedDraft() {
     form.name = event.name === 'Untitled event request' ? '' : event.name || ''
     form.description = event.description || ''
     form.purpose = event.purpose || ''
-    form.preferred_date = event.preferred_date || ''
-    form.preferred_start_time = timeInputValue(event.preferred_start_time)
-    form.preferred_end_time = timeInputValue(event.preferred_end_time)
+    form.preferred_start_datetime = combineDateTime(event.preferred_start_date, event.preferred_start_time)
+    form.preferred_end_datetime = combineDateTime(event.preferred_end_date, event.preferred_end_time)
     form.expected_attendance = event.expected_attendance || ''
     form.accessibility_needs = event.accessibility_needs || []
     form.room_layout = event.room_layout || ''
@@ -99,9 +123,22 @@ function updateNotes(value, notes) {
 }
 
 function payload() {
+  const start = splitDateTime(form.preferred_start_datetime)
+  const end = splitDateTime(form.preferred_end_datetime)
   return {
-    ...form,
+    name: form.name,
+    description: form.description,
+    purpose: form.purpose,
+    preferred_start_date: start.date,
+    preferred_start_time: start.time,
+    preferred_end_date: end.date,
+    preferred_end_time: end.time,
     expected_attendance: Number(form.expected_attendance),
+    accessibility_needs: form.accessibility_needs,
+    room_layout: form.room_layout,
+    equipment: form.equipment,
+    registration_needs: form.registration_needs,
+    special_requests: form.special_requests,
   }
 }
 
@@ -109,9 +146,8 @@ const hasDraftData = computed(() => [
   form.name,
   form.description,
   form.purpose,
-  form.preferred_date,
-  form.preferred_start_time,
-  form.preferred_end_time,
+  form.preferred_start_datetime,
+  form.preferred_end_datetime,
   form.expected_attendance,
   form.room_layout,
   form.special_requests,
@@ -121,50 +157,70 @@ const hasDraftData = computed(() => [
   || form.equipment.length > 0)
 
 const canSubmit = computed(() => {
-  const hasRequiredFields = [form.name, form.description, form.purpose, form.preferred_date, form.room_layout]
-    .every((value) => String(value ?? '').trim() !== '')
+  const hasRequiredFields = [
+    form.name,
+    form.description,
+    form.purpose,
+    form.preferred_start_datetime,
+    form.preferred_end_datetime,
+    form.room_layout,
+  ].every((value) => String(value ?? '').trim() !== '')
   const hasAttendance = Number(form.expected_attendance) > 0
-  const hasValidDate = form.preferred_date >= minimumDate
-  const hasValidTimes = !form.preferred_start_time
-    || !form.preferred_end_time
-    || form.preferred_start_time < form.preferred_end_time
+  const hasValidStart = splitDateTime(form.preferred_start_datetime).date >= minimumDate
+  // Plain string comparison is valid here because datetime-local values are
+  // "YYYY-MM-DDTHH:mm", which sorts lexicographically the same as
+  // chronologically -- this is the combined start-before-end check (not two
+  // separate date/time rules), so an end time earlier than the start time is
+  // correctly allowed as long as the end DATE is later (e.g. 22:00 on day
+  // one to 06:00 on day two).
+  const hasValidRange = form.preferred_end_datetime > form.preferred_start_datetime
+    && !exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime)
   const hasValidQuantities = form.equipment.every((entry) => entry.quantity >= 1)
     && form.accessibility_needs.every((entry) => entry.quantity === undefined || entry.quantity >= 1)
-  return hasRequiredFields && hasAttendance && hasValidDate && hasValidTimes && hasValidQuantities
+  return hasRequiredFields && hasAttendance && hasValidStart && hasValidRange && hasValidQuantities
 })
 
 const hasInvalidInput = computed(() => {
   const hasInvalidAttendance = form.expected_attendance !== '' && Number(form.expected_attendance) <= 0
-  const hasInvalidDate = form.preferred_date && form.preferred_date < minimumDate
-  const hasInvalidTimes = form.preferred_start_time
-    && form.preferred_end_time
-    && form.preferred_start_time >= form.preferred_end_time
+  const startDate = splitDateTime(form.preferred_start_datetime).date
+  const hasInvalidStart = startDate && startDate < minimumDate
+  const hasInvalidRange = form.preferred_start_datetime
+    && form.preferred_end_datetime
+    && (form.preferred_end_datetime <= form.preferred_start_datetime
+      || exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime))
   const hasInvalidEquipmentQuantity = form.equipment.some((entry) => entry.quantity < 1)
   const hasInvalidAccessibilityQuantity = form.accessibility_needs.some(
     (entry) => entry.quantity !== undefined && entry.quantity < 1,
   )
   return hasInvalidAttendance
-    || hasInvalidDate
-    || hasInvalidTimes
+    || hasInvalidStart
+    || hasInvalidRange
     || hasInvalidEquipmentQuantity
     || hasInvalidAccessibilityQuantity
 })
 
-function validateDate() {
-  delete errors.preferred_date
-  if (!form.preferred_date) {
-    errors.preferred_date = 'Preferred date is required.'
-  } else if (form.preferred_date < minimumDate) {
-    errors.preferred_date = 'Preferred date must be after today.'
+function validateDateRange() {
+  delete errors.preferred_start_datetime
+  delete errors.preferred_end_datetime
+  const startDate = splitDateTime(form.preferred_start_datetime).date
+  if (!form.preferred_start_datetime) {
+    errors.preferred_start_datetime = 'Preferred start date and time is required.'
+  } else if (startDate < minimumDate) {
+    errors.preferred_start_datetime = 'Preferred start date must be after today.'
   }
-}
-
-function validateTimeRange() {
-  delete errors.preferred_start_time
-  delete errors.preferred_end_time
-  if (form.preferred_start_time && form.preferred_end_time && form.preferred_start_time >= form.preferred_end_time) {
-    errors.preferred_start_time = 'Start time must be before the end time.'
-    errors.preferred_end_time = 'End time must be after the start time.'
+  // Deliberately does NOT flag a still-empty end date here -- this runs on
+  // every keystroke in either field (see the @input bindings below), and
+  // the end field is naturally still empty while the user is filling in
+  // the start field first. That "required" check only belongs in
+  // validateForm(), which runs once, at actual submit time. An end date
+  // that IS filled in but out of order is still flagged immediately,
+  // since that's a genuine mistake worth catching right away.
+  if (form.preferred_end_datetime && form.preferred_start_datetime) {
+    if (form.preferred_end_datetime <= form.preferred_start_datetime) {
+      errors.preferred_end_datetime = 'End date and time must be after the start date and time.'
+    } else if (exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime)) {
+      errors.preferred_end_datetime = 'Event duration cannot exceed 24 hours.'
+    }
   }
 }
 
@@ -189,10 +245,12 @@ function validateForm() {
     if (message && !form[field].trim()) errors[field] = message
   })
 
-  validateDate()
+  validateDateRange()
+  if (!form.preferred_end_datetime) {
+    errors.preferred_end_datetime = 'Preferred end date and time is required.'
+  }
 
   validateAttendance()
-  validateTimeRange()
 
   form.equipment.forEach((entry) => {
     if (entry.quantity < 1) errors.equipment = 'Equipment quantities must be at least 1.'
@@ -258,10 +316,9 @@ async function saveDraft() {
         <label :class="{ invalid: errors.description }">Description <textarea v-model.trim="form.description" /> <span v-if="errors.description" class="field-error">{{ errors.description }}</span></label>
         <label :class="{ invalid: errors.purpose }">Purpose of the event <textarea v-model.trim="form.purpose" /> <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span></label>
         <div class="grid">
-          <label :class="{ invalid: errors.preferred_date }">Preferred date <input v-model="form.preferred_date" type="date" :min="minimumDate" @input="validateDate" /> <span v-if="errors.preferred_date" class="field-error">{{ errors.preferred_date }}</span></label>
+          <label :class="{ invalid: errors.preferred_start_datetime }">Preferred start date &amp; time <input v-model="form.preferred_start_datetime" type="datetime-local" :min="`${minimumDate}T00:00`" @input="validateDateRange" /> <span v-if="errors.preferred_start_datetime" class="field-error">{{ errors.preferred_start_datetime }}</span></label>
+          <label :class="{ invalid: errors.preferred_end_datetime }">Preferred end date &amp; time <input v-model="form.preferred_end_datetime" type="datetime-local" :min="form.preferred_start_datetime || `${minimumDate}T00:00`" @input="validateDateRange" /> <span v-if="errors.preferred_end_datetime" class="field-error">{{ errors.preferred_end_datetime }}</span></label>
           <label :class="{ invalid: errors.expected_attendance }">Expected attendance <input v-model="form.expected_attendance" type="number" min="1" @input="validateAttendance" /> <span v-if="errors.expected_attendance" class="field-error">{{ errors.expected_attendance }}</span></label>
-          <label :class="{ invalid: errors.preferred_start_time }">Start time <input v-model="form.preferred_start_time" type="time" @input="validateTimeRange" /> <span v-if="errors.preferred_start_time" class="field-error">{{ errors.preferred_start_time }}</span></label>
-          <label :class="{ invalid: errors.preferred_end_time }">End time <input v-model="form.preferred_end_time" type="time" :min="form.preferred_start_time || undefined" @input="validateTimeRange" /> <span v-if="errors.preferred_end_time" class="field-error">{{ errors.preferred_end_time }}</span></label>
         </div>
       </fieldset>
 

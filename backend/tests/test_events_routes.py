@@ -127,3 +127,60 @@ def test_reassign_route_translates_no_coordinator_available_to_400(client, signi
 def test_reassign_route_rejects_unauthenticated(client):
     response = client.post("/events/event-1/reassign-coordinator", json={"new_coordinator_id": "x"})
     assert response.status_code == 401
+
+
+# -- DELETE /events/<event_id> -------------------------------------------
+
+
+def test_delete_route_succeeds_for_own_draft(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_organizer"])
+    event = FakeEvent(id="event-1", organizer_id="user-1", status="draft")
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+
+    calls = []
+    monkeypatch.setattr(
+        routes_module, "delete_draft_request", lambda event_id, event: calls.append(event_id)
+    )
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.delete("/events/event-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 204
+    assert calls == ["event-1"]
+
+
+def test_delete_route_denies_submitted_event(client, signing_key, monkeypatch):
+    """A submitted event request is no longer deletable -- rule_event_delete
+    restricts deletion to draft status, and the route must surface that as
+    a 403, not silently succeed."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+    event = FakeEvent(id="event-1", organizer_id="user-1", status="submitted")
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+
+    calls = []
+    monkeypatch.setattr(
+        routes_module, "delete_draft_request", lambda event_id, event: calls.append(event_id)
+    )
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.delete("/events/event-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "not_authorised"
+    assert calls == []  # authz must block this before the service ever runs
+
+
+def test_delete_route_denies_event_that_isnt_the_callers(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_organizer"])
+    event = FakeEvent(id="event-1", organizer_id="someone-else", status="draft")
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.delete("/events/event-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 404
+
+
+def test_delete_route_rejects_unauthenticated(client):
+    response = client.delete("/events/event-1")
+    assert response.status_code == 401

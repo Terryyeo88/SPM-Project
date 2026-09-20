@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
@@ -21,7 +21,8 @@ EVENT_FIELDS = {
     "name",
     "description",
     "purpose",
-    "preferred_date",
+    "preferred_start_date",
+    "preferred_end_date",
     "preferred_start_time",
     "preferred_end_time",
     "expected_attendance",
@@ -35,12 +36,15 @@ REQUIRED_FIELDS = {
     "name",
     "description",
     "purpose",
-    "preferred_date",
+    "preferred_start_date",
+    "preferred_end_date",
     "expected_attendance",
     "room_layout",
     "registration_needs",
 }
 DRAFT_NAME = "Untitled event request"
+# An event request's total span, start to end, may not exceed this.
+MAX_EVENT_DURATION = timedelta(hours=24)
 
 
 def _validate_item_list(value, field: str, allowed_items: set[str], *, quantity_required: bool) -> list[dict]:
@@ -96,14 +100,40 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
     if "registration_needs" in validated and not isinstance(validated["registration_needs"], bool):
         raise ValidationError("registration_needs must be true or false.")
 
-    if "preferred_date" in validated:
+    if "preferred_start_date" in validated:
         try:
-            preferred_date = date.fromisoformat(validated["preferred_date"])
+            start_date = date.fromisoformat(validated["preferred_start_date"])
         except (TypeError, ValueError) as exc:
-            raise ValidationError("preferred_date must be an ISO date (YYYY-MM-DD).") from exc
-        if preferred_date <= date.today():
-            raise ValidationError("preferred_date must be after today.")
+            raise ValidationError("preferred_start_date must be an ISO date (YYYY-MM-DD).") from exc
+        if start_date <= date.today():
+            raise ValidationError("preferred_start_date must be after today.")
 
+    if validated.get("preferred_end_date") == "":
+        validated["preferred_end_date"] = None
+    if "preferred_end_date" in validated and validated["preferred_end_date"] is not None:
+        try:
+            end_date = date.fromisoformat(validated["preferred_end_date"])
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("preferred_end_date must be an ISO date (YYYY-MM-DD).") from exc
+        # Only cross-checked against the start date when both are in THIS
+        # payload -- same convention as the time-range check below: a
+        # partial edit touching only one of a related pair isn't
+        # re-validated against whatever the other one already is in the DB.
+        if "preferred_start_date" in validated:
+            if end_date < start_date:
+                raise ValidationError("preferred_end_date must be on or after preferred_start_date.")
+            # A coarse, times-independent guard: two calendar days apart or
+            # more is ALWAYS over 24 hours no matter what times are picked
+            # (the earliest possible span, day-1 23:59 to day-3 00:00, is
+            # still just over a day) -- catches an obviously-too-long range
+            # even before/without preferred_start_time-preferred_end_time
+            # being known. Exactly one day apart is left to the precise
+            # datetime check below, since it's genuinely ambiguous without
+            # times (anywhere from a few minutes to just under 48 hours).
+            if end_date - start_date > timedelta(days=1):
+                raise ValidationError("Event duration cannot exceed 24 hours.")
+
+    # No venue-hours window any more -- events are available 24 hours.
     for field in ("preferred_start_time", "preferred_end_time"):
         if validated.get(field) == "":
             validated[field] = None
@@ -112,7 +142,38 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
                 validated[field] = time.fromisoformat(validated[field]).isoformat()
             except (TypeError, ValueError) as exc:
                 raise ValidationError(f"{field} must be an ISO time (HH:MM[:SS]).") from exc
-    if validated.get("preferred_start_time") and validated.get("preferred_end_time"):
+
+    # The real invariant is "start date+time is before end date+time" as
+    # ONE combined comparison, not two separate rules (date ordering, then
+    # time ordering) kept in sync -- that's what correctly allows an end
+    # TIME earlier than the start TIME as long as the end DATE is later
+    # (e.g. 22:00 on day one to 06:00 on day two is a normal overnight
+    # event), while still catching a same-day mistake. Only runs when all
+    # four fields are in THIS payload, same partial-edit convention as the
+    # date-only and (formerly) time-only checks above: a partial edit
+    # touching just one of the four isn't re-validated against whatever
+    # the others already are in the DB.
+    if (
+        validated.get("preferred_start_date")
+        and validated.get("preferred_end_date")
+        and validated.get("preferred_start_time")
+        and validated.get("preferred_end_time")
+    ):
+        start_dt = datetime.combine(
+            date.fromisoformat(validated["preferred_start_date"]),
+            time.fromisoformat(validated["preferred_start_time"]),
+        )
+        end_dt = datetime.combine(
+            date.fromisoformat(validated["preferred_end_date"]),
+            time.fromisoformat(validated["preferred_end_time"]),
+        )
+        if start_dt >= end_dt:
+            raise ValidationError("preferred_end_time must be after preferred_start_time.")
+        if end_dt - start_dt > MAX_EVENT_DURATION:
+            raise ValidationError("Event duration cannot exceed 24 hours.")
+    elif validated.get("preferred_start_time") and validated.get("preferred_end_time"):
+        # No end date given (or no start date to pair it with) -- the
+        # ordinary same-day case, unchanged from before.
         if validated["preferred_start_time"] >= validated["preferred_end_time"]:
             raise ValidationError("preferred_end_time must be after preferred_start_time.")
 
@@ -157,7 +218,14 @@ def _draft_payload(payload: dict, existing: dict | None = None) -> dict:
     database_payload = dict(existing or {})
     database_payload.update(payload)
     database_payload["name"] = database_payload.get("name") or DRAFT_NAME
-    for field in ("preferred_date", "preferred_start_time", "preferred_end_time", "room_layout"):
+    nullable_fields = (
+        "preferred_start_date",
+        "preferred_end_date",
+        "preferred_start_time",
+        "preferred_end_time",
+        "room_layout",
+    )
+    for field in nullable_fields:
         if database_payload.get(field) == "":
             database_payload[field] = None
     if database_payload.get("expected_attendance") == "":
@@ -176,7 +244,8 @@ def _from_database_event(event: SimpleNamespace) -> dict:
         "name": event.name,
         "description": event.description,
         "purpose": event.purpose,
-        "preferred_date": event.preferred_date,
+        "preferred_start_date": event.preferred_start_date,
+        "preferred_end_date": event.preferred_end_date,
         "preferred_start_time": event.preferred_start_time,
         "preferred_end_time": event.preferred_end_time,
         "expected_attendance": event.expected_attendance,
@@ -224,6 +293,18 @@ def save_draft_request(event_id: str, event: SimpleNamespace, payload: dict):
     database_payload = _draft_payload(payload, _from_database_event(event))
     result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
     return _first_row(result)
+
+
+def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
+    """Permanently remove a draft event request.
+
+    Callers must gate this through app.authz's event.delete action first
+    (rule_event_delete restricts it to the owning organizer while status
+    is still "draft") -- this function itself performs no status check,
+    the same trust boundary edit_event_request/submit_event_request rely
+    on for their own authz-gated preconditions.
+    """
+    supabase.table("events").delete().eq("id", event_id).execute()
 
 
 def submit_event_request(event_id: str, event: SimpleNamespace):

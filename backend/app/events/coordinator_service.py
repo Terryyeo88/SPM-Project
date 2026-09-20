@@ -84,7 +84,7 @@ def _get_all_coordinators() -> list[dict]:
 def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: str) -> list[dict]:
     result = (
         supabase.table("events")
-        .select("id, preferred_date, preferred_start_time, preferred_end_time, status")
+        .select("id, preferred_start_date, preferred_start_time, preferred_end_time, status")
         .eq("coordinator_id", coordinator_id)
         .neq("id", exclude_event_id)
         .in_("status", ACTIVE_STATUSES)
@@ -97,7 +97,7 @@ def _is_available(coordinator_id: str, event: dict) -> bool:
     """A coordinator is available if none of their other active events
     overlap this event's date/time."""
     for other in _get_active_events_for_coordinator(coordinator_id, event["id"]):
-        if other["preferred_date"] != event["preferred_date"]:
+        if other["preferred_start_date"] != event["preferred_start_date"]:
             continue
         if _times_overlap(
             event.get("preferred_start_time"), event.get("preferred_end_time"),
@@ -166,7 +166,7 @@ def assign_initial_coordinator(event_id: str) -> dict:
     available = [c for c in coordinators if _is_available(c["id"], event)]
     if not available:
         raise NoCoordinatorAvailableError(
-            f"Every coordinator is already occupied on {event.get('preferred_date')}."
+            f"Every coordinator is already occupied on {event.get('preferred_start_date')}."
         )
 
     # Fair, workload-based pick: fewest active events first, stable tiebreak by id.
@@ -257,7 +257,7 @@ def reassign_coordinator(
 
     if not _is_available(new_coordinator_id, event):
         raise NoCoordinatorAvailableError(
-            f"{new_coordinator['name']} is already occupied on {event.get('preferred_date')}."
+            f"{new_coordinator['name']} is already occupied on {event.get('preferred_start_date')}."
         )
 
     # coordinator_id is a single column, so this update alone enforces

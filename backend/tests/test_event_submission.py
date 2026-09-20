@@ -32,7 +32,8 @@ def _complete_draft():
         name="Community Conference",
         description="A community conference.",
         purpose="Knowledge sharing.",
-        preferred_date="2026-11-10",
+        preferred_start_date="2026-11-10",
+        preferred_end_date="2026-11-10",
         preferred_start_time=None,
         preferred_end_time=None,
         expected_attendance=100,
@@ -45,12 +46,20 @@ def _complete_draft():
 
 
 def _complete_payload():
-    """Return a valid request body that edge-case tests can modify."""
+    """Return a valid request body that edge-case tests can modify.
+
+    preferred_end_date defaults to the SAME day as preferred_start_date --
+    a single-day event -- so tests that only care about time-of-day
+    ordering (and don't touch the dates) keep exercising the ordinary
+    same-day comparison rather than the combined-datetime, multi-day one.
+    """
+    start_date = (date.today() + timedelta(days=1)).isoformat()
     return {
         "name": "Community Conference",
         "description": "A community conference.",
         "purpose": "Knowledge sharing.",
-        "preferred_date": (date.today() + timedelta(days=1)).isoformat(),
+        "preferred_start_date": start_date,
+        "preferred_end_date": start_date,
         "preferred_start_time": "09:00",
         "preferred_end_time": "17:00",
         "expected_attendance": 100,
@@ -116,7 +125,8 @@ def test_submit_event_route_rejects_incomplete_draft(client, signing_key, monkey
         "name",
         "description",
         "purpose",
-        "preferred_date",
+        "preferred_start_date",
+        "preferred_end_date",
         "expected_attendance",
         "room_layout",
         "registration_needs",
@@ -138,26 +148,124 @@ def test_submission_rejects_each_missing_required_field(missing_field):
     "event_date",
     [date.today().isoformat(), (date.today() - timedelta(days=1)).isoformat()],
 )
-def test_submission_rejects_today_and_past_preferred_dates(event_date):
+def test_submission_rejects_today_and_past_preferred_start_dates(event_date):
     """Verify an event cannot be submitted for today or the previous day."""
     payload = _complete_payload()
-    payload["preferred_date"] = event_date
+    payload["preferred_start_date"] = event_date
 
     with pytest.raises(ValidationError, match="after today"):
         validate_event_payload(payload, for_submission=True)
 
 
-def test_submission_accepts_tomorrows_preferred_date():
-    """Verify the nearest valid preferred date, tomorrow, is accepted."""
+def test_submission_accepts_tomorrows_preferred_start_date():
+    """Verify the nearest valid preferred start date, tomorrow, is accepted."""
     payload = _complete_payload()
-    payload["preferred_date"] = (date.today() + timedelta(days=1)).isoformat()
+    payload["preferred_start_date"] = (date.today() + timedelta(days=1)).isoformat()
 
     validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_rejects_end_date_before_start_date():
+    """preferred_end_date, when given, must not be earlier than
+    preferred_start_date -- an event can't finish before it starts."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-09"
+
+    with pytest.raises(ValidationError, match="preferred_end_date"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_accepts_end_date_equal_to_start_date():
+    """The single-day edge case where the end date equals the start date
+    is valid."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-10"
+
+    validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_rejects_event_spanning_more_than_24_hours():
+    """An event's total span, start to end, may not exceed 24 hours -- two
+    or more calendar days apart is always over that regardless of times,
+    so this is rejected outright before times even come into play."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-12"
+
+    with pytest.raises(ValidationError, match="24 hours"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_rejects_next_day_event_exceeding_24_hours_precisely():
+    """One calendar day apart is ambiguous from the dates alone, but with
+    times given the exact duration can still exceed 24 hours and must be
+    rejected."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-11"
+    payload["preferred_start_time"] = "08:00"
+    payload["preferred_end_time"] = "09:00"  # 25 hours later
+
+    with pytest.raises(ValidationError, match="24 hours"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_accepts_event_exactly_24_hours_long():
+    """Exactly 24 hours is the allowed boundary, not a violation."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-11"
+    payload["preferred_start_time"] = "08:00"
+    payload["preferred_end_time"] = "08:00"  # exactly 24 hours later
+
+    validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_requires_preferred_end_date():
+    """preferred_end_date is a mandatory field -- even a single-day event
+    must state its own end date (equal to the start date)."""
+    payload = _complete_payload()
+    payload.pop("preferred_end_date")
+
+    with pytest.raises(ValidationError, match="preferred_end_date"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_allows_end_time_before_start_time_when_end_date_is_later():
+    """An end time numerically earlier than the start time is a
+    legitimate overnight event once the end DATE is on a later day (e.g.
+    22:00 on day one to 06:00 on day two) -- the two pairs are compared
+    as combined datetimes, not as separate date/time rules."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-11"
+    payload["preferred_start_time"] = "22:00"
+    payload["preferred_end_time"] = "06:00"
+
+    validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_rejects_end_time_before_start_time_on_the_same_date():
+    """When the start and end dates are the SAME day, the end time must
+    still be after the start time -- the combined-datetime check reduces
+    to the ordinary same-day comparison in that case."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-10"
+    payload["preferred_start_time"] = "22:00"
+    payload["preferred_end_time"] = "06:00"
+
+    with pytest.raises(ValidationError, match="preferred_end_time"):
+        validate_event_payload(payload, for_submission=True)
 
 
 def test_submission_rejects_start_time_after_end_time():
     """Verify the event time range must run forwards, not backwards."""
     payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-10"
     payload["preferred_start_time"] = "17:01"
     payload["preferred_end_time"] = "17:00"
 
@@ -168,11 +276,27 @@ def test_submission_rejects_start_time_after_end_time():
 def test_submission_rejects_equal_start_and_end_times():
     """Verify an event cannot have a zero-length time range."""
     payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-10"
     payload["preferred_start_time"] = "09:00"
     payload["preferred_end_time"] = "09:00"
 
     with pytest.raises(ValidationError, match="preferred_end_time"):
         validate_event_payload(payload, for_submission=True)
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("00:00", "01:00"), ("05:00", "05:30"), ("23:00", "23:59")],
+)
+def test_submission_accepts_times_outside_old_venue_hours(start, end):
+    """Venues are now available 24 hours -- times that used to fall
+    outside the old 8am-10pm window are accepted."""
+    payload = _complete_payload()
+    payload["preferred_start_time"] = start
+    payload["preferred_end_time"] = end
+
+    validate_event_payload(payload, for_submission=True)
 
 
 def test_submission_allows_empty_special_requests():

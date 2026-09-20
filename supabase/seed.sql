@@ -104,7 +104,7 @@ begin
   if not exists (select 1 from public.events where name = 'Annual Tech Symposium') then
     insert into public.events (
       organizer_id, coordinator_id, name, description, purpose, status,
-      preferred_date, expected_attendance, room_layout
+      preferred_start_date, expected_attendance, room_layout
     ) values (
       org1_id, coord1_id, 'Annual Tech Symposium',
       'A symposium on emerging tech trends.', 'Knowledge sharing', 'planning',
@@ -116,7 +116,7 @@ begin
   if not exists (select 1 from public.events where name = 'Product Launch Networking Night') then
     insert into public.events (
       organizer_id, coordinator_id, name, description, purpose, status,
-      preferred_date, expected_attendance, room_layout
+      preferred_start_date, expected_attendance, room_layout
     ) values (
       org1_id, null, 'Product Launch Networking Night',
       'Networking event for a new product line.', 'Marketing', 'submitted',
@@ -128,7 +128,7 @@ begin
   if not exists (select 1 from public.events where name = 'Team Building Workshop') then
     insert into public.events (
       organizer_id, coordinator_id, name, description, purpose, status,
-      preferred_date, expected_attendance, room_layout
+      preferred_start_date, expected_attendance, room_layout
     ) values (
       org1_id, null, 'Team Building Workshop',
       'Half-day workshop for staff bonding.', 'Team building', 'submitted',
