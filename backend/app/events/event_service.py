@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import date, time
 from types import SimpleNamespace
+from app.events.coordinator_service import assign_initial_coordinator, NoCoordinatorAvailableError
 
 from app.extensions import supabase
 from app.shared.errors import ValidationError
-from app.events.coordinator_service import assign_initial_coordinator, NoCoordinatorAvailableError
 
 ROOM_LAYOUTS = {"theatre", "classroom", "boardroom", "seminar", "banquet", "networking"}
 EQUIPMENT = {"microphone", "projector", "screen", "wifi"}
