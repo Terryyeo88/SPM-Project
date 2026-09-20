@@ -22,12 +22,20 @@ from types import SimpleNamespace
 from flask import Blueprint, jsonify, request
 
 from app.auth.context import current_user
-from app.authz.actions import EVENT_CREATE, EVENT_EDIT, EVENT_REASSIGN_COORDINATOR, EVENT_SUBMIT, EVENT_VIEW
+from app.authz.actions import (
+    EVENT_CREATE,
+    EVENT_DELETE,
+    EVENT_EDIT,
+    EVENT_REASSIGN_COORDINATOR,
+    EVENT_SUBMIT,
+    EVENT_VIEW,
+)
 from app.authz.decorators import require
 from app.events.coordinator_service import NoCoordinatorAvailableError, reassign_coordinator
 from app.events.event_service import (
     create_draft_request,
     create_event_request,
+    delete_draft_request,
     edit_event_request,
     save_draft_request,
     submit_event_request,
@@ -62,6 +70,13 @@ def edit_event(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_event(event, event_id):
     return jsonify(vars(event)), 200
+
+
+@events_bp.route("/<event_id>", methods=["DELETE"])
+@require(EVENT_DELETE, loader=lambda event_id: load_event(event_id))
+def delete_event(event, event_id):
+    delete_draft_request(event_id, event)
+    return "", 204
 
 
 @events_bp.route("/<event_id>/draft", methods=["POST"])

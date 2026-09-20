@@ -220,6 +220,23 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
     return Decision.DENY_NOT_FOUND
 
 
+# -- event.delete --------------------------------------------------------
+# Source: same organiser-draft window as event.submit/event.edit's
+# organiser branch. An organiser may discard a request they haven't submitted
+# anywhere yet; once it's submitted, it's left their hands (a coordinator
+# may be assigned, reviewing it, etc.) so deletion is no longer theirs to
+# do -- withdrawing a submitted request is a status change (e.g. cancel),
+# not a delete, and out of scope here.
+
+
+def rule_event_delete(user: Any, event: Any) -> Decision:
+    if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "draft"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 # -- event.approve / event.reject ----------------------------------------
 # Source: "a coordinator acts only on events assigned to them" + the
 # migration's own comment naming the Event Status Management story's
