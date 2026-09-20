@@ -218,7 +218,14 @@ def _draft_payload(payload: dict, existing: dict | None = None) -> dict:
     database_payload = dict(existing or {})
     database_payload.update(payload)
     database_payload["name"] = database_payload.get("name") or DRAFT_NAME
-    for field in ("preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time", "room_layout"):
+    nullable_fields = (
+        "preferred_start_date",
+        "preferred_end_date",
+        "preferred_start_time",
+        "preferred_end_time",
+        "room_layout",
+    )
+    for field in nullable_fields:
         if database_payload.get(field) == "":
             database_payload[field] = None
     if database_payload.get("expected_attendance") == "":
