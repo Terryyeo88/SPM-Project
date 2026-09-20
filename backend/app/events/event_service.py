@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import date, time
 from types import SimpleNamespace
-from app.events.coordinator_service import assign_initial_coordinator, NoCoordinatorAvailableError
 
+from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
