@@ -58,16 +58,6 @@ function splitDateTime(value) {
   return { date: date || '', time: time || '' }
 }
 
-// Mirrors event_service.py's MAX_EVENT_DURATION -- an event's total span,
-// start to end, may not exceed 24 hours. Both values are datetime-local
-// strings, parsed as local time by `new Date()` (no timezone conversion,
-// same wall-clock interpretation the rest of this form already uses).
-const MAX_EVENT_DURATION_MS = 24 * 60 * 60 * 1000
-
-function exceedsMaxDuration(startValue, endValue) {
-  return new Date(endValue) - new Date(startValue) > MAX_EVENT_DURATION_MS
-}
-
 async function loadSavedDraft() {
   const savedDraftId = localStorage.getItem(draftStorageKey)
   if (!savedDraftId) return
@@ -174,7 +164,6 @@ const canSubmit = computed(() => {
   // correctly allowed as long as the end DATE is later (e.g. 22:00 on day
   // one to 06:00 on day two).
   const hasValidRange = form.preferred_end_datetime > form.preferred_start_datetime
-    && !exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime)
   const hasValidQuantities = form.equipment.every((entry) => entry.quantity >= 1)
     && form.accessibility_needs.every((entry) => entry.quantity === undefined || entry.quantity >= 1)
   return hasRequiredFields && hasAttendance && hasValidStart && hasValidRange && hasValidQuantities
@@ -186,8 +175,7 @@ const hasInvalidInput = computed(() => {
   const hasInvalidStart = startDate && startDate < minimumDate
   const hasInvalidRange = form.preferred_start_datetime
     && form.preferred_end_datetime
-    && (form.preferred_end_datetime <= form.preferred_start_datetime
-      || exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime))
+    && form.preferred_end_datetime <= form.preferred_start_datetime
   const hasInvalidEquipmentQuantity = form.equipment.some((entry) => entry.quantity < 1)
   const hasInvalidAccessibilityQuantity = form.accessibility_needs.some(
     (entry) => entry.quantity !== undefined && entry.quantity < 1,
@@ -218,8 +206,6 @@ function validateDateRange() {
   if (form.preferred_end_datetime && form.preferred_start_datetime) {
     if (form.preferred_end_datetime <= form.preferred_start_datetime) {
       errors.preferred_end_datetime = 'End date and time must be after the start date and time.'
-    } else if (exceedsMaxDuration(form.preferred_start_datetime, form.preferred_end_datetime)) {
-      errors.preferred_end_datetime = 'Event duration cannot exceed 24 hours.'
     }
   }
 }
