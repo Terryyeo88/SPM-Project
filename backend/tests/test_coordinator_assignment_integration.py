@@ -106,13 +106,13 @@ def test_assign_initial_coordinator_skips_coordinator_occupied_on_same_date(fixt
         organizer_id=organizer["id"],
         coordinator_id=busy_coordinator["id"],
         status="planning",
-        preferred_date="2027-03-01",
+        preferred_start_date="2027-03-01",
     )
     event_id = fixtures.create_event(
         organizer_id=organizer["id"],
         coordinator_id=None,
         status="submitted",
-        preferred_date="2027-03-01",
+        preferred_start_date="2027-03-01",
     )
 
     chosen = assign_initial_coordinator(event_id)
@@ -137,13 +137,13 @@ def test_assign_initial_coordinator_prefers_less_loaded_coordinator(fixtures):
         organizer_id=organizer["id"],
         coordinator_id=busier_coordinator["id"],
         status="planning",
-        preferred_date="2027-01-15",
+        preferred_start_date="2027-01-15",
     )
     event_id = fixtures.create_event(
         organizer_id=organizer["id"],
         coordinator_id=None,
         status="submitted",
-        preferred_date="2027-04-10",
+        preferred_start_date="2027-04-10",
     )
 
     chosen = assign_initial_coordinator(event_id)
@@ -166,7 +166,7 @@ def test_reassign_coordinator_records_audit_log(fixtures):
         organizer_id=organizer["id"],
         coordinator_id=original_coordinator["id"],
         status="planning",
-        preferred_date="2027-06-01",
+        preferred_start_date="2027-06-01",
     )
 
     result = reassign_coordinator(
@@ -204,7 +204,7 @@ def test_reassign_coordinator_rejects_request_from_non_current_coordinator(fixtu
         organizer_id=organizer["id"],
         coordinator_id=original_coordinator["id"],
         status="planning",
-        preferred_date="2027-06-15",
+        preferred_start_date="2027-06-15",
     )
 
     with pytest.raises(ValueError):
