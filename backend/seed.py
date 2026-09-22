@@ -101,7 +101,7 @@ def main():
             "description": "A symposium on emerging tech trends.",
             "purpose": "Knowledge sharing",
             "status": "planning",
-            "preferred_date": "2026-11-10",
+            "preferred_start_date": "2026-11-10",
             "expected_attendance": 200,
             "room_layout": "theatre",
         }
@@ -118,7 +118,7 @@ def main():
             "description": "Networking event for a new product line.",
             "purpose": "Marketing",
             "status": "submitted",
-            "preferred_date": "2026-11-10",
+            "preferred_start_date": "2026-11-10",
             "expected_attendance": 100,
             "room_layout": "networking",
         }
@@ -134,7 +134,7 @@ def main():
             "description": "Half-day workshop for staff bonding.",
             "purpose": "Team building",
             "status": "submitted",
-            "preferred_date": "2026-10-05",
+            "preferred_start_date": "2026-10-05",
             "expected_attendance": 40,
             "room_layout": "classroom",
         }

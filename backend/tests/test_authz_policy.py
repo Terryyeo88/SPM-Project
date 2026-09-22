@@ -56,6 +56,13 @@ def test_organiser_allowed_edit_while_draft():
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
+def test_organiser_allowed_edit_after_rejection():
+    """A rejected request returns to the organizer for corrections."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", status="rejected")
+    assert can(user, actions.EVENT_EDIT, event) is True
+
+
 def test_coordinator_allowed_edit_assigned_event_in_planning():
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status="planning")
@@ -107,6 +114,41 @@ def test_multi_role_union_on_same_event_for_edit():
     assert can(user, actions.EVENT_EDIT, event_wrong_status) is False
     with pytest.raises(AuthorisationError):
         authorise(user, actions.EVENT_EDIT, event_wrong_status)
+
+
+# -- event.delete ---------------------------------------------------------
+
+
+def test_organiser_allowed_delete_own_draft():
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", status="draft")
+    assert can(user, actions.EVENT_DELETE, event) is True
+
+
+def test_organiser_denied_delete_after_submission():
+    """A submitted request has left the organiser's hands -- it must not
+    be deletable, only the still-in-progress draft."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", status="submitted")
+    assert can(user, actions.EVENT_DELETE, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_DELETE, event)
+
+
+def test_organiser_denied_delete_on_event_that_isnt_theirs():
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-2", status="draft")
+    assert can(user, actions.EVENT_DELETE, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(user, actions.EVENT_DELETE, event)
+
+
+def test_coordinator_denied_delete_even_when_assigned():
+    """Deletion is an organiser-only, draft-only action -- a coordinator
+    has no path to it at all, regardless of status."""
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(coordinator_id="coord-1", status="draft")
+    assert can(user, actions.EVENT_DELETE, event) is False
 
 
 # -- event.approve / event.reject ----------------------------------------
@@ -287,6 +329,7 @@ def test_attendee_denied_every_internal_action():
         actions.EVENT_VIEW,
         actions.EVENT_SUBMIT,
         actions.EVENT_EDIT,
+        actions.EVENT_DELETE,
         actions.EVENT_APPROVE,
         actions.EVENT_REJECT,
         actions.EVENT_REQUEST_CLARIFICATION,

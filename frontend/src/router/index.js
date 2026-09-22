@@ -1,23 +1,27 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { NAV_LINKS, hasAnyRole } from '../lib/roles'
-import LoginView from '../views/LoginView.vue'
+import { ROUTE_ACCESS, hasAnyRole } from '../lib/roles'
 import DashboardView from '../views/DashboardView.vue'
-import EventsPlaceholder from '../views/events/EventsPlaceholder.vue'
+import CreateEventView from '../views/events/CreateEventView.vue'
+import EventDetailsView from '../views/events/EventDetailsView.vue'
+import EventsListPlaceholder from '../views/events/EventsListPlaceholder.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
+import LoginView from '../views/LoginView.vue'
 import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
 
-// roles.js's NAV_LINKS is the single source of truth for "which roles
+// roles.js's ROUTE_ACCESS is the single source of truth for "which roles
 // can reach this named route" -- built into a lookup here and used
-// below for route-level gating, AND separately imported by
-// DashboardView.vue for nav-link visibility. Reading from the same
-// array means the two can never drift apart from each other (they did,
-// briefly, in an earlier version of this branch: the route itself had
-// no gate at all, only the nav link was hidden -- an authenticated user
-// of any role could still reach e.g. /events/reassign by typing the URL
-// directly). A route with no entry in NAV_LINKS has no role
-// restriction -- currently just '/' and '/login'.
-const _rolesByRouteName = new Map(NAV_LINKS.map((link) => [link.routeName, link.roles]))
+// below for route-level gating, AND separately read (as its NAV_LINKS
+// subset) by DashboardView.vue for nav-link visibility. Reading from the
+// same array means the two can never drift apart from each other (they
+// did, briefly: the route itself had no gate at all, only the nav link
+// was hidden -- an authenticated user of any role could still reach e.g.
+// /events/reassign by typing the URL directly -- and later a second,
+// inline copy of the same decision appeared on /create-event). A route
+// with no entry in ROUTE_ACCESS has no role restriction -- currently
+// just '/' and '/login'. router/index.test.js asserts every ROUTE_ACCESS
+// entry names a route that is really registered below.
+const _rolesByRouteName = new Map(ROUTE_ACCESS.map((entry) => [entry.routeName, entry.roles]))
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
@@ -25,14 +29,30 @@ const routes = [
   {
     path: '/events',
     name: 'events',
-    component: EventsPlaceholder,
+    component: EventsListPlaceholder,
     meta: { roles: _rolesByRouteName.get('events') },
   },
+  {
+    path: '/create-event',
+    name: 'create-event',
+    component: CreateEventView,
+    meta: { roles: _rolesByRouteName.get('create-event') },
+  },
+  // Static path before the dynamic one for readability -- vue-router
+  // already ranks a static segment above `:eventId` regardless of
+  // declaration order, and router/index.test.js pins that down so
+  // /events/reassign can never be swallowed as an event id.
   {
     path: '/events/reassign',
     name: 'reassign-coordinator',
     component: ReassignCoordinatorView,
     meta: { roles: _rolesByRouteName.get('reassign-coordinator') },
+  },
+  {
+    path: '/events/:eventId',
+    name: 'event-details',
+    component: EventDetailsView,
+    meta: { roles: _rolesByRouteName.get('event-details') },
   },
   {
     path: '/venues',

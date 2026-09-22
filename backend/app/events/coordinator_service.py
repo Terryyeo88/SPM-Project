@@ -22,8 +22,10 @@ as long as it is fair and technically possible"):
   - "Requires coordinator assignment" = event.status == 'submitted' and
     event.coordinator_id is null.
   - Availability = no OTHER active event (status in ACTIVE_STATUSES)
-    already assigned to that coordinator overlaps this event's date
-    (and time range, if the event has one).
+    already assigned to that coordinator overlaps this event's full
+    [preferred_start_date+time, preferred_end_date+time) span (see
+    _event_span) -- covers same-day, overnight, and any-length-under-
+    24h events uniformly, not just an exact-date match.
   - Selection = workload-based: among the available coordinators, pick
     whoever currently has the fewest active assigned events. This is
     "fair" without needing seniority/experience data, which the client
@@ -36,7 +38,7 @@ as long as it is fair and technically possible"):
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import date, datetime, time
 from typing import Optional
 
 from app.extensions import supabase
@@ -50,16 +52,43 @@ class NoCoordinatorAvailableError(Exception):
     """Raised when every Event Coordinator is occupied on the event's date."""
 
 
-def _times_overlap(
-    a_start: Optional[time], a_end: Optional[time],
-    b_start: Optional[time], b_end: Optional[time],
-) -> bool:
-    """True if two optional time ranges overlap. A missing time is treated
-    as "all day" so a date-only event still correctly blocks the whole day."""
-    a_start = a_start or time.min
-    a_end = a_end or time.max
-    b_start = b_start or time.min
-    b_end = b_end or time.max
+def _parse_date(value: Optional[str]) -> Optional[date]:
+    return date.fromisoformat(value) if value else None
+
+
+def _parse_time(value: Optional[str]) -> Optional[time]:
+    return time.fromisoformat(value) if value else None
+
+
+def _event_span(event: dict) -> tuple[datetime, datetime]:
+    """The full [start, end) datetime span this event occupies, for
+    availability-overlap purposes.
+
+    - A missing preferred_end_date means an ordinary same-day event --
+      it falls back to preferred_start_date, per event_service.py's own
+      "no end date given" convention.
+    - A missing preferred_start_time/preferred_end_time is treated as
+      the start/end of that day (time.min / time.max), so a date-only
+      event still correctly blocks the whole day(s) it's on -- same
+      convention the old date-only check used.
+
+    Combining into real datetimes (rather than comparing dates and times
+    separately) is what makes an overnight event -- e.g. 22:00 day 1 to
+    06:00 day 2 -- correctly overlap something starting at 23:00 on day
+    1 or ending at 01:00 on day 2, even though those pairs don't share a
+    single preferred_start_date.
+    """
+    start_date = _parse_date(event["preferred_start_date"])
+    end_date = _parse_date(event.get("preferred_end_date")) or start_date
+    start_time = _parse_time(event.get("preferred_start_time")) or time.min
+    end_time = _parse_time(event.get("preferred_end_time")) or time.max
+    return datetime.combine(start_date, start_time), datetime.combine(end_date, end_time)
+
+
+def _spans_overlap(a: dict, b: dict) -> bool:
+    """True if two events' full date/time spans overlap at all."""
+    a_start, a_end = _event_span(a)
+    b_start, b_end = _event_span(b)
     return a_start < b_end and b_start < a_end
 
 
@@ -84,7 +113,10 @@ def _get_all_coordinators() -> list[dict]:
 def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: str) -> list[dict]:
     result = (
         supabase.table("events")
-        .select("id, preferred_date, preferred_start_time, preferred_end_time, status")
+        .select(
+            "id, preferred_start_date, preferred_end_date, "
+            "preferred_start_time, preferred_end_time, status"
+        )
         .eq("coordinator_id", coordinator_id)
         .neq("id", exclude_event_id)
         .in_("status", ACTIVE_STATUSES)
@@ -94,15 +126,10 @@ def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: st
 
 
 def _is_available(coordinator_id: str, event: dict) -> bool:
-    """A coordinator is available if none of their other active events
-    overlap this event's date/time."""
+    """A coordinator is available if none of their other active events'
+    date/time spans (see _event_span) overlap this event's span."""
     for other in _get_active_events_for_coordinator(coordinator_id, event["id"]):
-        if other["preferred_date"] != event["preferred_date"]:
-            continue
-        if _times_overlap(
-            event.get("preferred_start_time"), event.get("preferred_end_time"),
-            other.get("preferred_start_time"), other.get("preferred_end_time"),
-        ):
+        if _spans_overlap(event, other):
             return False
     return True
 
@@ -166,7 +193,7 @@ def assign_initial_coordinator(event_id: str) -> dict:
     available = [c for c in coordinators if _is_available(c["id"], event)]
     if not available:
         raise NoCoordinatorAvailableError(
-            f"Every coordinator is already occupied on {event.get('preferred_date')}."
+            f"Every coordinator is already occupied on {event.get('preferred_start_date')}."
         )
 
     # Fair, workload-based pick: fewest active events first, stable tiebreak by id.
@@ -257,7 +284,7 @@ def reassign_coordinator(
 
     if not _is_available(new_coordinator_id, event):
         raise NoCoordinatorAvailableError(
-            f"{new_coordinator['name']} is already occupied on {event.get('preferred_date')}."
+            f"{new_coordinator['name']} is already occupied on {event.get('preferred_start_date')}."
         )
 
     # coordinator_id is a single column, so this update alone enforces
