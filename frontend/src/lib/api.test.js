@@ -31,7 +31,7 @@ vi.mock('../stores/auth', () => ({
 vi.mock('../router', () => ({ default: routerMock }))
 
 import { supabase } from './supabaseClient'
-import { apiGet, apiPost } from './api'
+import { apiDelete, apiGet, apiPost } from './api'
 
 function mockFetchResponse({ ok, status, body }) {
   return { ok, status, json: async () => body }
@@ -85,6 +85,58 @@ describe('api.js: request()/apiGet/apiPost', () => {
       await apiGet('/me')
       const [, options] = global.fetch.mock.calls[0]
       expect(options.headers.Authorization).toBeUndefined()
+    })
+  })
+
+  // apiDelete was added on main for draft deletion (DELETE /events/<id>
+  // returns 204 with NO body), so the empty-body path matters here in a
+  // way it doesn't for GET/POST.
+  describe('apiDelete', () => {
+    it('issues a DELETE with no request body', async () => {
+      global.fetch.mockResolvedValue({ ok: true, status: 204, json: async () => { throw new Error('no body') } })
+      await apiDelete('/events/abc')
+      const [url, options] = global.fetch.mock.calls[0]
+      expect(url).toContain('/events/abc')
+      expect(options.method).toBe('DELETE')
+      expect(options.body).toBeUndefined()
+    })
+
+    it('a 204 with an empty body resolves to null instead of throwing on the JSON parse', async () => {
+      global.fetch.mockResolvedValue({ ok: true, status: 204, json: async () => { throw new Error('no body') } })
+      await expect(apiDelete('/events/abc')).resolves.toBeNull()
+    })
+
+    it('a 404 (not the caller\'s event, or already deleted) throws with the real code and does not redirect', async () => {
+      global.fetch.mockResolvedValue(
+        mockFetchResponse({ ok: false, status: 404, body: { error: { code: 'not_found', message: 'Event not found.' } } }),
+      )
+      await expect(apiDelete('/events/abc')).rejects.toMatchObject({ status: 404, code: 'not_found' })
+      expect(push).not.toHaveBeenCalled()
+    })
+
+    it('a 403 (event is no longer a draft) throws and does not redirect -- forbidden is not the same as logged out', async () => {
+      global.fetch.mockResolvedValue(
+        mockFetchResponse({ ok: false, status: 403, body: { error: { code: 'not_authorised', message: 'nope' } } }),
+      )
+      await expect(apiDelete('/events/abc')).rejects.toMatchObject({ status: 403, code: 'not_authorised' })
+      expect(push).not.toHaveBeenCalled()
+      expect(clearLocalState).not.toHaveBeenCalled()
+    })
+
+    it('an expired session on a DELETE still triggers the forced logout, exactly like GET/POST', async () => {
+      global.fetch.mockResolvedValue(
+        mockFetchResponse({ ok: false, status: 401, body: { error: { code: 'auth_session_idle', message: 'idle' } } }),
+      )
+      await expect(apiDelete('/events/abc')).rejects.toMatchObject({ code: 'auth_session_idle' })
+      expect(clearLocalState).toHaveBeenCalledTimes(1)
+      expect(push).toHaveBeenCalledWith({ name: 'login' })
+    })
+
+    it('sends the Bearer token like every other verb', async () => {
+      supabase.auth.getSession.mockResolvedValue({ data: { session: { access_token: 'tok123' } } })
+      global.fetch.mockResolvedValue({ ok: true, status: 204, json: async () => { throw new Error('no body') } })
+      await apiDelete('/events/abc')
+      expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer tok123')
     })
   })
 
