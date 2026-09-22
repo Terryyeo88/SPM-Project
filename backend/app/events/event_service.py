@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from types import SimpleNamespace
 
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
@@ -43,8 +43,6 @@ REQUIRED_FIELDS = {
     "registration_needs",
 }
 DRAFT_NAME = "Untitled event request"
-# An event request's total span, start to end, may not exceed this.
-MAX_EVENT_DURATION = timedelta(hours=24)
 
 
 def _validate_item_list(value, field: str, allowed_items: set[str], *, quantity_required: bool) -> list[dict]:
@@ -122,16 +120,6 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
         if "preferred_start_date" in validated:
             if end_date < start_date:
                 raise ValidationError("preferred_end_date must be on or after preferred_start_date.")
-            # A coarse, times-independent guard: two calendar days apart or
-            # more is ALWAYS over 24 hours no matter what times are picked
-            # (the earliest possible span, day-1 23:59 to day-3 00:00, is
-            # still just over a day) -- catches an obviously-too-long range
-            # even before/without preferred_start_time-preferred_end_time
-            # being known. Exactly one day apart is left to the precise
-            # datetime check below, since it's genuinely ambiguous without
-            # times (anywhere from a few minutes to just under 48 hours).
-            if end_date - start_date > timedelta(days=1):
-                raise ValidationError("Event duration cannot exceed 24 hours.")
 
     # No venue-hours window any more -- events are available 24 hours.
     for field in ("preferred_start_time", "preferred_end_time"):
@@ -169,8 +157,6 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
         )
         if start_dt >= end_dt:
             raise ValidationError("preferred_end_time must be after preferred_start_time.")
-        if end_dt - start_dt > MAX_EVENT_DURATION:
-            raise ValidationError("Event duration cannot exceed 24 hours.")
     elif validated.get("preferred_start_time") and validated.get("preferred_end_time"):
         # No end date given (or no start date to pair it with) -- the
         # ordinary same-day case, unchanged from before.
