@@ -9,6 +9,17 @@ from app.events.coordinator_service import NoCoordinatorAvailableError, assign_i
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
+EVENT_STATUSES = {
+    "draft",
+    "submitted",
+    "under_review",
+    "approved",
+    "planning",
+    "confirmed",
+    "completed",
+    "cancelled",
+    "rejected",
+}
 ROOM_LAYOUTS = {"theatre", "classroom", "boardroom", "seminar", "banquet", "networking"}
 EQUIPMENT = {"microphone", "projector", "screen", "wifi"}
 ACCESSIBILITY_NEEDS = {
@@ -316,3 +327,55 @@ def submit_event_request(event_id: str, event: SimpleNamespace):
 
     result = supabase.table("events").select("*").eq("id", event_id).single().execute()
     return result.data
+
+
+def list_event_requests(user, status: str | None = None) -> list[dict]:
+    """Every event request the caller is entitled to see, scoped per
+    role -- see rule_event_list's *** warning *** in app.authz.rules'
+    module docstring: passing that role-only check does NOT mean "every
+    event", it means "attempt a list at all". The actual per-row scoping
+    is this function's job, not authz's:
+      - event_organizer sees events where organizer_id == user.id
+        (View Event Requests story: "all the event requests that have
+        been created or drafted by him or her")
+      - event_coordinator sees events where coordinator_id == user.id
+        (the equivalent coordinator-side grant referenced by that same
+        rule)
+    A user holding both roles sees the UNION of both, not just one --
+    multi-role union is the same structural stance app.authz.rules takes
+    everywhere else (see that module's docstring on why it's `in
+    user.roles`, never `user.role ==`, throughout).
+
+    `status` is the optional filter from "Can filter based of status of
+    events" -- applied after the ownership scoping above, never in place
+    of it.
+
+    NOT implemented here: replying to Event Coordinator feedback on a
+    request "under review" (the rest of that same acceptance criterion).
+    That depends on a clarification/feedback record that doesn't exist
+    yet -- it belongs to Event Review and Approval (Aaralyn), which
+    sprint planning explicitly deferred past Sprint 1 ("leave this to a
+    later date"). Wiring a reply flow against a table that doesn't exist
+    would be guessing at a shape someone else's story still needs to
+    define.
+    """
+    conditions = []
+    if "event_organizer" in user.roles:
+        conditions.append(f"organizer_id.eq.{user.id}")
+    if "event_coordinator" in user.roles:
+        conditions.append(f"coordinator_id.eq.{user.id}")
+    if not conditions:
+        # rule_event_list already blocks a caller holding neither role
+        # from reaching this function at all -- this is defence in depth,
+        # not the real gate, so that a future bug in that rule fails
+        # closed (empty list) rather than open (every event).
+        return []
+
+    if status is not None and status not in EVENT_STATUSES:
+        raise ValidationError(f"status must be one of: {', '.join(sorted(EVENT_STATUSES))}.")
+
+    query = supabase.table("events").select("*").or_(",".join(conditions))
+    if status is not None:
+        query = query.eq("status", status)
+    result = query.order("created_at", desc=True).execute()
+    return result.data or []

@@ -29,6 +29,47 @@ ORGANIZERS = [
     {"email": "organizer1@example.com", "name": "Derek Ong"},
 ]
 
+# Venues (View Venue Catalogue, Nawaz, Sprint 1) -- no auth.users involved,
+# a venue isn't owned by anyone, so these are plain rows.
+VENUES = [
+    {
+        "name": "Grand Ballroom",
+        "location": "Main Building, Level 3",
+        "capacity": 300,
+        "facilities": ["microphone", "projector", "screen", "wifi"],
+        "accessibility_features": ["wheelchair_access", "lift_access"],
+        "supported_layouts": ["theatre", "banquet", "networking"],
+        "status": "available",
+    },
+    {
+        "name": "Innovation Hub",
+        "location": "Tech Wing, Level 1",
+        "capacity": 80,
+        "facilities": ["projector", "screen", "wifi"],
+        "accessibility_features": ["wheelchair_access", "removable_seats"],
+        "supported_layouts": ["classroom", "seminar", "boardroom"],
+        "status": "available",
+    },
+    {
+        "name": "Executive Boardroom",
+        "location": "Main Building, Level 5",
+        "capacity": 20,
+        "facilities": ["screen", "wifi"],
+        "accessibility_features": ["wheelchair_access"],
+        "supported_layouts": ["boardroom"],
+        "status": "occupied",
+    },
+    {
+        "name": "Riverside Pavilion",
+        "location": "East Campus, Ground Floor",
+        "capacity": 150,
+        "facilities": ["microphone", "wifi"],
+        "accessibility_features": ["wheelchair_access", "lift_access", "extra_legroom_seats"],
+        "supported_layouts": ["banquet", "networking", "seminar"],
+        "status": "maintenance",
+    },
+]
+
 
 def get_or_create_user(email: str, name: str) -> str:
     """Return the profile id for this email, creating the auth user +
@@ -70,6 +111,20 @@ def get_or_create_event(event: dict) -> dict:
         return existing.data[0]
 
     result = supabase.table("events").insert(event).execute()
+    return result.data[0]
+
+
+def get_or_create_venue(venue: dict) -> dict:
+    existing = (
+        supabase.table("venues")
+        .select("*")
+        .eq("name", venue["name"])
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+
+    result = supabase.table("venues").insert(venue).execute()
     return result.data[0]
 
 
@@ -141,7 +196,11 @@ def main():
     )
     print(f"Event ready: {event_c['name']} (needs assignment, open date)")
 
-    print("\nDone. 3 coordinators, 1 organizer, 3 events seeded.")
+    for venue in VENUES:
+        v = get_or_create_venue(venue)
+        print(f"Venue ready: {v['name']} ({v['status']})")
+
+    print("\nDone. 3 coordinators, 1 organizer, 3 events, 4 venues seeded.")
 
 
 if __name__ == "__main__":

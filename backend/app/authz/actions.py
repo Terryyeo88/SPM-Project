@@ -13,10 +13,10 @@ proves it. "The schema could technically support it" is not a source on
 its own -- see rules.py's docstring on EVENT_LIST / EVENT_CREATE for why
 that distinction matters.
 
-Deliberately NOT here: anything about registrations, venues, or
-equipment (no such tables exist yet -- whoever builds those stories
-should add their own actions the same way, sourced the same way), and no
-profile.view_* (GET /me needs no policy check at all; see app/me/routes.py).
+Deliberately NOT here: anything about registrations or equipment (no
+such tables exist yet -- whoever builds those stories should add their
+own actions the same way, sourced the same way), and no profile.view_*
+(GET /me needs no policy check at all; see app/me/routes.py).
 """
 
 from __future__ import annotations
@@ -34,3 +34,21 @@ EVENT_REJECT = "event.reject"
 EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
+
+# -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
+# Source: "As an Event Coordinator, I want to see venue details so that
+# I can find the appropriate venue for the event request." The catalogue
+# is read-only in Sprint 1 -- no venue.create/edit/delete actions exist
+# yet because no story asks for them; whoever builds venue management
+# later should add those the same way, sourced the same way.
+#
+# Both role-only, same shape as EVENT_LIST/EVENT_CREATE (see that
+# section's warning above `rule_event_list` in rules.py) -- a venue
+# record has no owner to check a relationship against, so "can this role
+# view venues at all" is the whole question. Unlike events there is no
+# per-row scoping the caller must additionally apply: the catalogue is
+# shared inventory, not scoped to who is asking, so VENUE_VIEW/VENUE_LIST
+# passing really does mean "show them the record", full stop.
+
+VENUE_VIEW = "venue.view"
+VENUE_LIST = "venue.list"
