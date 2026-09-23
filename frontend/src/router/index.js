@@ -3,19 +3,31 @@ import { useAuthStore } from '../stores/auth'
 import DashboardView from '../views/DashboardView.vue'
 import CreateEventView from '../views/events/CreateEventView.vue'
 import EventDetailsView from '../views/events/EventDetailsView.vue'
-import EventsListPlaceholder from '../views/events/EventsListPlaceholder.vue'
+import EventsListView from '../views/events/EventsListView.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
-import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
+import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
+import VenueDetailView from '../views/venues/VenueDetailView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   { path: '/', name: 'dashboard', component: DashboardView },
-  { path: '/events', name: 'events', component: EventsListPlaceholder },
+  { path: '/events', name: 'events', component: EventsListView },
   { path: '/events/:eventId', name: 'event-details', component: EventDetailsView },
   { path: '/create-event', name: 'create-event', component: CreateEventView, meta: { roles: ['event_organizer'] } },
   { path: '/events/reassign', name: 'reassign-coordinator', component: ReassignCoordinatorView },
-  { path: '/venues', name: 'venues', component: VenuesPlaceholder },
+  {
+    path: '/venues',
+    name: 'venues',
+    component: VenueCatalogueView,
+    meta: { roles: ['event_coordinator', 'venue_staff'] },
+  },
+  {
+    path: '/venues/:venueId',
+    name: 'venue-details',
+    component: VenueDetailView,
+    meta: { roles: ['event_coordinator', 'venue_staff'] },
+  },
 ]
 
 const router = createRouter({

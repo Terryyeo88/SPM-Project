@@ -136,3 +136,43 @@ begin
     );
   end if;
 end $$;
+
+-- ============================================================
+-- Venues (View Venue Catalogue, Nawaz, Sprint 1)
+-- ============================================================
+-- No auth.users/profiles involved -- venues aren't owned by anyone, so
+-- these are plain inserts, each guarded by name so re-running this file
+-- is still safe.
+
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+select 'Grand Ballroom', 'Main Building, Level 3', 300,
+  array['microphone', 'projector', 'screen', 'wifi'],
+  array['wheelchair_access', 'lift_access'],
+  array['theatre', 'banquet', 'networking']::public.room_layout[],
+  'available'
+where not exists (select 1 from public.venues where name = 'Grand Ballroom');
+
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+select 'Innovation Hub', 'Tech Wing, Level 1', 80,
+  array['projector', 'screen', 'wifi'],
+  array['wheelchair_access', 'removable_seats'],
+  array['classroom', 'seminar', 'boardroom']::public.room_layout[],
+  'available'
+where not exists (select 1 from public.venues where name = 'Innovation Hub');
+
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+select 'Executive Boardroom', 'Main Building, Level 5', 20,
+  array['screen', 'wifi'],
+  array['wheelchair_access'],
+  array['boardroom']::public.room_layout[],
+  'occupied'
+where not exists (select 1 from public.venues where name = 'Executive Boardroom');
+
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+select 'Riverside Pavilion', 'East Campus, Ground Floor', 150,
+  array['microphone', 'wifi'],
+  array['wheelchair_access', 'lift_access', 'extra_legroom_seats'],
+  array['banquet', 'networking', 'seminar']::public.room_layout[],
+  'maintenance'
+where not exists (select 1 from public.venues where name = 'Riverside Pavilion');
+

@@ -54,6 +54,8 @@ from app.authz.rules import (
     rule_event_request_clarification,
     rule_event_submit,
     rule_event_view,
+    rule_venue_list,
+    rule_venue_view,
 )
 from app.shared.errors import AuthorisationError, NotFoundError
 
@@ -71,6 +73,8 @@ _RULES: dict[str, RuleFunc] = {
     actions.EVENT_REQUEST_CLARIFICATION: rule_event_request_clarification,
     actions.EVENT_CANCEL: rule_event_cancel,
     actions.EVENT_REASSIGN_COORDINATOR: rule_event_reassign_coordinator,
+    actions.VENUE_VIEW: rule_venue_view,
+    actions.VENUE_LIST: rule_venue_list,
 }
 
 
