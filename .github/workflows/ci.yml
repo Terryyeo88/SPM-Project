@@ -5,6 +5,12 @@ on:
   pull_request:
 
 jobs:
+  # Kept as `test` (its original name) rather than renamed to
+  # `backend-test` -- a rename risks silently breaking a GitHub branch
+  # protection rule that requires a status check by this exact name, and
+  # that couldn't be confirmed one way or the other from here (no access
+  # to check branch protection settings). Adding the new job below,
+  # untouched otherwise, avoids that risk entirely.
   test:
     runs-on: ubuntu-latest
     defaults:
@@ -39,3 +45,47 @@ jobs:
       # know which tests those are.
       - name: Test with coverage
         run: pytest --cov=app --cov-report=term-missing
+
+  # New job -- ci.yml previously never ran anything under frontend/ at
+  # all, so the 95 Vitest tests added alongside the IS-27 frontend work
+  # (role-based nav/routing, idle/expired-session handling) had nothing
+  # checking them on push/PR until this job existed.
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # frontend/package.json's own "engines" field requires
+      # ^22.18.0 || >=24.12.0 -- Node 22 (the lower of those two
+      # ranges) is used here as an LTS release, matching how the
+      # backend job pins to the Python version actually developed
+      # against rather than "whatever's newest".
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Confirms the app actually bundles -- catches broken imports
+      # (e.g. an unresolved module) that unit tests alone wouldn't
+      # necessarily exercise. No .env is present in a fresh checkout
+      # here either; Vite's client env vars are simply undefined at
+      # build time (nothing throws until a page actually runs in a
+      # browser and tries to use them -- see supabaseClient.js), so
+      # this step doesn't need Supabase credentials to succeed.
+      - name: Build
+        run: npm run build
+
+      # `npm test` runs `vitest run` (see package.json) -- unit and
+      # integration-style tests that mock Supabase/fetch rather than
+      # needing a live backend or database, so no secrets are needed
+      # here either.
+      - name: Test
+        run: npm test
