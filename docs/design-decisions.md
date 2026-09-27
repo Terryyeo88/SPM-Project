@@ -223,3 +223,40 @@ in `docs/open-questions.md` pending ownership.
 The underlying cause, dashboard-first changes, is addressed by a process
 rule (README, "Apply migrations"), not by this migration. Without the rule,
 the same drift will come back.
+
+### Verified by `supabase db reset` (2026-09-27)
+
+The reconciliation was first checked only by a programmatic diff (replaying
+the migration files in a parser and comparing the result to PostgREST's
+OpenAPI view of live). That diff couldn't execute SQL, so the following
+were then verified against a real local Postgres 17 (`npx supabase db
+reset`, CLI 2.118.0):
+
+- **Every migration applies in order from empty with no errors.** This was
+  the first time the reconcile file's `do` block, `information_schema`
+  guards and `using` clauses had executed anywhere.
+- **The migration really does nothing on a second run.** Re-running it against the migrated
+  database emitted only "already exists, skipping" notices. The `events`
+  table was not rewritten (same `relfilenode`), row hashes were unchanged,
+  and a full `pg_dump --schema-only` of `public` was identical before and
+  after.
+- **Conversions behave as intended on real rows:**
+  - `accessibility_needs`: a JSON list becomes a jsonb array; a non-JSON
+    string becomes a jsonb string (nothing lost); empty or whitespace-only
+    text becomes SQL NULL.
+  - `registration_needs`: `true`/`false`/`yes`/` YES `/`0`/`off` convert
+    via Postgres's own cast; empty text and NULL become NULL.
+  - An unreadable `registration_needs` value (`maybe`) stops the migration
+    with an error. Because a migration file runs as one transaction,
+    nothing is left half-converted: both columns stay `text` and no rows
+    change.
+- **All 20 integration tests pass** against the reset database. They rely
+  only on `supabase/seed.sql`, not on anything specific to the shared
+  project.
+
+Not verified: parity of the non-PostgREST objects (the function, triggers,
+indexes, RLS policies and constraints) *against live*. The local side was
+catalogued, but live's catalog needs a direct Postgres connection
+(`DATABASE_URL`), which wasn't configured. Until that comparison is done,
+"reproducible" means the files build a working schema, not that the result
+matches live exactly in every object PostgREST can't see.

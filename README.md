@@ -67,10 +67,39 @@ add a new one. The same rule applies to exploratory changes: if a column
 turns out to be unnecessary, remove it with its own migration rather than
 deleting it in the dashboard.
 
-This rule is enforced only by discipline until the Supabase CLI is adopted
-(`supabase db reset` against a local instance would let CI prove that the
-files alone build a working schema). When in doubt, open the dashboard and
-check which tables/columns actually exist before assuming a migration ran.
+**Reproducible from empty: verified.** As of 2026-09-27 the migration set
+builds the full schema from an empty database with `npx supabase db reset`.
+All migrations apply in order with no errors, the reconcile migration is a
+verified no-op on a second run, and all 20 integration tests pass against
+the result. To run it yourself (needs Docker Desktop running; the CLI runs
+through `npx`, so there's nothing to install globally):
+
+```bash
+npx supabase start       # first run pulls images; a few minutes
+npx supabase db reset    # drop local DB, apply every migration in order, run seed.sql
+npx supabase status      # local API URL + keys (these are local demo keys, not the real project's)
+npx supabase stop        # when you're done
+```
+
+Before you open a PR that adds a migration, run `npx supabase db reset`
+and confirm it finishes cleanly. That's the whole check. To run the
+integration tests against local instead of the shared project, export the
+local values for that shell only. They take precedence over `.env`, which
+is never overridden:
+
+```bash
+eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/LOCAL_/')"
+SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY" \
+  pytest -m integration          # from backend/
+```
+
+The integration tests rely on `supabase/seed.sql` (`coordinator1@example.com`
+/ `Password123!` and the seeded venues), which `db reset` loads for you.
+
+The file-first rule itself is still **enforced only by discipline** until
+everyone works this way. Nothing stops a dashboard edit, and nothing yet
+runs `db reset` in CI. When in doubt, open the dashboard and check which
+tables/columns actually exist before assuming a migration ran.
 
 ### Seed data
 
