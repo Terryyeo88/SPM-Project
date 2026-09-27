@@ -209,6 +209,39 @@ describe('router: authentication and role-based route guarding', () => {
     })
   })
 
+  describe('/venues/:venueId (venue-details)', () => {
+    it('a coordinator reaches it and the id arrives as a route param', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      await router.push('/venues/v-1')
+      expect(router.currentRoute.value.name).toBe('venue-details')
+      expect(router.currentRoute.value.params.venueId).toBe('v-1')
+    })
+
+    it('venue_staff reaches it too (mirrors /venues)', async () => {
+      mockSession(true)
+      mockMe('venue_staff')
+      await router.push('/venues/v-1')
+      expect(router.currentRoute.value.name).toBe('venue-details')
+    })
+
+    it.each(['event_organizer', 'technical_support_staff', 'attendee'])(
+      '%s is redirected to /dashboard',
+      async (role) => {
+        mockSession(true)
+        mockMe(role)
+        await router.push('/venues/v-1')
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      },
+    )
+
+    it('an unauthenticated visitor is sent to /login', async () => {
+      mockSession(false)
+      await router.push('/venues/v-1')
+      expect(router.currentRoute.value.name).toBe('login')
+    })
+  })
+
   // The sharpest regression guard here: if the dynamic /events/:eventId
   // ever swallowed the static /events/reassign, an ORGANISER (allowed on
   // event-details, denied on reassign) would suddenly be let through to a

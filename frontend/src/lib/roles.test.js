@@ -157,6 +157,19 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(reachableRoutes([ROLES.EVENT_ORGANIZER])).toContain('event-details')
   })
 
+  it('venue-details is reachable by coordinator and venue_staff (mirrors venues), and denied to organiser/technical_support_staff/attendee', () => {
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('venue-details')
+    expect(reachableRoutes([ROLES.VENUE_STAFF])).toContain('venue-details')
+    for (const role of [ROLES.EVENT_ORGANIZER, ROLES.TECHNICAL_SUPPORT_STAFF, ROLES.ATTENDEE]) {
+      expect(reachableRoutes([role])).not.toContain('venue-details')
+    }
+  })
+
+  it('venue-details is hidden from the nav, same as event-details', () => {
+    expect(visibleLinks([ROLES.EVENT_COORDINATOR])).not.toContain('venue-details')
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('venue-details')
+  })
+
   it('venue_staff sees only Venues', () => {
     expect(visibleLinks([ROLES.VENUE_STAFF])).toEqual(['venues'])
   })

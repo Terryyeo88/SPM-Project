@@ -4,10 +4,11 @@ import { ROUTE_ACCESS, hasAnyRole } from '../lib/roles'
 import DashboardView from '../views/DashboardView.vue'
 import CreateEventView from '../views/events/CreateEventView.vue'
 import EventDetailsView from '../views/events/EventDetailsView.vue'
-import EventsListPlaceholder from '../views/events/EventsListPlaceholder.vue'
+import EventsListView from '../views/events/EventsListView.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
-import VenuesPlaceholder from '../views/venues/VenuesPlaceholder.vue'
+import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
+import VenueDetailView from '../views/venues/VenueDetailView.vue'
 
 // roles.js's ROUTE_ACCESS is the single source of truth for "which roles
 // can reach this named route" -- built into a lookup here and used
@@ -29,7 +30,7 @@ const routes = [
   {
     path: '/events',
     name: 'events',
-    component: EventsListPlaceholder,
+    component: EventsListView,
     meta: { roles: _rolesByRouteName.get('events') },
   },
   {
@@ -57,8 +58,16 @@ const routes = [
   {
     path: '/venues',
     name: 'venues',
-    component: VenuesPlaceholder,
+    component: VenueCatalogueView,
     meta: { roles: _rolesByRouteName.get('venues') },
+  },
+  // Same static-before-dynamic reasoning as /events/reassign above --
+  // /venues/:venueId must not come first.
+  {
+    path: '/venues/:venueId',
+    name: 'venue-details',
+    component: VenueDetailView,
+    meta: { roles: _rolesByRouteName.get('venue-details') },
   },
 ]
 

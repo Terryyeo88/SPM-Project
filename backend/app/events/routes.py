@@ -26,6 +26,7 @@ from app.authz.actions import (
     EVENT_CREATE,
     EVENT_DELETE,
     EVENT_EDIT,
+    EVENT_LIST,
     EVENT_REASSIGN_COORDINATOR,
     EVENT_SUBMIT,
     EVENT_VIEW,
@@ -37,6 +38,7 @@ from app.events.event_service import (
     create_event_request,
     delete_draft_request,
     edit_event_request,
+    list_event_requests,
     save_draft_request,
     submit_event_request,
 )
@@ -44,6 +46,15 @@ from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
 events_bp = Blueprint("events", __name__, url_prefix="/events")
+
+
+@events_bp.route("", methods=["GET"])
+@require(EVENT_LIST)
+def list_events():
+    status = request.args.get("status")
+    events = list_event_requests(current_user(), status)
+    return jsonify(events), 200
+
 
 @events_bp.route("", methods=["POST"])
 @require(EVENT_CREATE)

@@ -12,13 +12,14 @@
  * re-mapped or translated anywhere else.
  *
  * IS-27's "routed to a view appropriate to their role" criterion is
- * implemented as: everyone lands on the same Dashboard route, and the
- * dashboard's own content (which nav links it shows) adapts to the
- * caller's roles -- there is no separate per-role page/route. This was a
- * deliberate choice, not an assumption slipped in silently: Events and
- * Venues are still placeholders that belong to Aaralyn's and Nawaz's own
- * stories, so inventing new routes/pages here would mean guessing at
- * pages that are someone else's to design. Logged in
+ * implemented as: everyone lands on the same Dashboard route after
+ * login, and the dashboard's own content (which nav links it shows)
+ * adapts to the caller's roles -- there is no separate per-role landing
+ * page. This still holds now that Events, Create Event, Venue Catalogue
+ * etc. are real pages (Aaralyn's and Nawaz's stories): the dashboard is
+ * the landing page, not itself the role-specific view -- reaching any
+ * of these from there is ordinary in-app navigation, gated by
+ * ROUTE_ACCESS below like everything else. Logged in
  * docs/open-questions.md for customer/instructor confirmation, following
  * the same pattern Terry used for event.cancel's status range.
  *
@@ -104,6 +105,11 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           404 from GET /events/<id>. Not a nav link:
  *                           it's reached from the events list and after
  *                           creating an event.
+ *   venue-details        -- app/authz/rules.py::rule_venue_view mirrors
+ *                           rule_venue_list -- role-only, same
+ *                           coordinator/venue_staff pair as `venues`
+ *                           above. Not a nav link: reached from the
+ *                           venue catalogue list.
  *
  * Attendee and Technical Support Staff intentionally unlock nothing yet:
  * Attendee Registration and Equipment features aren't built this sprint
@@ -141,6 +147,12 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'event-details',
       label: 'Event details',
       roles: [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR],
+      inNav: false,
+    },
+    {
+      routeName: 'venue-details',
+      label: 'Venue details',
+      roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },
     // Object.freeze() on the outer array is shallow -- it stops entries

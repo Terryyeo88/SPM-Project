@@ -186,39 +186,24 @@ def test_submission_accepts_end_date_equal_to_start_date():
     validate_event_payload(payload, for_submission=True)
 
 
-def test_submission_rejects_event_spanning_more_than_24_hours():
-    """An event's total span, start to end, may not exceed 24 hours -- two
-    or more calendar days apart is always over that regardless of times,
-    so this is rejected outright before times even come into play."""
+def test_submission_accepts_event_spanning_multiple_days():
+    """Events are no longer capped at a 24-hour span -- a multi-day date
+    range is accepted."""
     payload = _complete_payload()
     payload["preferred_start_date"] = "2026-11-10"
     payload["preferred_end_date"] = "2026-11-12"
 
-    with pytest.raises(ValidationError, match="24 hours"):
-        validate_event_payload(payload, for_submission=True)
+    validate_event_payload(payload, for_submission=True)
 
 
-def test_submission_rejects_next_day_event_exceeding_24_hours_precisely():
-    """One calendar day apart is ambiguous from the dates alone, but with
-    times given the exact duration can still exceed 24 hours and must be
-    rejected."""
+def test_submission_accepts_next_day_event_exceeding_24_hours_precisely():
+    """A precise duration of more than 24 hours is accepted now that the
+    max-duration rule has been removed."""
     payload = _complete_payload()
     payload["preferred_start_date"] = "2026-11-10"
     payload["preferred_end_date"] = "2026-11-11"
     payload["preferred_start_time"] = "08:00"
     payload["preferred_end_time"] = "09:00"  # 25 hours later
-
-    with pytest.raises(ValidationError, match="24 hours"):
-        validate_event_payload(payload, for_submission=True)
-
-
-def test_submission_accepts_event_exactly_24_hours_long():
-    """Exactly 24 hours is the allowed boundary, not a violation."""
-    payload = _complete_payload()
-    payload["preferred_start_date"] = "2026-11-10"
-    payload["preferred_end_date"] = "2026-11-11"
-    payload["preferred_start_time"] = "08:00"
-    payload["preferred_end_time"] = "08:00"  # exactly 24 hours later
 
     validate_event_payload(payload, for_submission=True)
 

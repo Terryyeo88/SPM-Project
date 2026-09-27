@@ -316,3 +316,32 @@ def rule_event_reassign_coordinator(user: Any, event: Any) -> Decision:
     if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
         return Decision.DENY_NOT_FOUND
     return Decision.ALLOW
+
+
+# -- venue.view / venue.list (role-only -- see actions.py's venues section) -
+# Source: View Venue Catalogue story -- "As an Event Coordinator, I want
+# to see venue details so that I can find the appropriate venue for the
+# event request." No ownership relationship exists for a venue (it's
+# shared inventory, not a per-user resource), so both actions are
+# role-only, same shape as event.list/event.create above -- unlike
+# event.list, though, there is no additional per-row filter the caller
+# must apply afterwards, because every coordinator is entitled to see
+# every venue in the catalogue.
+#
+# venue_staff is included alongside event_coordinator: Venue Staff are
+# the ones who approve or reject bookings against these same records
+# (Venue Booking Approval story, later sprint), so they need to see venue
+# details too. This is our own inference, not a line from the story text
+# -- flagged in docs/open-questions.md for customer confirmation, same
+# as any other assumption this codebase has made ahead of a confirmed
+# answer.
+
+
+def rule_venue_list(user: Any, venue: Any = None) -> Decision:
+    if _has_role(user, "event_coordinator") or _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_venue_view(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_list(user, venue)

@@ -184,3 +184,55 @@ def test_delete_route_denies_event_that_isnt_the_callers(client, signing_key, mo
 def test_delete_route_rejects_unauthenticated(client):
     response = client.delete("/events/event-1")
     assert response.status_code == 401
+
+
+# -- GET /events (list) -------------------------------------------------
+
+
+def test_list_route_succeeds_for_organizer(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_organizer"])
+    sample = [FakeEvent(id="event-1", organizer_id="user-1").__dict__]
+    monkeypatch.setattr(routes_module, "list_event_requests", lambda user, status: sample)
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.get("/events", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.get_json() == sample
+
+
+def test_list_route_passes_status_query_param_through(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_organizer"])
+    seen = []
+
+    def fake_list(user, status):
+        seen.append(status)
+        return []
+
+    monkeypatch.setattr(routes_module, "list_event_requests", fake_list)
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.get("/events?status=submitted", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert seen == ["submitted"]
+
+
+def test_list_route_denies_role_with_no_listing_rights(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["attendee"])
+    monkeypatch.setattr(
+        routes_module,
+        "list_event_requests",
+        lambda user, status: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.get("/events", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "not_authorised"
+
+
+def test_list_route_rejects_unauthenticated(client):
+    response = client.get("/events")
+    assert response.status_code == 401
