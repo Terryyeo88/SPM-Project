@@ -40,8 +40,36 @@ SQL Editor (Project -> SQL Editor -> paste the file's contents -> Run), in
 filename order. Nothing enforces that every environment (your local dev
 project, a teammate's, staging) is actually at the same migration version —
 if you've just pulled new commits, check `supabase/migrations/` for new
-files and apply any you haven't run yet. **This is a known gap, raised at
-standup, not yet closed.** Until it is: when in doubt, open the dashboard and
+files and apply any you haven't run yet.
+
+**What went wrong in Sprint 1.** Because nothing enforced parity, schema
+changes were made directly in the dashboard, and the migration files were
+never written. By 2026-09-27 the live `events` table had six columns that no
+migration described: `equipment_needed`, `shared_event_id`,
+`registration_start_datetime` and `registration_end_datetime` didn't exist
+in the files at all, and `accessibility_needs`/`registration_needs` had
+different types (jsonb/boolean live, text in the files). A fresh environment
+built from the files couldn't create an event.
+`20260927000000_reconcile_events_with_live.sql` closes that gap. It is
+idempotent and a no-op against the live database. See
+`docs/design-decisions.md` ("Live schema was the source of truth when
+reconciling migrations") for why the files were changed to match live
+rather than the other way round.
+
+**The rule from now on: migration file first, then apply. Never
+dashboard-first.** Any schema change (new table, new column, type change,
+new enum value, new policy) is written as a new timestamped file in
+`supabase/migrations/` and committed. Only then is it applied to the
+database, by pasting that exact file into the SQL Editor. If you find
+yourself about to click "add column" in the Table Editor, write the
+migration instead. Never edit a migration that's already been applied;
+add a new one. The same rule applies to exploratory changes: if a column
+turns out to be unnecessary, remove it with its own migration rather than
+deleting it in the dashboard.
+
+This rule is enforced only by discipline until the Supabase CLI is adopted
+(`supabase db reset` against a local instance would let CI prove that the
+files alone build a working schema). When in doubt, open the dashboard and
 check which tables/columns actually exist before assuming a migration ran.
 
 ### Seed data

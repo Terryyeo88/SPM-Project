@@ -38,3 +38,15 @@ decisions worth double-checking.
   records (Venue Booking Approval story). This is our own inference, not
   a line from the story text — please confirm Venue Staff should have
   this access.
+
+- **Three orphan columns on `events`: who owns them?**
+  `shared_event_id` (uuid, no foreign key), `registration_start_datetime`
+  and `registration_end_datetime` (both timestamptz) exist in the live
+  database. They were added through the dashboard with no migration and are
+  now captured by `20260927000000_reconcile_events_with_live.sql` for
+  parity. No code, test or doc on any branch or in any commit references
+  them, and every live row has NULL in all three (checked 2026-09-27). The
+  names suggest registration-window work (Event Registration story) and
+  some kind of event grouping or recurrence, but that's a guess. Whoever
+  added them: please claim them, or agree to remove them in a new migration.
+  Until then, nobody should build on them.

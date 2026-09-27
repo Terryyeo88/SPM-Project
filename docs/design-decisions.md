@@ -183,3 +183,43 @@ tests in `test_auth_jwt.py` because they sign tokens with Python's own
 `time.time()` at verification time, so there's no skew to trigger — only
 `test_jwt_integration.py`, calling the real Supabase auth server, could ever
 have found it.
+
+## Live schema was the source of truth when reconciling migrations
+
+By Sprint 2 the live `events` table and the migration files disagreed on six
+columns (see `supabase/migrations/20260927000000_reconcile_events_with_live.sql`
+for the list). They had drifted because changes were applied in the
+dashboard first and the migration files were never written. There were two
+ways to close the gap: change the files to match the database, or roll the
+database back to match the files. We changed the files, for these reasons:
+
+- **The running code already depends on the live shape.**
+  `app/events/event_service.py` writes jsonb lists into
+  `accessibility_needs`, a real boolean into `registration_needs`, and a
+  jsonb object into `equipment_needed`. `CreateEventView`/`EventDetailsView`
+  read those shapes back. Rolling the database back to `text` columns with
+  no `equipment_needed` would break event creation on the live system to
+  satisfy files that nothing had ever run successfully against.
+- **Live rows hold data in those shapes.** A rollback would mean converting
+  or discarding real data (jsonb to text loses structure, and
+  `equipment_needed` would be dropped outright). Reconciling the files
+  destroys nothing.
+- **The files were the thing that was wrong.** A migration history exists
+  to reproduce the real database. When the two disagree and the database is
+  the one users and code are relying on, the history is what's out of date.
+
+The reconciliation migration is therefore written to be a no-op against
+live. It uses `add column if not exists`, and each type change is guarded by
+an `information_schema` check. Against an empty or stale database it
+converts old `text` values with explicit `using` clauses, and it fails
+loudly rather than silently nulling a `registration_needs` value it can't
+read as a boolean. It drops nothing. That includes the three orphan columns
+(`shared_event_id`, `registration_start_datetime`,
+`registration_end_datetime`). No code on any branch references them and
+every live row is NULL, but removing a column someone may be about to use is
+a decision for its owner, not a side effect of a parity fix. They're listed
+in `docs/open-questions.md` pending ownership.
+
+The underlying cause, dashboard-first changes, is addressed by a process
+rule (README, "Apply migrations"), not by this migration. Without the rule,
+the same drift will come back.
