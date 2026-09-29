@@ -1,11 +1,10 @@
 <script setup>
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { NAV_LINKS, hasAnyRole } from '../lib/roles'
+import AppNavBar from '../components/AppNavBar.vue'
 
 const auth = useAuthStore()
-const router = useRouter()
 
 // IS-27's "routed to a view appropriate to their role" criterion: this
 // is the one Dashboard route everyone lands on after login, and ITS
@@ -13,82 +12,122 @@ const router = useRouter()
 // why no separate per-role page was built. `hasAnyRole` is a union
 // check, so a user holding multiple roles (e.g. Coordinator AND Venue
 // Staff) sees the union of what either role unlocks, not just whatever
-// `roles[0]` happens to be.
+// `roles[0]` happens to be. The links themselves now live in AppNavBar
+// (which filters NAV_LINKS the same way); this copy drives the section
+// cards below and the "nothing built for your role" fallback.
 const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(auth.roles, link.roles)))
-
-async function handleSignOut() {
-  // try/finally: local state is already cleared by auth.signOut() even
-  // if its Supabase network call failed (see the store's own comment),
-  // so the user should still land on /login either way rather than
-  // being stranded on a dashboard that now thinks it's logged out.
-  try {
-    await auth.signOut()
-  } finally {
-    router.push({ name: 'login' })
-  }
-}
 </script>
 
 <template>
-  <div class="dashboard">
-    <header>
-      <h1>ConnectSphere</h1>
-      <button @click="handleSignOut">Sign out</button>
-    </header>
+  <div class="page">
+    <AppNavBar />
 
-    <section v-if="auth.profile">
-      <p>
-        Signed in as <strong>{{ auth.profile.name }}</strong> ({{ auth.profile.email }})
-      </p>
-      <p>Roles: {{ auth.profile.roles.join(', ') || 'none' }}</p>
-    </section>
-    <!-- Distinct from the "nothing built for your role" case below: this
-    is a genuine error (network/backend failure while loading /me), not
-    an access decision -- see stores/auth.js's profileLoadError. -->
-    <p v-else-if="auth.profileLoadError" class="load-error">
-      Couldn't load your profile: {{ auth.profileLoadError }} -- try refreshing.
-    </p>
+    <main class="content">
+      <div class="container">
+        <section v-if="auth.profile" class="welcome">
+          <span class="title">Welcome, {{ auth.profile.name }}</span>
+          <span class="subtitle">
+            {{ auth.profile.email }} · Roles: {{ auth.profile.roles.join(', ') || 'none' }}
+          </span>
+        </section>
+        <!-- Distinct from the "nothing built for your role" case below: this
+        is a genuine error (network/backend failure while loading /me), not
+        an access decision -- see stores/auth.js's profileLoadError. -->
+        <p v-else-if="auth.profileLoadError" class="load-error">
+          Couldn't load your profile: {{ auth.profileLoadError }} -- try refreshing.
+        </p>
 
-    <nav v-if="visibleLinks.length">
-      <router-link v-for="link in visibleLinks" :key="link.routeName" :to="{ name: link.routeName }">
-        {{ link.label }}
-      </router-link>
-    </nav>
-    <!-- v-else-if (not v-else) on auth.profile specifically: only claims
-    "nothing built for your role" once we actually KNOW the roles (a
-    genuinely empty match), never while profile is still null/failed --
-    that case is the message above instead. -->
-    <p v-else-if="auth.profile" class="no-sections">
-      Nothing's been built yet for your role(s) this sprint -- see docs/traceability.md's
-      "Explicitly deferred" section.
-    </p>
+        <div v-if="visibleLinks.length" class="sections">
+          <router-link
+            v-for="link in visibleLinks"
+            :key="link.routeName"
+            :to="{ name: link.routeName }"
+            class="section-card"
+          >
+            <span class="section-label">{{ link.label }}</span>
+            <span class="section-arrow">&rarr;</span>
+          </router-link>
+        </div>
+        <!-- v-else-if (not v-else) on auth.profile specifically: only claims
+        "nothing built for your role" once we actually KNOW the roles (a
+        genuinely empty match), never while profile is still null/failed --
+        that case is the message above instead. -->
+        <p v-else-if="auth.profile" class="no-sections">
+          Nothing's been built yet for your role(s) this sprint -- see docs/traceability.md's
+          "Explicitly deferred" section.
+        </p>
+      </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.dashboard {
-  max-width: 640px;
-  margin: 2rem auto;
-  padding: 0 1rem;
-}
-header {
+.page {
+  min-height: 100vh;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  background: #eeeeee;
+}
+.content {
+  flex: 1 1 auto;
+  padding: 32px 16px;
+  display: flex;
+  justify-content: center;
+}
+.container {
+  width: 100%;
+  max-width: 880px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f1f1f;
+}
+.subtitle {
+  font-size: 13px;
+  color: #8a8a8a;
+}
+.sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.section-card {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border: 1px dashed #9a9a9a;
+  border-radius: 6px;
+  padding: 20px 18px;
+  text-decoration: none;
+  color: #2a2a2a;
+  font-size: 14px;
+  font-weight: 600;
 }
-nav {
-  display: flex;
-  gap: 1rem;
-  margin-top: 1.5rem;
+.section-card:hover {
+  border-style: solid;
+  border-color: #444444;
+}
+.section-arrow {
+  color: #9a9a9a;
 }
 .no-sections {
-  margin-top: 1.5rem;
-  color: #666;
-  font-size: 0.9rem;
+  margin: 0;
+  color: #666666;
+  font-size: 13px;
 }
 .load-error {
-  margin-top: 1.5rem;
+  margin: 0;
   color: #c0392b;
-  font-size: 0.9rem;
+  font-size: 13px;
 }
 </style>

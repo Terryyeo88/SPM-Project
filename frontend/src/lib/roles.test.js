@@ -125,8 +125,8 @@ describe('ROUTE_ACCESS / NAV_LINKS structural sanity (hand-maintained tables -- 
 })
 
 describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirroring DashboardView.vue and router/index.js)', () => {
-  it('event_organizer sees Events and Create event, and nothing else', () => {
-    expect(visibleLinks([ROLES.EVENT_ORGANIZER]).sort()).toEqual(['create-event', 'events'].sort())
+  it('event_organizer sees only Events (Create event is a button on the events list, not a nav link)', () => {
+    expect(visibleLinks([ROLES.EVENT_ORGANIZER])).toEqual(['events'])
   })
 
   it('event_coordinator sees the sections built for them, but NOT Create event (organiser-only)', () => {
@@ -190,19 +190,19 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('a multi-role user with no overlapping single link still gets the full union (organizer + venue_staff)', () => {
     expect(visibleLinks([ROLES.EVENT_ORGANIZER, ROLES.VENUE_STAFF]).sort()).toEqual(
-      ['create-event', 'events', 'venues'].sort(),
+      ['events', 'venues'].sort(),
     )
   })
 
-  it('a user who is BOTH organiser and coordinator gets Create event AND Reassign Coordinator (union across the two roles)', () => {
+  it('a user who is BOTH organiser and coordinator gets the union of both roles', () => {
     expect(visibleLinks([ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR]).sort()).toEqual(
-      ['create-event', 'events', 'reassign-coordinator', 'venues'].sort(),
+      ['events', 'reassign-coordinator', 'venues'].sort(),
     )
   })
 
   it('holding every role at once yields the union of everything, each link exactly once', () => {
     const all = visibleLinks(Object.values(ROLES))
-    expect(all.sort()).toEqual(['create-event', 'events', 'reassign-coordinator', 'venues'].sort())
+    expect(all.sort()).toEqual(['events', 'reassign-coordinator', 'venues'].sort())
     expect(new Set(all).size).toBe(all.length)
   })
 

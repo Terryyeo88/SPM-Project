@@ -95,6 +95,9 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           Organizer, I can create an event request";
  *                           app/authz/rules.py::rule_event_create allows
  *                           event_organizer only.
+ *                           Not a nav link: reached from the
+ *                           "New Event Request" button on the events
+ *                           list instead.
  *   event-details       -- app/authz/rules.py::rule_event_view allows the
  *                           owning organiser and the ASSIGNED
  *                           coordinator. Only the role half of that is
@@ -129,7 +132,7 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'create-event',
       label: 'Create event',
       roles: [ROLES.EVENT_ORGANIZER],
-      inNav: true,
+      inNav: false,
     },
     {
       routeName: 'venues',
