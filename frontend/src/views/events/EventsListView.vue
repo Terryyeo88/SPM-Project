@@ -1,6 +1,9 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet } from '../../lib/api'
+import { useAuthStore } from '../../stores/auth'
+import { ROUTE_ACCESS, hasAnyRole } from '../../lib/roles'
+import AppNavBar from '../../components/AppNavBar.vue'
 
 const events = ref([])
 const loading = ref(true)
@@ -38,62 +41,304 @@ function formatDate(value) {
 
 watch(statusFilter, loadEvents)
 onMounted(loadEvents)
+
+// --- Display-only additions below: none of these change what is fetched. ---
+
+const auth = useAuthStore()
+
+// Only show "New Event Request" to roles the router would actually let
+// through to /create-event -- read from the same ROUTE_ACCESS table so
+// the button can't drift from the route guard.
+const createEventRoles = ROUTE_ACCESS.find((entry) => entry.routeName === 'create-event').roles
+const canCreateEvent = computed(() => hasAnyRole(auth.roles, createEventRoles))
+
+// Client-side search over the already-loaded list (by name).
+const search = ref('')
+const visibleEvents = computed(() => {
+  const term = search.value.trim().toLowerCase()
+  if (!term) return events.value
+  return events.value.filter((event) => (event.name || '').toLowerCase().includes(term))
+})
+
+function statusLabel(status) {
+  return status.replace(/_/g, ' ')
+}
+
+function dateRange(event) {
+  const start = formatDate(event.preferred_start_date)
+  const end = event.preferred_end_date
+  return end && end !== event.preferred_start_date ? `${start} – ${end}` : start
+}
 </script>
 
 <template>
-  <main class="events-list">
-    <p><router-link to="/">&larr; Back</router-link></p>
-    <header>
-      <h1>Event requests</h1>
-      <label class="filter">
-        Status
-        <select v-model="statusFilter">
-          <option value="">All</option>
-          <option v-for="status in STATUSES" :key="status" :value="status">{{ status }}</option>
-        </select>
-      </label>
-    </header>
+  <div class="page">
+    <AppNavBar />
 
-    <p v-if="loading">Loading event requests...</p>
-    <p v-else-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-else-if="events.length === 0" class="empty">
-      No event requests to show{{ statusFilter ? ` with status "${statusFilter}"` : '' }}.
-    </p>
-    <ul v-else class="event-cards">
-      <li v-for="event in events" :key="event.id">
-        <router-link :to="`/events/${event.id}`" class="event-card">
-          <div class="event-card-main">
-            <strong>{{ event.name }}</strong>
-            <span class="muted">{{ formatDate(event.preferred_start_date) }}</span>
-          </div>
-          <span class="status" :class="`status-${event.status}`">{{ event.status }}</span>
-        </router-link>
-      </li>
-    </ul>
-  </main>
+    <main class="content">
+      <div class="container">
+        <div class="page-header">
+          <h1 class="title">My Event Requests</h1>
+          <router-link v-if="canCreateEvent" :to="{ name: 'create-event' }" class="new-request">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            New Event Request
+          </router-link>
+        </div>
+
+        <div class="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="2" stroke-linecap="round" class="search-icon" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            v-model="search"
+            type="text"
+            class="search-input"
+            placeholder="Search your event requests..."
+            aria-label="Search event requests"
+          />
+        </div>
+
+        <div class="tabs" role="group" aria-label="Filter by status">
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: statusFilter === '' }"
+            @click="statusFilter = ''"
+          >
+            All<template v-if="statusFilter === '' && !loading && !error"> ({{ events.length }})</template>
+          </button>
+          <button
+            v-for="status in STATUSES"
+            :key="status"
+            type="button"
+            class="tab"
+            :class="{ active: statusFilter === status }"
+            @click="statusFilter = status"
+          >
+            {{ statusLabel(status) }}<template v-if="statusFilter === status && !loading && !error"> ({{ events.length }})</template>
+          </button>
+        </div>
+
+        <div class="list">
+          <p v-if="loading" class="message">Loading event requests...</p>
+          <p v-else-if="error" class="message error" role="alert">{{ error }}</p>
+          <p v-else-if="events.length === 0" class="message">
+            No event requests to show{{ statusFilter ? ` with status "${statusFilter}"` : '' }}.
+          </p>
+          <p v-else-if="visibleEvents.length === 0" class="message">
+            No event requests match "{{ search }}".
+          </p>
+          <template v-else>
+            <router-link
+              v-for="event in visibleEvents"
+              :key="event.id"
+              :to="`/events/${event.id}`"
+              class="row"
+            >
+              <div class="row-main">
+                <span class="row-name">{{ event.name }}</span>
+                <span class="row-meta">
+                  {{ dateRange(event) }}<template v-if="event.expected_attendance"> · {{ event.expected_attendance }} attendees</template>
+                </span>
+              </div>
+              <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
+            </router-link>
+          </template>
+        </div>
+      </div>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.events-list { max-width: 760px; margin: 2rem auto; padding: 0 1rem 3rem; }
-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.filter { display: flex; align-items: center; gap: .5rem; font-weight: 600; }
-.filter select { padding: .4rem .6rem; border: 1px solid #94a3b8; border-radius: 4px; font: inherit; }
-.event-cards { list-style: none; margin: 1.5rem 0 0; padding: 0; display: grid; gap: .75rem; }
-.event-card {
+.page {
+  min-height: 100vh;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  background: #eeeeee;
+}
+.content {
+  flex: 1 1 auto;
+  padding: 32px 16px;
+  display: flex;
+  justify-content: center;
+}
+.container {
+  width: 100%;
+  max-width: 880px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.page-header {
+  display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: .9rem 1.1rem;
-  border: 1px solid #cbd5e1;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f1f1f;
+}
+.new-request {
+  height: 42px;
+  border-radius: 4px;
+  background: #444444;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.search {
+  position: relative;
+}
+.search-icon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.search-input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid #b0b0b0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 16px 0 44px;
+  font-size: 14px;
+  color: #333333;
+  box-sizing: border-box;
+}
+.search-input:focus {
+  outline: none;
+  border-color: #555555;
+}
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tab {
+  border: 1px solid #b0b0b0;
+  background: #ffffff;
+  color: #555555;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.tab.active {
+  border-color: #444444;
+  background: #444444;
+  color: #ffffff;
+}
+.list {
+  background: #ffffff;
+  border: 1px dashed #9a9a9a;
   border-radius: 6px;
+  padding: 4px 18px;
+  box-sizing: border-box;
+}
+.message {
+  margin: 0;
+  padding: 16px 0;
+  font-size: 14px;
+  color: #8a8a8a;
+}
+.error {
+  color: #b42318;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px dashed #e2e2e2;
   text-decoration: none;
   color: inherit;
+  cursor: pointer;
 }
-.event-card:hover { border-color: #0f766e; }
-.event-card-main { display: flex; flex-direction: column; gap: .2rem; }
-.muted { color: #64748b; font-size: .9rem; }
-.status { padding: .3rem .6rem; background: #e2e8f0; border-radius: 4px; text-transform: capitalize; font-size: .85rem; white-space: nowrap; }
-.error { color: #b42318; }
-.empty { color: #64748b; margin-top: 1.5rem; }
+.row:last-child {
+  border-bottom: none;
+}
+.row:hover .row-name {
+  text-decoration: underline;
+}
+.row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.row-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a2a;
+}
+.row-meta {
+  font-size: 12px;
+  color: #8a8a8a;
+}
+.status {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6a6a6a;
+  background: #f0f0f0;
+  border-radius: 10px;
+  padding: 3px 10px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+/* One colour per status. */
+.status-draft {
+  color: #5f5f5f;
+  background: #efefef;
+}
+.status-submitted {
+  color: #6b3fa0;
+  background: #f1ebf8;
+}
+.status-under_review {
+  color: #8a6d00;
+  background: #fff4c2;
+}
+.status-approved {
+  color: #1f5a9e;
+  background: #e4eefb;
+}
+.status-planning {
+  color: #2f7a3f;
+  background: #e4f5e8;
+}
+.status-confirmed {
+  color: #0f6e6a;
+  background: #ddf3f1;
+}
+.status-completed {
+  color: #3f4a57;
+  background: #e3e7ec;
+}
+.status-cancelled {
+  color: #a3521b;
+  background: #fcebdd;
+}
+.status-rejected {
+  color: #b42318;
+  background: #fde8e6;
+}
 </style>
