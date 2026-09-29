@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ROLES, ROUTE_ACCESS, NAV_LINKS, hasAnyRole } from './roles'
+import { ROLES, ROUTE_ACCESS, NAV_LINKS, hasAnyRole, navRoles, roleLabel } from './roles'
 
 function visibleLinks(userRoles) {
   return NAV_LINKS.filter((link) => hasAnyRole(userRoles, link.roles)).map((link) => link.routeName)
@@ -208,5 +208,42 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('an empty roles array sees nothing', () => {
     expect(visibleLinks([])).toEqual([])
+  })
+})
+
+describe('navRoles (which roles contribute nav links / dashboard cards)', () => {
+  it('a coordinator-only user contributes no nav roles -- per the wireframe they work from their dashboard', () => {
+    expect(navRoles([ROLES.EVENT_COORDINATOR])).toEqual([])
+  })
+
+  it("a multi-role user keeps their other roles' links", () => {
+    expect(navRoles([ROLES.EVENT_COORDINATOR, ROLES.EVENT_ORGANIZER])).toEqual([ROLES.EVENT_ORGANIZER])
+  })
+
+  it('leaves non-coordinator roles unchanged and tolerates a missing profile', () => {
+    expect(navRoles([ROLES.VENUE_STAFF])).toEqual([ROLES.VENUE_STAFF])
+    expect(navRoles(undefined)).toEqual([])
+  })
+})
+
+describe('roleLabel', () => {
+  it('gives every role a readable label', () => {
+    expect(roleLabel(ROLES.EVENT_COORDINATOR)).toBe('Event Coordinator')
+    for (const role of Object.values(ROLES)) {
+      expect(roleLabel(role)).not.toBe(role)
+    }
+  })
+
+  it('falls back to the raw value for an unknown role', () => {
+    expect(roleLabel('something_new')).toBe('something_new')
+  })
+})
+
+describe('profile route', () => {
+  it('is reachable by every role, and is not a nav link (it is the header profile icon)', () => {
+    for (const role of Object.values(ROLES)) {
+      expect(reachableRoutes([role])).toContain('profile')
+    }
+    expect(NAV_LINKS.some((l) => l.routeName === 'profile')).toBe(false)
   })
 })

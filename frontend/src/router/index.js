@@ -7,6 +7,7 @@ import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListView from '../views/events/EventsListView.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
+import ProfileView from '../views/ProfileView.vue'
 import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
 import VenueDetailView from '../views/venues/VenueDetailView.vue'
 
@@ -27,6 +28,12 @@ const _rolesByRouteName = new Map(ROUTE_ACCESS.map((entry) => [entry.routeName, 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   { path: '/', name: 'dashboard', component: DashboardView },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: ProfileView,
+    meta: { roles: _rolesByRouteName.get('profile') },
+  },
   {
     path: '/events',
     name: 'events',

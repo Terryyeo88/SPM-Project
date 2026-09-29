@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiGet } from '../../lib/api'
+import AppNavBar from '../../components/AppNavBar.vue'
 
 const route = useRoute()
 const venue = ref(null)
@@ -29,6 +30,8 @@ onMounted(loadVenue)
 </script>
 
 <template>
+  <div class="app-page">
+    <AppNavBar />
   <main class="venue-details">
     <p><router-link to="/venues">&larr; Venues</router-link></p>
     <p v-if="loading">Loading venue...</p>
@@ -56,9 +59,11 @@ onMounted(loadVenue)
       </p>
     </template>
   </main>
+  </div>
 </template>
 
 <style scoped>
+.app-page { min-height: 100vh; background: #ffffff; }
 .venue-details { max-width: 760px; margin: 2rem auto; padding: 0 1rem 3rem; }
 header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
 .eyebrow { font-weight: 700; }

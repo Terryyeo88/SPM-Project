@@ -125,6 +125,14 @@ def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: st
     return result.data
 
 
+def list_coordinators() -> list[dict]:
+    """Every Event Coordinator (id, name, email), sorted by name -- the
+    choices for the Reassign dropdown. Availability is NOT filtered here:
+    reassign_coordinator() still rejects a busy coordinator with a clear
+    message, which is simpler than keeping two copies of that check."""
+    return sorted(_get_all_coordinators(), key=lambda c: (c.get("name") or "").lower())
+
+
 def _is_available(coordinator_id: str, event: dict) -> bool:
     """A coordinator is available if none of their other active events'
     date/time spans (see _event_span) overlap this event's span."""

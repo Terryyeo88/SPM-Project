@@ -1,8 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { NAV_LINKS, hasAnyRole } from '../lib/roles'
+import { NAV_LINKS, ROLES, hasAnyRole, navRoles } from '../lib/roles'
 import AppNavBar from '../components/AppNavBar.vue'
+import CoordinatorDashboard from './dashboard/CoordinatorDashboard.vue'
 
 const auth = useAuthStore()
 
@@ -12,10 +13,13 @@ const auth = useAuthStore()
 // why no separate per-role page was built. `hasAnyRole` is a union
 // check, so a user holding multiple roles (e.g. Coordinator AND Venue
 // Staff) sees the union of what either role unlocks, not just whatever
-// `roles[0]` happens to be. The links themselves now live in AppNavBar
+// `roles[0]` happens to be. The links themselves live in AppNavBar
 // (which filters NAV_LINKS the same way); this copy drives the section
-// cards below and the "nothing built for your role" fallback.
-const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(auth.roles, link.roles)))
+// cards below and the "nothing built for your role" fallback. navRoles()
+// leaves out the coordinator role -- per the coordinator wireframe a
+// coordinator gets the "My Assigned Events" dashboard instead of links.
+const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(navRoles(auth.roles), link.roles)))
+const isCoordinator = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR]))
 </script>
 
 <template>
@@ -26,9 +30,6 @@ const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(auth.r
       <div class="container">
         <section v-if="auth.profile" class="welcome">
           <span class="title">Welcome, {{ auth.profile.name }}</span>
-          <span class="subtitle">
-            {{ auth.profile.email }} · Roles: {{ auth.profile.roles.join(', ') || 'none' }}
-          </span>
         </section>
         <!-- Distinct from the "nothing built for your role" case below: this
         is a genuine error (network/backend failure while loading /me), not
@@ -52,10 +53,12 @@ const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(auth.r
         "nothing built for your role" once we actually KNOW the roles (a
         genuinely empty match), never while profile is still null/failed --
         that case is the message above instead. -->
-        <p v-else-if="auth.profile" class="no-sections">
+        <p v-else-if="auth.profile && !isCoordinator" class="no-sections">
           Nothing's been built yet for your role(s) this sprint -- see docs/traceability.md's
           "Explicitly deferred" section.
         </p>
+
+        <CoordinatorDashboard v-if="isCoordinator" />
       </div>
     </main>
   </div>

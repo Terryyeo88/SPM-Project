@@ -1,29 +1,24 @@
 <script setup>
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { NAV_LINKS, hasAnyRole } from '../lib/roles'
+import { NAV_LINKS, hasAnyRole, navRoles, roleLabel } from '../lib/roles'
 
 const auth = useAuthStore()
-const router = useRouter()
 
 // Same role-filtered NAV_LINKS the dashboard has always used -- see
 // roles.js's ROUTE_ACCESS for why the nav and the router guard both read
 // from that one table. `hasAnyRole` is a union check, so a multi-role
 // user sees every link any of their roles unlocks.
-const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(auth.roles, link.roles)))
+// navRoles() leaves out the coordinator role: per the coordinator
+// wireframe a coordinator has no nav links (they work from their
+// dashboard), so a coordinator-only user sees just the logo + account.
+const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(navRoles(auth.roles), link.roles)))
 
-async function handleSignOut() {
-  // try/finally: local state is already cleared by auth.signOut() even
-  // if its Supabase network call failed (see the store's own comment),
-  // so the user should still land on /login either way rather than
-  // being stranded on a page that now thinks it's logged out.
-  try {
-    await auth.signOut()
-  } finally {
-    router.push({ name: 'login' })
-  }
-}
+// Role badge text, e.g. "Event Coordinator" (joined for multi-role users).
+const roleText = computed(() => auth.roles.map(roleLabel).join(' · '))
+
+// Sign out now lives on the profile page (per the wireframe, the header
+// just shows the role and a profile icon).
 </script>
 
 <template>
@@ -34,7 +29,7 @@ async function handleSignOut() {
         <span class="brand-name">ConnectSphere</span>
       </router-link>
 
-      <nav class="links">
+      <nav v-if="visibleLinks.length" class="links">
         <router-link :to="{ name: 'dashboard' }" class="link" exact-active-class="active">Dashboard</router-link>
         <router-link
           v-for="link in visibleLinks"
@@ -48,8 +43,19 @@ async function handleSignOut() {
       </nav>
 
       <div class="account">
-        <span v-if="auth.profile" class="user-name">{{ auth.profile.name }}</span>
-        <button type="button" class="sign-out" @click="handleSignOut">Sign out</button>
+        <span v-if="roleText" class="role-badge">{{ roleText }}</span>
+        <router-link
+          :to="{ name: 'profile' }"
+          class="avatar"
+          :aria-label="auth.profile ? `Your profile (${auth.profile.name})` : 'Your profile'"
+          :title="auth.profile?.name"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 20c0-4 3.5-7 8-7s8 3 8 7" />
+          </svg>
+        </router-link>
       </div>
     </div>
   </header>
@@ -122,23 +128,37 @@ async function handleSignOut() {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-left: auto;
 }
-.user-name {
-  font-size: 13px;
-  color: #666666;
-}
-.sign-out {
-  height: 34px;
-  border: 1px solid #b0b0b0;
-  border-radius: 4px;
-  background: #fafafa;
-  color: #333333;
-  font-size: 13px;
+.role-badge {
+  font-size: 11px;
   font-weight: 600;
-  padding: 0 14px;
-  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6a6a6a;
+  border: 1px solid #d8d8d8;
+  border-radius: 12px;
+  padding: 4px 10px;
+  background: #f7f7f7;
 }
-.sign-out:hover {
-  background: #f0f0f0;
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #9a9a9a;
+  background: #f5f5f5;
+  color: #6a6a6a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar:hover,
+.avatar.router-link-active {
+  border-color: #2568e8;
+  color: #2568e8;
+}
+.avatar:focus-visible {
+  outline: 2px solid #2568e8;
+  outline-offset: 2px;
 }
 </style>

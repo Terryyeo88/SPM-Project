@@ -39,6 +39,32 @@ export const ROLES = Object.freeze({
   ATTENDEE: 'attendee',
 })
 
+/** Display names for the header badge and the profile page. */
+export const ROLE_LABELS = Object.freeze({
+  [ROLES.EVENT_ORGANIZER]: 'Event Organiser',
+  [ROLES.EVENT_COORDINATOR]: 'Event Coordinator',
+  [ROLES.VENUE_STAFF]: 'Venue Staff',
+  [ROLES.TECHNICAL_SUPPORT_STAFF]: 'Technical Support Staff',
+  [ROLES.ATTENDEE]: 'Attendee',
+})
+
+/** "event_coordinator" -> "Event Coordinator"; unknown roles are shown as-is. */
+export function roleLabel(role) {
+  return ROLE_LABELS[role] ?? role
+}
+
+/**
+ * The roles whose links appear in the nav bar and as dashboard cards.
+ * The Event Coordinator wireframe has no nav links -- a coordinator works
+ * entirely from their "My Assigned Events" dashboard -- so that role
+ * contributes none. A user who ALSO holds another role still gets that
+ * role's links. (The routes themselves stay reachable: this only affects
+ * which links are shown, not ROUTE_ACCESS gating.)
+ */
+export function navRoles(userRoles) {
+  return (userRoles ?? []).filter((role) => role !== ROLES.EVENT_COORDINATOR)
+}
+
 /**
  * true if `userRoles` (the array GET /me returns) contains AT LEAST ONE
  * of `allowedRoles`. Multi-role union check -- never assume a single
@@ -156,6 +182,14 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'venue-details',
       label: 'Venue details',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    // Every signed-in user can see their own profile -- reached from the
+    // profile icon in the nav bar, not a nav link.
+    {
+      routeName: 'profile',
+      label: 'My profile',
+      roles: Object.values(ROLES),
       inNav: false,
     },
     // Object.freeze() on the outer array is shallow -- it stops entries

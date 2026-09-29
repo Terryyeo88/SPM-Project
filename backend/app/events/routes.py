@@ -23,22 +23,31 @@ from flask import Blueprint, jsonify, request
 
 from app.auth.context import current_user
 from app.authz.actions import (
+    COORDINATOR_LIST,
+    EVENT_APPROVE,
     EVENT_CREATE,
     EVENT_DELETE,
     EVENT_EDIT,
     EVENT_LIST,
     EVENT_REASSIGN_COORDINATOR,
+    EVENT_REJECT,
     EVENT_SUBMIT,
     EVENT_VIEW,
 )
 from app.authz.decorators import require
-from app.events.coordinator_service import NoCoordinatorAvailableError, reassign_coordinator
+from app.events.coordinator_service import (
+    NoCoordinatorAvailableError,
+    list_coordinators,
+    reassign_coordinator,
+)
 from app.events.event_service import (
+    approve_event_request,
     create_draft_request,
     create_event_request,
     delete_draft_request,
     edit_event_request,
     list_event_requests,
+    reject_event_request,
     save_draft_request,
     submit_event_request,
 )
@@ -54,6 +63,13 @@ def list_events():
     status = request.args.get("status")
     events = list_event_requests(current_user(), status)
     return jsonify(events), 200
+
+
+# Static path, so Flask matches it ahead of GET /events/<event_id> below.
+@events_bp.route("/coordinators", methods=["GET"])
+@require(COORDINATOR_LIST)
+def list_coordinators_route():
+    return jsonify(list_coordinators()), 200
 
 
 @events_bp.route("", methods=["POST"])
@@ -104,6 +120,21 @@ def save_draft(event, event_id):
 def submit_event(event, event_id):
     submitted_event = submit_event_request(event_id, event)
     return jsonify(submitted_event), 200
+
+@events_bp.route("/<event_id>/approve", methods=["POST"])
+@require(EVENT_APPROVE, loader=lambda event_id: load_event(event_id))
+def approve_event(event, event_id):
+    approved = approve_event_request(event_id, event, current_user().id)
+    return jsonify(approved), 200
+
+
+@events_bp.route("/<event_id>/reject", methods=["POST"])
+@require(EVENT_REJECT, loader=lambda event_id: load_event(event_id))
+def reject_event(event, event_id):
+    body = request.get_json(silent=True) or {}
+    rejected = reject_event_request(event_id, event, current_user().id, body.get("reason"))
+    return jsonify(rejected), 200
+
 
 # The `load_event` function is a loader for the `@require` decorator.
 # It fetches the event from the database and exposes it as an EventLike object (SimpleNamespace)

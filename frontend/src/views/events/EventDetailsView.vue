@@ -3,6 +3,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiDelete, apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
+import { tabForStatus } from '../../lib/coordinatorDashboard'
+import CoordinatorEventReview from './CoordinatorEventReview.vue'
+import AppNavBar from '../../components/AppNavBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +51,23 @@ function localDateString(value) {
   const offset = value.getTimezoneOffset()
   return new Date(value.getTime() - offset * 60 * 1000).toISOString().slice(0, 10)
 }
+
+// The assigned coordinator came here from their dashboard, so Back returns
+// to the dashboard tab matching this event's status; everyone else goes
+// back to the events list as before.
+// The assigned coordinator gets the review layout (wireframe "Event Review
+// -- Coordinator") instead of the organiser's form / read-only view.
+const isAssignedCoordinator = computed(() => Boolean(
+  event.value && event.value.coordinator_id && event.value.coordinator_id === auth.profile?.id,
+))
+
+const backLink = computed(() => {
+  const tab = tabForStatus(event.value?.status)
+  if (tab && event.value.coordinator_id === auth.profile?.id) {
+    return { to: { name: 'dashboard', query: { tab } }, label: 'My Assigned Events' }
+  }
+  return { to: '/events', label: 'Events' }
+})
 
 const minimumDate = localDateString(new Date(Date.now() + 24 * 60 * 60 * 1000))
 
@@ -287,10 +307,13 @@ onMounted(loadEvent)
 </script>
 
 <template>
+  <div class="app-page">
+    <AppNavBar />
   <main class="event-details">
-    <p><router-link to="/events">&larr; Events</router-link></p>
+    <p><router-link :to="backLink.to">&larr; {{ backLink.label }}</router-link></p>
     <p v-if="loading">Loading event...</p>
     <p v-else-if="error" class="error" role="alert">{{ error }}</p>
+    <CoordinatorEventReview v-else-if="event && isAssignedCoordinator" :event="event" @updated="event = $event" />
     <template v-else-if="event">
       <header>
         <div>
@@ -366,9 +389,11 @@ onMounted(loadEvent)
       </section>
     </template>
   </main>
+  </div>
 </template>
 
 <style scoped>
+.app-page { min-height: 100vh; background: #ffffff; }
 .event-details { max-width: 760px; margin: 2rem auto; padding: 0 1rem 3rem; }
 header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
 .eyebrow, .label { font-weight: 700; }
