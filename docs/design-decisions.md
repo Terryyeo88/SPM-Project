@@ -335,9 +335,11 @@ system-initiated transition in future (a scheduled job marking past events
 completed, say) would have no honest actor. Forcing a value would mean
 inventing a "system" user or recording a lie. The convention instead is:
 **NULL means "no human actor", and nothing in the current design produces
-one.** Every transition we build records a real person. When auto-assignment's
-`submitted → under_review` moves onto `transition()` (the raw-write
-migration, a separate change), it is attributed to the organiser whose
-submit request triggered it, because that request caused it. So in practice there
+one.** Every transition we build records a real person. Auto-assignment's
+`submitted → under_review` (and a resubmission's return to review) is
+attributed to the organiser whose submit request triggered it, because that
+request caused it. `assign_initial_coordinator(event_id, actor=None)` keeps
+`actor` optional only for backward compatibility: the submit path always
+passes it, so a NULL row means a caller outside that path. So in practice there
 are no NULL rows. If one ever appears, it is either a deliberate
 system transition or a bug. The schema is left exactly as Justin wrote it.
