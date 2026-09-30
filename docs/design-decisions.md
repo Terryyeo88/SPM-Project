@@ -260,3 +260,84 @@ catalogued, but live's catalog needs a direct Postgres connection
 (`DATABASE_URL`), which wasn't configured. Until that comparison is done,
 "reproducible" means the files build a working schema, not that the result
 matches live exactly in every object PostgREST can't see.
+
+## Status transitions: one guarded path, edges as data
+
+Every change to `events.status` goes through
+`app/events/transitions.py::transition()`. Four decisions shape it.
+
+**The edge set is data, not branching.** `ALLOWED` is a frozenset of
+`(from, to)` pairs, each paired in `_EDGE_SOURCES` with the story sentence
+it comes from. An illegal transition is a *missing entry*, not a *missing
+`if`*. "What can a planning event become?" is answered by reading one
+table, a new lifecycle step is a one-line, reviewable diff, and a test can
+assert the whole set in one comparison
+(`test_edge_set_is_exactly_the_sourced_edges`). With branching logic, the
+same question means reading every code path that writes a status. Before
+this change there were four such paths, and only one of them checked
+anything.
+
+**The expected status is in the WHERE clause, not checked by a read and
+then a write.** The update is `UPDATE events SET status = :to WHERE id = :id
+AND status = :from`, and the row count is checked afterwards. Postgres
+evaluates that WHERE against the row's current committed value while
+holding the row lock. Two requests racing from the same status therefore
+cannot both match: exactly one updates a row and the other updates zero,
+which becomes a 409 `status_conflict`. A read-then-write cannot give this
+guarantee. The read and the write are separate moments, so a change
+between them is silently overwritten, and the value the old code wrote
+back could even revert someone else's change (the old `under_review`
+write did exactly that). Proven against real Postgres: 10 simultaneous
+`approved → planning` attempts give 1 winner and 9 conflicts. With the
+status filter removed, the same race gives 10 "winners" and 10 history
+rows for one real change. We never retry a conflict automatically. A retry
+would re-apply a decision the user made about a state that no longer
+exists.
+
+**Authorisation and the state machine are separate.** `@require` answers
+"may *this user* do this to *this event*" (relationship and role, giving a
+403 or 404). `transition()` answers "is this *edge* legal at all, and is the
+event still where we think it is" (giving a 409 or 400). Each is a pure
+function of different inputs: rules of `(user, event)`, edges of `(from,
+to, reason)`. So each is tested without building the other's fixtures.
+Merged, every state-machine test would need users and every authz test
+would need edges. The status precondition therefore appears twice: in the
+rule, which decides the 403, and in `ALLOWED`, which decides legality. This
+is deliberate, and the route passes `expected_from=event.status` so the
+write is conditional on exactly the state authz approved.
+
+**Reasons live in `event_status_log`, not on `events`.** IS-39's
+cancellation reason and the Approved/Rejected story's rejection reason are
+the same thing: metadata about a *transition*, not a property of the
+event. An event can be rejected, fixed and resubmitted, then rejected
+again. A `rejection_reason` or `cancellation_reason` column would keep
+only the last one and lose the record the Week 4 clarification asks us to
+keep. The same table also serves the Activity History and Change History
+core features (who changed what, when, and why). **Do not add
+`cancellation_reason`, `rejection_reason` or similar columns to
+`events`.** Write a transition with a reason, and read it back from
+`event_status_log` (`GET /events/<id>/status-history`). The table is
+Justin's `20260929000000_event_status_log.sql`. We reused it rather than
+creating a second history table.
+
+**Known non-atomic pair.** The status update and the history insert are two
+PostgREST requests, not one transaction. If the insert fails after the
+update succeeds, the event has moved with no audit row, the caller sees a
+500, and a retry gets a 409. We accept this for now. The fix, if it's ever
+needed, is a single Postgres function (RPC) that does both statements in
+one transaction. We are not building an outbox or anything two-phase.
+
+## `event_status_log.changed_by` stays nullable (a trade-off we chose not to take)
+
+We considered making `changed_by` NOT NULL, so that an unattributed audit
+row would be impossible, and decided against it. A genuinely
+system-initiated transition in future (a scheduled job marking past events
+completed, say) would have no honest actor. Forcing a value would mean
+inventing a "system" user or recording a lie. The convention instead is:
+**NULL means "no human actor", and nothing in the current design produces
+one.** Every transition we build records a real person. When auto-assignment's
+`submitted → under_review` moves onto `transition()` (the raw-write
+migration, a separate change), it is attributed to the organiser whose
+submit request triggered it, because that request caused it. So in practice there
+are no NULL rows. If one ever appears, it is either a deliberate
+system transition or a bug. The schema is left exactly as Justin wrote it.
