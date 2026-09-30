@@ -43,6 +43,7 @@ from typing import Any
 from app.authz import actions
 from app.authz.rules import (
     Decision,
+    rule_coordinator_list,
     rule_event_approve,
     rule_event_cancel,
     rule_event_create,
@@ -75,6 +76,7 @@ _RULES: dict[str, RuleFunc] = {
     actions.EVENT_REASSIGN_COORDINATOR: rule_event_reassign_coordinator,
     actions.VENUE_VIEW: rule_venue_view,
     actions.VENUE_LIST: rule_venue_list,
+    actions.COORDINATOR_LIST: rule_coordinator_list,
 }
 
 

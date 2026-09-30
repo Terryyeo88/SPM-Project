@@ -345,3 +345,14 @@ def rule_venue_list(user: Any, venue: Any = None) -> Decision:
 
 def rule_venue_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
+
+
+# -- coordinator.list (role-only -- see actions.py's coordinators section) -
+# Only an Event Coordinator can reassign (rule_event_reassign_coordinator),
+# so only they need to see who they could reassign to.
+
+
+def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "event_coordinator"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN

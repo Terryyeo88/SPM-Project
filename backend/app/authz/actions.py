@@ -35,6 +35,15 @@ EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
 
+# -- coordinators --------------------------------------------------------
+# Source: "Coordinator needs reassignment" -- the current coordinator
+# picks who to hand the event to, so they need the list of other Event
+# Coordinators to choose from (the Reassign dropdown on the coordinator's
+# event review page). Role-only: it lists names/emails of staff, not
+# anything tied to a particular event.
+
+COORDINATOR_LIST = "coordinator.list"
+
 # -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
 # Source: "As an Event Coordinator, I want to see venue details so that
 # I can find the appropriate venue for the event request." The catalogue

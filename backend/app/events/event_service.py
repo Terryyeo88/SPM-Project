@@ -329,6 +329,62 @@ def submit_event_request(event_id: str, event: SimpleNamespace):
     return result.data
 
 
+def _record_status_change(
+    event_id: str, from_status: str, to_status: str, changed_by: str, reason: str | None = None
+) -> None:
+    """Audit trail for a status change -- see
+    supabase/migrations/20260929000000_event_status_log.sql for why."""
+    supabase.table("event_status_log").insert(
+        {
+            "event_id": event_id,
+            "from_status": from_status,
+            "to_status": to_status,
+            "changed_by": changed_by,
+            "reason": reason,
+        }
+    ).execute()
+
+
+def _decide(event_id: str, event: SimpleNamespace, to_status: str, decided_by: str, reason: str | None):
+    """Moves an under_review event to `to_status`.
+
+    The authz rule (rule_event_approve / rule_event_reject) has already
+    checked the caller is the assigned coordinator and the event is
+    under_review. The update is ALSO conditioned on status still being
+    under_review, so two decisions racing each other (e.g. a double click,
+    or approve and reject from two tabs) can't both land -- the second
+    matches no row and gets a clear error instead of silently winning.
+    """
+    result = (
+        supabase.table("events")
+        .update({"status": to_status})
+        .eq("id", event_id)
+        .eq("status", "under_review")
+        .select("*")
+        .execute()
+    )
+    if not result.data:
+        raise ValidationError("This event request is no longer under review -- refresh to see its current status.")
+    _record_status_change(event_id, event.status, to_status, decided_by, reason)
+    return _first_row(result)
+
+
+def approve_event_request(event_id: str, event: SimpleNamespace, approved_by: str):
+    """Event Review and Approval: coordinator approves -> "approved"
+    (Week 4: "Approval = sufficient info for planning")."""
+    return _decide(event_id, event, "approved", approved_by, None)
+
+
+def reject_event_request(event_id: str, event: SimpleNamespace, rejected_by: str, reason):
+    """Event Review and Approval: coordinator rejects -> "rejected".
+    A reason is required (Week 4: "Free text reason is reasonable";
+    rejected requests keep a record of the decision) so the organiser
+    knows what to fix before resubmitting."""
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to reject an event request.")
+    return _decide(event_id, event, "rejected", rejected_by, reason.strip())
+
+
 def list_event_requests(user, status: str | None = None) -> list[dict]:
     """Every event request the caller is entitled to see, scoped per
     role -- see rule_event_list's *** warning *** in app.authz.rules'

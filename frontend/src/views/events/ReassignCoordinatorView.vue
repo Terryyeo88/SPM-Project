@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { apiPost } from '../../lib/api'
+import AppNavBar from '../../components/AppNavBar.vue'
 
 const eventId = ref('')
 const newCoordinatorId = ref('')
@@ -27,6 +28,8 @@ async function handleSubmit() {
 </script>
 
 <template>
+  <div class="app-page">
+    <AppNavBar />
   <div class="reassign">
     <p><router-link to="/">&larr; Back</router-link></p>
     <h2>Reassign Coordinator</h2>
@@ -54,9 +57,11 @@ async function handleSubmit() {
     <p v-if="error" class="error">{{ error }}</p>
     <pre v-if="result">{{ JSON.stringify(result, null, 2) }}</pre>
   </div>
+  </div>
 </template>
 
 <style scoped>
+.app-page { min-height: 100vh; background: #ffffff; }
 .reassign {
   max-width: 480px;
   margin: 2rem auto;

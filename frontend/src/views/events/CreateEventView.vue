@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { apiGet, apiPost } from '../../lib/api'
+import AppNavBar from '../../components/AppNavBar.vue'
 
 const draftStorageKey = 'connectsphere-event-draft-id'
 
@@ -290,6 +291,8 @@ async function saveDraft() {
 </script>
 
 <template>
+  <div class="app-page">
+    <AppNavBar />
   <main class="events-page">
     <p><router-link to="/">&larr; Back</router-link></p>
     <h1>Create an event request</h1>
@@ -358,9 +361,11 @@ async function saveDraft() {
       </div>
     </form>
   </main>
+  </div>
 </template>
 
 <style scoped>
+.app-page { min-height: 100vh; background: #ffffff; }
 .events-page { max-width: 760px; margin: 2rem auto; padding: 0 1rem 3rem; }
 .intro { color: #52606d; }
 form { display: grid; gap: 1rem; }
