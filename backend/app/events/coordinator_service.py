@@ -41,6 +41,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Optional
 
+from app.events.transitions import transition
 from app.extensions import supabase
 
 # Statuses that count as "this coordinator is actively on the hook for
@@ -176,15 +177,22 @@ def _get_coordinator_profile(coordinator_id: str) -> dict:
     return result.data[0]["profiles"]
 
 
-def assign_initial_coordinator(event_id: str) -> dict:
+def assign_initial_coordinator(event_id: str, actor: Optional[str] = None) -> dict:
     """
     Auto-assign an Event Coordinator to the given event.
 
     Returns the assigned coordinator's profile dict (id, name, email).
 
+    `actor` is who the resulting submitted -> under_review status change is
+    attributed to in event_status_log -- the submit path passes the
+    organiser, whose submit request caused it. Optional only so existing
+    callers keep working; left as None it records a NULL changed_by, which
+    per docs/design-decisions.md means "no human actor".
+
     Raises:
         ValueError                  - event not found, or already has a coordinator
         NoCoordinatorAvailableError - no coordinators exist, or all are occupied
+        TransitionConflictError     - the event left `submitted` concurrently
     """
     event = _get_event(event_id)
 
@@ -207,14 +215,30 @@ def assign_initial_coordinator(event_id: str) -> dict:
     # Fair, workload-based pick: fewest active events first, stable tiebreak by id.
     chosen = min(available, key=lambda c: (_workload(c["id"]), c["id"]))
 
-    supabase.table("events").update(
-        {
-            "coordinator_id": chosen["id"],
-            # Assignment is what moves a submitted request into review,
-            # per Event Status Management (Aaralyn) / Week4 clarification.
-            "status": "under_review" if event["status"] == "submitted" else event["status"],
-        }
-    ).eq("id", event_id).execute()
+    # Claim the event for the chosen coordinator only if it is STILL
+    # unassigned, so two concurrent assignments can't both land. The status
+    # is no longer written here. The old code wrote back the status it had
+    # read above, which silently reverted any change made in between.
+    claimed = (
+        supabase.table("events")
+        .update({"coordinator_id": chosen["id"]})
+        .eq("id", event_id)
+        .is_("coordinator_id", "null")
+        .execute()
+    )
+    if not claimed.data:
+        raise ValueError(
+            f"Event {event_id} already has a coordinator assigned "
+            "(use the reassignment flow instead)."
+        )
+
+    # Assignment is what moves a submitted request into review, per Event
+    # Status Management (Aaralyn) / Week4 clarification -- now through the
+    # single guarded path, conditional on the event still being submitted.
+    # Not atomic with the claim above: if this raises, the event keeps its
+    # coordinator but stays `submitted`.
+    if event["status"] == "submitted":
+        transition(event_id, "under_review", actor, expected_from="submitted")
 
     supabase.table("coordinator_assignment_log").insert(
         {
