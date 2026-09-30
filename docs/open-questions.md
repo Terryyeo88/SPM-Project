@@ -81,6 +81,18 @@ decisions worth double-checking.
   added them: please claim them, or agree to remove them in a new migration.
   Until then, nobody should build on them.
 
+- **Test-suite network gap: JWKS is still fetched over the wire.** The
+  unit-test guard (`tests/conftest.py`) blocks the *database* but not the
+  *network*. A unit test that sends a real bearer token without the
+  `signing_key` fixture makes `app.auth.jwt` fetch the signing keys from
+  `SUPABASE_URL/auth/v1/.well-known/jwks.json` for real. It's read-only
+  against a public endpoint, so the risk is low. But it makes the suite
+  slower and flaky offline or behind a firewall, and the failure looks like
+  a network or auth error rather than "this test forgot its fixture". The
+  fix would be the same shape as the database guard: an autouse fixture
+  that makes `app.auth.jwt._http_get_json` raise a named error unless a
+  test installs a key. Not done yet.
+
 - **IS-39: "Organizer is notified of cancellation and reason" — blocked on
   notifications.** The cancel route stores the reason and returns it, and
   the organiser can read it via `GET /events/<id>/status-history`, but

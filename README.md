@@ -82,19 +82,8 @@ npx supabase stop        # when you're done
 ```
 
 Before you open a PR that adds a migration, run `npx supabase db reset`
-and confirm it finishes cleanly. That's the whole check. To run the
-integration tests against local instead of the shared project, export the
-local values for that shell only. They take precedence over `.env`, which
-is never overridden:
-
-```bash
-eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/LOCAL_/')"
-SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY" \
-  pytest -m integration          # from backend/
-```
-
-The integration tests rely on `supabase/seed.sql` (`coordinator1@example.com`
-/ `Password123!` and the seeded venues), which `db reset` loads for you.
+and confirm it finishes cleanly. That's the whole check. The same local
+stack is what integration tests run against. See "Running tests" below.
 
 The file-first rule itself is still **enforced only by discipline** until
 everyone works this way. Nothing stops a dashboard edit, and nothing yet
@@ -134,15 +123,36 @@ Every other route requires a valid Supabase-issued bearer token
 cd backend
 pytest                                    # everything that can run
 pytest -m "not integration"               # unit tests only -- no DB, no network, no .env needed
-pytest -m integration                     # integration tests only -- needs .env with real credentials
+pytest -m integration                     # integration tests only -- against a LOCAL Supabase (below)
 pytest --cov=app --cov-report=term-missing   # with coverage
 ```
 
-Integration tests (marked `@pytest.mark.integration`) talk to the real
-Supabase project and **skip themselves automatically** if `SUPABASE_URL` /
-`SUPABASE_SERVICE_ROLE_KEY` aren't set — this is what lets CI run without any
-secrets configured at all. They also expect the seed data above to exist
-(some skip individually if specific seeded rows aren't found).
+**Unit tests cannot reach any database.** If one tries, it fails with
+`UnitTestDatabaseAccessError` naming the test. Fake the call it missed.
+
+**Integration tests** (marked `@pytest.mark.integration`) create and delete
+real rows, so **they only run against a local Supabase**:
+
+```bash
+npx supabase start && npx supabase db reset       # from the repo root
+eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/LOCAL_/')"
+SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY"   pytest -m integration                           # from backend/
+```
+
+Otherwise they skip themselves, with a message saying why:
+- **No credentials** (CI): skipped.
+- **`SUPABASE_URL` is not local**, e.g. your `.env` pointing at the shared
+  project: **skipped**. A bare `pytest` on a machine with `.env` therefore
+  does not write to the database the team demos from. "Local" means
+  `localhost` or a loopback IP (what `npx supabase status` reports).
+- **Deliberately running against the shared project** needs an explicit,
+  exact opt-in:
+  `INTEGRATION_TESTS_WRITE_TO_REMOTE_SUPABASE=yes-write-test-data-to-the-shared-project`.
+  Don't set this casually.
+
+pytest's header line says which case you're in (e.g.
+`integration tests: RUN against 127.0.0.1 [local]`). Integration tests
+rely on `supabase/seed.sql`, which `db reset` loads.
 
 ## Secrets
 
