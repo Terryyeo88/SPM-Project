@@ -12,6 +12,11 @@ Anything that genuinely needs a live database is marked
 `@pytest.mark.integration` (registered in pytest.ini) and is skipped
 automatically unless SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are both
 set in the environment -- never true in CI (Phase 6).
+
+"Unit tests never touch a database" is ENFORCED, not just intended: see
+_forbid_database_in_unit_tests below. Every test not marked integration
+runs with the shared Supabase client rigged to raise
+UnitTestDatabaseAccessError the moment anything touches it.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import app.auth.jwt as jwt_module  # noqa: E402
 from app import create_app  # noqa: E402
 from app.config import Config  # noqa: E402
+from app.extensions import _LazySupabaseClient  # noqa: E402
 
 
 class _TestConfig(Config):
@@ -43,6 +49,48 @@ class _TestConfig(Config):
     SUPABASE_SERVICE_ROLE_KEY = None
     SUPABASE_JWT_SECRET = None
     TESTING = True
+
+
+class UnitTestDatabaseAccessError(BaseException):
+    """A unit test reached for the real Supabase client.
+
+    Deliberately a BaseException, not an Exception. App code has broad
+    `except Exception` handlers (e.g. /health/db turns any failure into a
+    503, and create_app's error handler turns any Exception into a 500
+    JSON response). An Exception raised here could be caught there, and a
+    test asserting on that 500 or 503 would pass without ever noticing it
+    had tried to reach the database. A BaseException passes through
+    `except Exception` and Flask's handlers alike, and fails the test with
+    this message.
+    """
+
+
+@pytest.fixture(autouse=True)
+def _forbid_database_in_unit_tests(request, monkeypatch):
+    """Autouse: applies to EVERY test, and there's nothing to opt into or forget.
+
+    Integration tests are exempt, since reaching a real database is their
+    whole point. Every other test gets the shared client's one entry point,
+    _LazySupabaseClient._get_client, replaced with one that raises. The
+    patch is on the CLASS because every app module holds a reference to
+    the same `supabase` instance, taken at import time. Rebinding
+    app.extensions.supabase would reach none of them, and blanking
+    SUPABASE_URL wouldn't help once the client is cached. A test that
+    swaps a module's `supabase` for its own fake is unaffected. Only a call
+    that reaches the REAL client, i.e. an incomplete fake, trips this.
+    """
+    if request.node.get_closest_marker("integration"):
+        return
+
+    def _refuse(self):
+        raise UnitTestDatabaseAccessError(
+            f"This unit test tried to reach the database: {request.node.nodeid}. "
+            "Unit tests must not touch Supabase -- some code path it exercises uses the real "
+            "`supabase` client that the test's fakes/monkeypatches don't cover. Fake that call "
+            "(or mark the test @pytest.mark.integration if it genuinely needs a database)."
+        )
+
+    monkeypatch.setattr(_LazySupabaseClient, "_get_client", _refuse)
 
 
 @pytest.fixture

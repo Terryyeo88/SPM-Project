@@ -260,3 +260,54 @@ catalogued, but live's catalog needs a direct Postgres connection
 (`DATABASE_URL`), which wasn't configured. Until that comparison is done,
 "reproducible" means the files build a working schema, not that the result
 matches live exactly in every object PostgREST can't see.
+
+## Unit tests are structurally unable to reach a database
+
+**What happened.** During the IS-36/38/39 work, Justin's approve/reject
+logic moved onto `app.events.transitions`. His `test_event_decisions.py`
+fixture replaced `event_service`'s Supabase client with a fake, but the
+writes now went through `transitions`' client, which the fixture didn't
+cover. The root `.env` is loaded whenever the app is imported, so those
+"unit" tests sent real requests to the **shared live project**. They were
+rejected only because the test's event id, `"event-1"`, isn't a valid UUID.
+Nothing was written (verified read-only afterwards), but that was luck.
+The same thing happens to any unit test whose fakes miss a single database
+call. It was found while retargeting that fixture.
+
+**Why unit tests must be unable to reach any database.** A unit test that
+can quietly reach a real database is dangerous whichever way it goes.
+- It can write to shared data that teammates are demoing from.
+- It can pass for the wrong reason. Proven: a unit test calling `/health/db`
+  with no fakes got a real 200 from the live project and passed.
+- It can fail confusingly on a machine without credentials, or behind a
+  firewall, with a network error that doesn't say what's wrong.
+
+"Unit tests don't touch the database" was already the stated intent (the
+conftest docstring said so). Nothing enforced it.
+
+**What the guard does.** `tests/conftest.py::_forbid_database_in_unit_tests`
+is an autouse fixture, so it applies to every test and nobody can forget to
+opt in. For any test *not* marked `integration`, it replaces
+`app.extensions._LazySupabaseClient._get_client` (the single path every use
+of the shared `supabase` client goes through) with one that raises
+`UnitTestDatabaseAccessError: This unit test tried to reach the database:
+<test id> ...`.
+- **Why patch the class, not blank `SUPABASE_URL` or rebind the module
+  variable.** Every app module holds a reference to the same client
+  instance, taken at import time, so rebinding `app.extensions.supabase`
+  would reach none of them. Blanking the URL doesn't help once the client
+  is cached, which it is after any integration test in the same run. The
+  `signing_key` fixture also sets a fake URL on purpose, so a missed fake
+  would produce a vague DNS error rather than a clear message. The
+  class-level patch works whether or not the client is cached: this was
+  verified in a combined run where integration tests had already built it.
+- **Why a `BaseException` and not an `Exception`.** App code has broad
+  `except Exception` handlers (`/health/db` returns 503, and `create_app`
+  turns any Exception into a 500). A normal exception could be swallowed
+  there, and the test would pass anyway. A `BaseException` passes through
+  both and fails the test by name.
+- Tests that substitute their own fake for a module's `supabase` are
+  unaffected. Only a call that reaches the real client trips the guard.
+- Integration tests are exempt, and they still run against whatever
+  `SUPABASE_URL` is set. Pointing them at a local `npx supabase db reset`
+  rather than the shared project is covered in the README.
