@@ -6,7 +6,7 @@ from datetime import date, datetime, time
 from types import SimpleNamespace
 
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
-from app.events.transitions import record_creation
+from app.events.transitions import record_creation, transition
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
@@ -311,24 +311,31 @@ def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
 
 def submit_event_request(event_id: str, event: SimpleNamespace):
     validate_event_payload(_from_database_event(event), for_submission=True)
-    result = (
-        supabase.table("events")
-        .update({"status": "submitted"})
-        .eq("id", event_id)
-        .select("*")
-        .execute()
-    )
-    submitted_event = _first_row(result)
+    # draft -> submitted, or rejected -> submitted (resubmission), through the
+    # single guarded path. The actor is the organiser: @require's
+    # rule_event_submit only lets the event's own organiser get here.
+    submitted_event = transition(event_id, "submitted", event.organizer_id, expected_from=event.status)
 
     # Per Customer Briefing Step 3 / Event Status Management: submission
     # should trigger coordinator auto-assignment, moving the event to
     # "under_review". If nobody's available, it stays "submitted" and
     # unassigned -- an intentionally open case per coordinator_service's
     # own docstring, not an error here.
-    try:
-        assign_initial_coordinator(event_id)
-    except NoCoordinatorAvailableError:
-        return submitted_event
+    #
+    # Both paths attribute submitted -> under_review to the ORGANISER, not
+    # the coordinator. That is deliberate, not a bug: the organiser's submit
+    # request is what caused it (docs/design-decisions.md, changed_by).
+    if event.coordinator_id:
+        # Resubmission of a rejected request: it keeps the coordinator who
+        # reviewed it and goes straight back into their review.
+        # assign_initial_coordinator correctly refuses an already-assigned
+        # event, so it isn't called here.
+        transition(event_id, "under_review", event.organizer_id, expected_from="submitted")
+    else:
+        try:
+            assign_initial_coordinator(event_id, actor=event.organizer_id)
+        except NoCoordinatorAvailableError:
+            return submitted_event
 
     result = supabase.table("events").select("*").eq("id", event_id).single().execute()
     return result.data

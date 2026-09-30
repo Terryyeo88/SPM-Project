@@ -155,14 +155,19 @@ def rule_event_create(user: Any, event: Any = None) -> Decision:
 
 # -- event.submit -------------------------------------------------------
 # Source: Event Status Management story -- "submitting a completed
-# request changes status to Submitted", organiser-only, and only from
-# draft (status precondition taken directly from that quote).
+# request changes status to Submitted", organiser-only, from draft.
+# Sprint 2: also from `rejected` -- "a rejected request can be
+# re-submitted for review after the Organizer makes changes" (ruling:
+# rejected -> submitted, via the same /submit). This closes the dead end
+# where rule_event_edit let an organiser edit a rejected request that
+# nothing then let them submit. "After changes" is NOT verified (see
+# docs/open-questions.md).
 
 
 def rule_event_submit(user: Any, event: Any) -> Decision:
     if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
         return Decision.DENY_NOT_FOUND
-    if not _event_status_in(event, "draft"):
+    if not _event_status_in(event, "draft", "rejected"):
         return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
 
