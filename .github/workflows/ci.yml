@@ -40,7 +40,7 @@ jobs:
       # genuinely unset here, the same condition verified locally by
       # temporarily removing .env. This is NOT simulated by unsetting
       # env vars in this workflow; it's the real, unavoidable state of a
-      # checkout that never had the file. The 9 integration tests skip
+      # checkout that never had the file. The integration tests skip
       # themselves (see backend/tests/conftest.py); nothing here needs to
       # know which tests those are.
       - name: Test with coverage
