@@ -281,3 +281,52 @@ def test_record_creation_writes_a_null_from_status_row(store):
     s = store("draft")
     transitions.record_creation("event-1", "org-1")
     assert s.history == [(None, "draft", "org-1", None)]
+
+
+# -- user-facing messages never leak raw enum values ---------------------------
+
+
+def _messages_for_every_failure(store):
+    """Trigger every error transition() can raise, from every status."""
+    messages = []
+    for from_status in ALL_STATUSES:
+        for to_status in ALL_STATUSES:
+            s = store(from_status)
+            try:  # illegal edge, or legal edge with a missing reason
+                transition("event-1", to_status, "a", reason=None, expected_from=from_status)
+            except (IllegalTransitionError, ValidationError) as exc:
+                messages.append(exc.message)
+            if (from_status, to_status) in ALLOWED:
+                s.status = "cancelled" if from_status != "cancelled" else "draft"
+                try:  # conflict
+                    transition("event-1", to_status, "a", reason="r", expected_from=from_status)
+                except TransitionConflictError as exc:
+                    messages.append(exc.message)
+    store("draft")
+    try:
+        transition("event-1", "cancelled", "a", reason=5, expected_from="approved")
+    except ValidationError as exc:
+        messages.append(exc.message)
+    return messages
+
+
+def test_no_transition_error_message_contains_a_raw_status_value(store):
+    messages = _messages_for_every_failure(store)
+    assert len(messages) > 80  # sanity: we really did exercise them
+    for message in messages:
+        assert "under_review" not in message, message
+        assert "_" not in message, message
+
+
+def test_conflict_message_reads_as_plain_english(store):
+    store("approved")
+    with pytest.raises(TransitionConflictError) as exc_info:
+        transition("event-1", "approved", "c", expected_from="under_review")
+    assert exc_info.value.message.startswith("This event is no longer under review")
+
+
+def test_reject_reason_message_matches_the_previous_wording(store):
+    store("under_review")
+    with pytest.raises(ValidationError) as exc_info:
+        transition("event-1", "rejected", "c", expected_from="under_review")
+    assert exc_info.value.message == "A reason is required to reject an event request."

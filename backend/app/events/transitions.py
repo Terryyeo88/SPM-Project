@@ -90,6 +90,28 @@ ALLOWED: frozenset[tuple[str, str]] = frozenset(_EDGE_SOURCES)
 # enforced once here rather than at each call site.
 REASON_REQUIRED: frozenset[str] = frozenset({"rejected", "cancelled"})
 
+# User-facing wording. Error messages reach the frontend verbatim (api.js
+# shows error.message), so they never contain a raw enum value.
+_LABELS: dict[str, str] = {
+    "draft": "a draft",
+    "submitted": "submitted",
+    "under_review": "under review",
+    "approved": "approved",
+    "planning": "in planning",
+    "confirmed": "confirmed",
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "rejected": "rejected",
+}
+_REASON_MESSAGES: dict[str, str] = {
+    "rejected": "A reason is required to reject an event request.",
+    "cancelled": "A reason is required to cancel an event.",
+}
+
+
+def label(status: str | None) -> str:
+    return _LABELS.get(status, str(status).replace("_", " "))
+
 
 class TransitionConflictError(AppError):
     """The event was not in the status this transition expected when the
@@ -118,7 +140,7 @@ def _clean_reason(to_status: str, reason: Any) -> str | None:
         raise ValidationError("reason must be a string.")
     cleaned = reason.strip() if isinstance(reason, str) else None
     if to_status in REASON_REQUIRED and not cleaned:
-        raise ValidationError(f"A reason is required to move an event to {to_status}.")
+        raise ValidationError(_REASON_MESSAGES[to_status])
     return cleaned or None
 
 
@@ -153,12 +175,13 @@ def transition(
 
     from_status = expected_from if expected_from is not None else _db_current_status(event_id)
     if not is_allowed(from_status, to_status):
-        raise IllegalTransitionError(f"An event cannot move from {from_status} to {to_status}.")
+        raise IllegalTransitionError(f"An event that is {label(from_status)} cannot become {label(to_status)}.")
 
     updated = _db_conditional_update(event_id, from_status, to_status)
     if updated is None:
         raise TransitionConflictError(
-            f"This event is no longer {from_status} -- someone else changed it. Refresh to see its current status."
+            f"This event is no longer {label(from_status)} -- someone else changed it. "
+            "Refresh to see its current status."
         )
 
     # Not atomic with the update above -- see the module docstring.
