@@ -6,6 +6,7 @@ from datetime import date, datetime, time
 from types import SimpleNamespace
 
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
+from app.events.transitions import record_creation
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
@@ -266,7 +267,9 @@ def create_event_request(organizer_id: str, payload: dict):
     database_payload["organizer_id"] = organizer_id
     database_payload["status"] = "draft"
     result = supabase.table("events").insert(database_payload).select("*").execute()
-    return _first_row(result)
+    created = _first_row(result)
+    record_creation(created["id"], organizer_id)  # history row: NULL -> draft
+    return created
 
 
 def create_draft_request(organizer_id: str, payload: dict):
@@ -274,7 +277,9 @@ def create_draft_request(organizer_id: str, payload: dict):
     database_payload["organizer_id"] = organizer_id
     database_payload["status"] = "draft"
     result = supabase.table("events").insert(database_payload).select("*").execute()
-    return _first_row(result)
+    created = _first_row(result)
+    record_creation(created["id"], organizer_id)  # history row: NULL -> draft
+    return created
 
 
 def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
