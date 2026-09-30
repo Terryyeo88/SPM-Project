@@ -261,7 +261,7 @@ catalogued, but live's catalog needs a direct Postgres connection
 "reproducible" means the files build a working schema, not that the result
 matches live exactly in every object PostgREST can't see.
 
-## Unit tests are structurally unable to reach a database
+## Tests cannot reach a database they shouldn't: unit tests none, integration tests only a local one
 
 **What happened.** During the IS-36/38/39 work, Justin's approve/reject
 logic moved onto `app.events.transitions`. His `test_event_decisions.py`
@@ -308,6 +308,39 @@ of the shared `supabase` client goes through) with one that raises
   both and fails the test by name.
 - Tests that substitute their own fake for a module's `supabase` are
   unaffected. Only a call that reaches the real client trips the guard.
-- Integration tests are exempt, and they still run against whatever
-  `SUPABASE_URL` is set. Pointing them at a local `npx supabase db reset`
-  rather than the shared project is covered in the README.
+- Integration tests are exempt from this guard. The second half below
+  governs them.
+
+**Second half: integration tests refuse a non-local database by default.**
+The unit-test guard left one path open. The integration-test skip only
+fired when credentials were *absent*, and the root `.env` supplies them. So
+a teammate typing a bare `pytest` ran all the integration tests (creating
+and deleting users, events and audit rows) against the shared project the
+team demos from. Now `tests/conftest.py` decides, at collection time,
+whether integration tests may run:
+- **No credentials** (CI): skipped, with a message on how to run them locally.
+- **`SUPABASE_URL` is local:** they run, with no opt-in needed.
+- **Anything else:** **skipped, not failed.** Someone running the whole
+  suite hasn't done anything wrong. The message names the host and says
+  exactly how to run against local instead.
+- **Deliberate exception:**
+  `INTEGRATION_TESTS_WRITE_TO_REMOTE_SUPABASE=yes-write-test-data-to-the-shared-project`
+  (exact value, so `=1` or `=true` is refused and the message says so).
+  It's long and explicit, so it can't be set by accident and it reads
+  plainly in a shell history.
+
+**How "local" is detected: the URL's host.** A URL counts as local only if
+the host is `localhost` or a loopback IP literal (127.0.0.0/8, `::1`), which
+is what `npx supabase status` reports. We match the host because that is
+exactly where requests, and therefore writes, will go. The one alternative
+the CLI offers is its well-known local demo keys (JWT issuer
+`supabase-demo`), and it's less reliable. A key says who signed it, not
+where requests are sent, so a local key paired with a live URL still writes
+to live. The CLI's newer `sb_secret_…` keys aren't JWTs at all. Hostnames
+are not DNS-resolved, and anything we can't parse counts as non-local, so
+lookalikes such as `127.0.0.1.nip.io` or `localhost.example.com` fail
+safe. pytest's header line states the decision on every run.
+
+Together, the two halves make the rule: **unit tests cannot reach any
+database, and integration tests cannot reach a non-local one without
+someone saying so out loud.**

@@ -8,10 +8,13 @@ throwaway EC keypair plus a `make_token()` factory, and points
 app.auth.jwt's JWKS cache at that keypair instead of the real network --
 no test here ever talks to Supabase's actual JWKS endpoint.
 
-Anything that genuinely needs a live database is marked
-`@pytest.mark.integration` (registered in pytest.ini) and is skipped
-automatically unless SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are both
-set in the environment -- never true in CI (Phase 6).
+Anything that genuinely needs a real database is marked
+`@pytest.mark.integration` (registered in pytest.ini). Integration tests
+run ONLY against a local Supabase (see pytest_collection_modifyitems at
+the bottom): they're skipped when SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+are absent (CI), and ALSO skipped when SUPABASE_URL points anywhere
+non-local -- which is what the repo-root .env does on a teammate's machine
+-- unless the explicit opt-in below is set.
 
 "Unit tests never touch a database" is ENFORCED, not just intended: see
 _forbid_database_in_unit_tests below. Every test not marked integration
@@ -22,10 +25,12 @@ UnitTestDatabaseAccessError the moment anything touches it.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import jwt as pyjwt
 import pytest
@@ -176,10 +181,78 @@ def signing_key(monkeypatch):
     return key
 
 
+# -- where integration tests may run -----------------------------------------
+# Integration tests create and delete real rows (users, events, audit log).
+# Against the shared project, that's the database the team demos from, so
+# they refuse any non-local SUPABASE_URL unless this is set to EXACTLY the
+# value below. Deliberately long and specific: it can't be set by accident,
+# and anyone reading a shell history can see what was agreed to.
+REMOTE_OPT_IN_VAR = "INTEGRATION_TESTS_WRITE_TO_REMOTE_SUPABASE"
+REMOTE_OPT_IN_VALUE = "yes-write-test-data-to-the-shared-project"
+
+_HOW_TO_RUN_LOCALLY = (
+    "start a local stack (npx supabase start && npx supabase db reset) and export its "
+    "API_URL/SERVICE_ROLE_KEY as SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY -- see README 'Running tests'"
+)
+
+
+def _supabase_host(url: str) -> str | None:
+    try:
+        return urlsplit(url).hostname
+    except ValueError:  # e.g. an unfilled .env.example placeholder
+        return None
+
+
+def is_local_supabase(url: str) -> bool:
+    """True only for `localhost` or a loopback IP literal (127.0.0.0/8, ::1) --
+    what `npx supabase status` reports (http://127.0.0.1:<port>). Matched on
+    the URL's HOST because that is exactly where requests (and so writes)
+    go. Anything else, including a hostname we can't parse, counts as
+    non-local: fail safe."""
+    host = _supabase_host(url)
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def integration_skip_reason(environ) -> str | None:
+    """None if integration tests may run in this environment, else why not."""
+    url, key = environ.get("SUPABASE_URL"), environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not (url and key):
+        return f"no SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY set. To run integration tests, {_HOW_TO_RUN_LOCALLY}."
+    if is_local_supabase(url):
+        return None
+    opt_in = environ.get(REMOTE_OPT_IN_VAR)
+    if opt_in == REMOTE_OPT_IN_VALUE:
+        return None
+    host = _supabase_host(url) or "an unparseable URL"
+    ignored = f" ({REMOTE_OPT_IN_VAR} is set, but not to the exact required value.)" if opt_in else ""
+    return (
+        f"SUPABASE_URL points at {host}, which is not a local Supabase. Integration tests write real "
+        f"data, so they refuse a non-local database by default.{ignored} To run them, {_HOW_TO_RUN_LOCALLY}. "
+        f"To run against {host} deliberately: {REMOTE_OPT_IN_VAR}={REMOTE_OPT_IN_VALUE}"
+    )
+
+
+def pytest_report_header(config):
+    reason = integration_skip_reason(os.environ)
+    host = _supabase_host(os.environ.get("SUPABASE_URL") or "") or "none"
+    if reason is None:
+        where = "local" if is_local_supabase(os.environ.get("SUPABASE_URL") or "") else "REMOTE (opted in)"
+        return f"integration tests: RUN against {host} [{where}]"
+    return f"integration tests: SKIPPED (target: {host})"
+
+
 def pytest_collection_modifyitems(config, items):
-    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+    reason = integration_skip_reason(os.environ)
+    if reason is None:
         return
-    skip_integration = pytest.mark.skip(reason="requires SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY")
+    skip_integration = pytest.mark.skip(reason=reason)
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip_integration)
