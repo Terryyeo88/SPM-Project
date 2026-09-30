@@ -260,3 +260,87 @@ catalogued, but live's catalog needs a direct Postgres connection
 (`DATABASE_URL`), which wasn't configured. Until that comparison is done,
 "reproducible" means the files build a working schema, not that the result
 matches live exactly in every object PostgREST can't see.
+
+## Tests cannot reach a database they shouldn't: unit tests none, integration tests only a local one
+
+**What happened.** During the IS-36/38/39 work, Justin's approve/reject
+logic moved onto `app.events.transitions`. His `test_event_decisions.py`
+fixture replaced `event_service`'s Supabase client with a fake, but the
+writes now went through `transitions`' client, which the fixture didn't
+cover. The root `.env` is loaded whenever the app is imported, so those
+"unit" tests sent real requests to the **shared live project**. They were
+rejected only because the test's event id, `"event-1"`, isn't a valid UUID.
+Nothing was written (verified read-only afterwards), but that was luck.
+The same thing happens to any unit test whose fakes miss a single database
+call. It was found while retargeting that fixture.
+
+**Why unit tests must be unable to reach any database.** A unit test that
+can quietly reach a real database is dangerous whichever way it goes.
+- It can write to shared data that teammates are demoing from.
+- It can pass for the wrong reason. Proven: a unit test calling `/health/db`
+  with no fakes got a real 200 from the live project and passed.
+- It can fail confusingly on a machine without credentials, or behind a
+  firewall, with a network error that doesn't say what's wrong.
+
+"Unit tests don't touch the database" was already the stated intent (the
+conftest docstring said so). Nothing enforced it.
+
+**What the guard does.** `tests/conftest.py::_forbid_database_in_unit_tests`
+is an autouse fixture, so it applies to every test and nobody can forget to
+opt in. For any test *not* marked `integration`, it replaces
+`app.extensions._LazySupabaseClient._get_client` (the single path every use
+of the shared `supabase` client goes through) with one that raises
+`UnitTestDatabaseAccessError: This unit test tried to reach the database:
+<test id> ...`.
+- **Why patch the class, not blank `SUPABASE_URL` or rebind the module
+  variable.** Every app module holds a reference to the same client
+  instance, taken at import time, so rebinding `app.extensions.supabase`
+  would reach none of them. Blanking the URL doesn't help once the client
+  is cached, which it is after any integration test in the same run. The
+  `signing_key` fixture also sets a fake URL on purpose, so a missed fake
+  would produce a vague DNS error rather than a clear message. The
+  class-level patch works whether or not the client is cached: this was
+  verified in a combined run where integration tests had already built it.
+- **Why a `BaseException` and not an `Exception`.** App code has broad
+  `except Exception` handlers (`/health/db` returns 503, and `create_app`
+  turns any Exception into a 500). A normal exception could be swallowed
+  there, and the test would pass anyway. A `BaseException` passes through
+  both and fails the test by name.
+- Tests that substitute their own fake for a module's `supabase` are
+  unaffected. Only a call that reaches the real client trips the guard.
+- Integration tests are exempt from this guard. The second half below
+  governs them.
+
+**Second half: integration tests refuse a non-local database by default.**
+The unit-test guard left one path open. The integration-test skip only
+fired when credentials were *absent*, and the root `.env` supplies them. So
+a teammate typing a bare `pytest` ran all the integration tests (creating
+and deleting users, events and audit rows) against the shared project the
+team demos from. Now `tests/conftest.py` decides, at collection time,
+whether integration tests may run:
+- **No credentials** (CI): skipped, with a message on how to run them locally.
+- **`SUPABASE_URL` is local:** they run, with no opt-in needed.
+- **Anything else:** **skipped, not failed.** Someone running the whole
+  suite hasn't done anything wrong. The message names the host and says
+  exactly how to run against local instead.
+- **Deliberate exception:**
+  `INTEGRATION_TESTS_WRITE_TO_REMOTE_SUPABASE=yes-write-test-data-to-the-shared-project`
+  (exact value, so `=1` or `=true` is refused and the message says so).
+  It's long and explicit, so it can't be set by accident and it reads
+  plainly in a shell history.
+
+**How "local" is detected: the URL's host.** A URL counts as local only if
+the host is `localhost` or a loopback IP literal (127.0.0.0/8, `::1`), which
+is what `npx supabase status` reports. We match the host because that is
+exactly where requests, and therefore writes, will go. The one alternative
+the CLI offers is its well-known local demo keys (JWT issuer
+`supabase-demo`), and it's less reliable. A key says who signed it, not
+where requests are sent, so a local key paired with a live URL still writes
+to live. The CLI's newer `sb_secret_…` keys aren't JWTs at all. Hostnames
+are not DNS-resolved, and anything we can't parse counts as non-local, so
+lookalikes such as `127.0.0.1.nip.io` or `localhost.example.com` fail
+safe. pytest's header line states the decision on every run.
+
+Together, the two halves make the rule: **unit tests cannot reach any
+database, and integration tests cannot reach a non-local one without
+someone saying so out loud.**
