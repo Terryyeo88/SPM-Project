@@ -11,16 +11,42 @@
  *               GET /events/coordinators. Afterwards this coordinator no
  *               longer has the event, so they're sent back to their dashboard.
  *
+ * Editing:
+ *   Edit Details -> POST /events/<id>. Once a request is submitted only the
+ *               assigned coordinator may change it (IS-31), while it's
+ *               under review or in planning (rule_event_edit). This edits
+ *               THIS session only -- each session is its own event record,
+ *               reviewed on its own -- with the same form and as-you-type
+ *               validation the organiser uses (EventSessionFields).
+ *
+ * Sessions:
+ *   One coordinator is assigned to the whole request, so this page lists
+ *   every session of it (the `sessions` prop, from GET /events/<id>/sessions).
+ *   Each links to its own review page, where it can be viewed and edited.
+ *
  * The Conversation section is a placeholder until clarification messages
  * exist (Request Clarification isn't built yet).
  */
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { formatDateRange, statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
+import {
+  minimumStartDate,
+  sessionFromEvent,
+  sessionHasInvalidInput,
+  sessionPayload,
+  validateSession,
+} from '../../lib/eventSessions'
+import EventSessionFields from '../../components/EventSessionFields.vue'
 
-const props = defineProps({ event: { type: Object, required: true } })
+const props = defineProps({
+  event: { type: Object, required: true },
+  // Every session of this request the coordinator can see -- all of them,
+  // since one coordinator handles the whole request.
+  sessions: { type: Array, default: () => [] },
+})
 const emit = defineEmits(['updated'])
 
 const auth = useAuthStore()
@@ -38,9 +64,25 @@ const newCoordinatorId = ref('')
 const reassignReason = ref('')
 
 const isUnderReview = computed(() => props.event.status === 'under_review')
+
+function sessionWhen(session) {
+  const range = formatDateRange(session.preferred_start_date, session.preferred_end_date)
+  const times = [time(session.preferred_start_time), time(session.preferred_end_time)].filter(Boolean).join(' – ')
+  return times ? `${range} · ${times}` : range
+}
 // Past events (completed / cancelled / rejected) have nothing left to hand over.
 const canReassign = computed(() => ['under_review', 'approved', 'planning', 'confirmed'].includes(props.event.status))
 const otherCoordinators = computed(() => coordinators.value.filter((c) => c.id !== auth.profile?.id))
+
+// Same status window as rule_event_edit's coordinator branch on the backend.
+const canEdit = computed(() => ['under_review', 'planning'].includes(props.event.status))
+const editing = ref(false)
+const editForm = reactive({ name: '', description: '', purpose: '', session: null })
+const editErrors = reactive({})
+const minimumDate = minimumStartDate()
+const editHasInvalidInput = computed(() => Boolean(
+  editForm.session && sessionHasInvalidInput(editForm.session, minimumDate),
+))
 
 const LABELS = {
   wheelchair_access: 'Wheelchair access',
@@ -69,6 +111,10 @@ function time(value) {
   return value ? value.slice(0, 5) : ''
 }
 
+function dateTime(value) {
+  return value ? new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not specified'
+}
+
 const details = computed(() => {
   const e = props.event
   const times = [time(e.preferred_start_time), time(e.preferred_end_time)].filter(Boolean).join(' – ')
@@ -82,8 +128,69 @@ const details = computed(() => {
     { label: 'Accessibility Needs', value: describeItems(e.accessibility_needs) },
     { label: 'Equipment', value: describeItems(e.equipment_needed?.equipment) },
     { label: 'Registration Needed', value: e.registration_needs ? 'Yes' : 'No' },
+    ...(e.registration_needs
+      ? [{ label: 'Registration Period', value: `${dateTime(e.registration_start_datetime)} – ${dateTime(e.registration_end_datetime)}` }]
+      : []),
     { label: 'Special Requests', value: e.special_requests || 'None', block: Boolean(e.special_requests) },
   ]
+})
+
+function startEditing() {
+  error.value = ''
+  success.value = ''
+  openPanel.value = null
+  editForm.name = props.event.name || ''
+  editForm.description = props.event.description || ''
+  editForm.purpose = props.event.purpose || ''
+  editForm.session = sessionFromEvent(props.event)
+  Object.keys(editErrors).forEach((field) => delete editErrors[field])
+  editing.value = true
+}
+
+function cancelEditing() {
+  editing.value = false
+  editForm.session = null
+  error.value = ''
+}
+
+function validateEdit() {
+  Object.keys(editErrors).forEach((field) => delete editErrors[field])
+  if (!editForm.name.trim()) editErrors.name = 'Event name is required.'
+  if (!editForm.description.trim()) editErrors.description = 'Description is required.'
+  if (!editForm.purpose.trim()) editErrors.purpose = 'Purpose is required.'
+  const sessionIsValid = validateSession(editForm.session, minimumDate)
+  return Object.keys(editErrors).length === 0 && sessionIsValid
+}
+
+function saveEdits() {
+  error.value = ''
+  success.value = ''
+  if (!validateEdit()) return
+  return run(async () => {
+    // sessionPayload carries the session's id for the organiser's draft
+    // endpoint; the edit endpoint is already addressed by id, so drop it.
+    const { id, ...sessionFields } = sessionPayload(editForm.session)
+    const updated = await apiPost(`/events/${props.event.id}`, {
+      name: editForm.name,
+      description: editForm.description,
+      purpose: editForm.purpose,
+      ...sessionFields,
+    })
+    editing.value = false
+    editForm.session = null
+    success.value = 'Event details updated.'
+    emit('updated', updated)
+  })
+}
+
+// Moving to another session of the request reuses this component with a new
+// `event`; drop anything half-done on the previous session.
+watch(() => props.event.id, () => {
+  editing.value = false
+  editForm.session = null
+  openPanel.value = null
+  error.value = ''
+  success.value = ''
 })
 
 function togglePanel(name) {
@@ -177,12 +284,57 @@ function reassign() {
       </p>
     </section>
 
+    <section v-if="sessions.length > 1" class="card" aria-labelledby="sessions-heading">
+      <h2 id="sessions-heading">Sessions in this Request</h2>
+      <p class="muted small">You're the coordinator for every session. Open one to review or edit it.</p>
+      <ul class="session-list">
+        <li v-for="(session, index) in sessions" :key="session.id" :class="{ current: session.id === event.id }">
+          <router-link v-if="session.id !== event.id" :to="`/events/${session.id}`" class="session-link">
+            Session {{ index + 1 }}
+          </router-link>
+          <span v-else class="session-link" aria-current="page">Session {{ index + 1 }} (this one)</span>
+          <span class="muted small">{{ sessionWhen(session) }}</span>
+          <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+        </li>
+      </ul>
+    </section>
+
     <section class="card" aria-labelledby="details-heading">
-      <h2 id="details-heading">Event Details</h2>
-      <div v-for="row in details" :key="row.label" class="detail-row" :class="{ block: row.block }">
-        <span class="muted">{{ row.label }}</span>
-        <span class="value">{{ row.value }}</span>
+      <div class="card-heading">
+        <h2 id="details-heading">Event Details</h2>
+        <button v-if="canEdit && !editing" type="button" class="btn small neutral" :disabled="busy" @click="startEditing">
+          Edit Details
+        </button>
       </div>
+
+      <form v-if="editing" class="edit-form" novalidate @submit.prevent="saveEdits">
+        <label :class="{ invalid: editErrors.name }">Event name
+          <input v-model.trim="editForm.name" @input="delete editErrors.name" />
+          <span v-if="editErrors.name" class="field-error">{{ editErrors.name }}</span>
+        </label>
+        <label :class="{ invalid: editErrors.description }">Description
+          <textarea v-model.trim="editForm.description" rows="3" @input="delete editErrors.description" />
+          <span v-if="editErrors.description" class="field-error">{{ editErrors.description }}</span>
+        </label>
+        <label :class="{ invalid: editErrors.purpose }">Purpose
+          <textarea v-model.trim="editForm.purpose" rows="3" @input="delete editErrors.purpose" />
+          <span v-if="editErrors.purpose" class="field-error">{{ editErrors.purpose }}</span>
+        </label>
+        <EventSessionFields :session="editForm.session" :index="0" :minimum-date="minimumDate" title="Session details" />
+        <div class="panel-actions">
+          <button type="submit" class="btn small primary" :disabled="busy || editHasInvalidInput">
+            {{ busy ? 'Saving...' : 'Save Changes' }}
+          </button>
+          <button type="button" class="btn small neutral" :disabled="busy" @click="cancelEditing">Cancel</button>
+        </div>
+      </form>
+
+      <template v-else>
+        <div v-for="row in details" :key="row.label" class="detail-row" :class="{ block: row.block }">
+          <span class="muted">{{ row.label }}</span>
+          <span class="value">{{ row.value }}</span>
+        </div>
+      </template>
     </section>
 
     <section class="decision" aria-labelledby="decision-heading">
@@ -192,18 +344,20 @@ function reassign() {
         This request is {{ statusLabel(event.status).toLowerCase() }}, so there's nothing to approve or reject.
       </p>
 
+      <p v-if="editing" class="muted small">Save or cancel your edits before making a decision.</p>
+
       <div class="buttons">
         <template v-if="isUnderReview">
-          <button type="button" class="btn approve" :disabled="busy" @click="approve">
+          <button type="button" class="btn approve" :disabled="busy || editing" @click="approve">
             {{ busy && !openPanel ? 'Approving...' : 'Approve Request' }}
           </button>
-          <button type="button" class="btn reject" :aria-expanded="openPanel === 'reject'" :disabled="busy"
+          <button type="button" class="btn reject" :aria-expanded="openPanel === 'reject'" :disabled="busy || editing"
             @click="togglePanel('reject')">
             Reject Request
           </button>
         </template>
         <button v-if="canReassign" type="button" class="btn neutral" :aria-expanded="openPanel === 'reassign'"
-          :disabled="busy" @click="togglePanel('reassign')">
+          :disabled="busy || editing" @click="togglePanel('reassign')">
           Reassign Coordinator
         </button>
       </div>
@@ -266,6 +420,26 @@ h2 { margin: 0 0 4px; font-size: 15px; color: #222; }
 
 .card { background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; padding: 22px 28px; }
 .card h2 { margin-bottom: 10px; }
+.card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.card-heading h2 { margin: 0; }
+.session-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.session-list li {
+  display: grid; grid-template-columns: 170px 1fr auto; align-items: center; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 13px;
+}
+.session-list li:last-child { border-bottom: none; }
+.session-link { font-weight: 600; color: #2a2a2a; }
+.session-list li.current .session-link { color: #1f1f1f; }
+@media (max-width: 600px) { .session-list li { grid-template-columns: 1fr; gap: 4px; } }
+.edit-form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.edit-form > label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: #444; }
+.edit-form > label input, .edit-form > label textarea {
+  box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #b8b8b8; border-radius: 4px;
+  font: inherit; font-size: 14px; font-weight: 400;
+}
+.edit-form > label textarea { resize: vertical; }
+.edit-form .invalid input, .edit-form .invalid textarea { border-color: #a33f3f; }
+.field-error { color: #a33f3f; font-size: 12px; font-weight: 400; }
 .detail-row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 13px; }
 .detail-row:last-child { border-bottom: none; }
 .detail-row.block { flex-direction: column; gap: 6px; }

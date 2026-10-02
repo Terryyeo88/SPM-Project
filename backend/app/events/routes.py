@@ -47,6 +47,7 @@ from app.events.event_service import (
     delete_draft_request,
     edit_event_request,
     list_event_requests,
+    list_event_sessions,
     reject_event_request,
     save_draft_request,
     submit_event_request,
@@ -97,6 +98,14 @@ def edit_event(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_event(event, event_id):
     return jsonify(vars(event)), 200
+
+
+# Every session of the same request (rows sharing shared_event_id) that the
+# caller may see, plus the shared name/description/purpose.
+@events_bp.route("/<event_id>/sessions", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_event_sessions(event, event_id):
+    return jsonify(list_event_sessions(event, current_user())), 200
 
 
 @events_bp.route("/<event_id>", methods=["DELETE"])

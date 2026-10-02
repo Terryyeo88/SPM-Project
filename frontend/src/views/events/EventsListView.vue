@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { ROUTE_ACCESS, hasAnyRole } from '../../lib/roles'
+import { groupIntoRequests, timeValue } from '../../lib/eventSessions'
 import AppNavBar from '../../components/AppNavBar.vue'
 
 const events = ref([])
@@ -52,14 +53,6 @@ const auth = useAuthStore()
 const createEventRoles = ROUTE_ACCESS.find((entry) => entry.routeName === 'create-event').roles
 const canCreateEvent = computed(() => hasAnyRole(auth.roles, createEventRoles))
 
-// Client-side search over the already-loaded list (by name).
-const search = ref('')
-const visibleEvents = computed(() => {
-  const term = search.value.trim().toLowerCase()
-  if (!term) return events.value
-  return events.value.filter((event) => (event.name || '').toLowerCase().includes(term))
-})
-
 function statusLabel(status) {
   return status.replace(/_/g, ' ')
 }
@@ -68,6 +61,45 @@ function dateRange(event) {
   const start = formatDate(event.preferred_start_date)
   const end = event.preferred_end_date
   return end && end !== event.preferred_start_date ? `${start} – ${end}` : start
+}
+
+// --- One box per event request (grouping: lib/eventSessions) ---------------
+
+const requests = computed(() => groupIntoRequests(events.value))
+
+// Client-side search over the already-loaded requests (by name).
+const search = ref('')
+const visibleRequests = computed(() => {
+  const term = search.value.trim().toLowerCase()
+  if (!term) return requests.value
+  return requests.value.filter((request) => request.sessions.some(
+    (session) => (session.name || '').toLowerCase().includes(term),
+  ))
+})
+
+// The request's overall span: earliest session start to latest session end.
+function requestDateRange(request) {
+  const starts = request.sessions.map((s) => s.preferred_start_date).filter(Boolean).sort()
+  const ends = request.sessions.map((s) => s.preferred_end_date || s.preferred_start_date).filter(Boolean).sort()
+  if (!starts.length) return 'Not set'
+  const first = starts[0]
+  const last = ends[ends.length - 1]
+  return last && last !== first ? `${first} – ${last}` : first
+}
+
+function sessionWhen(session) {
+  const times = [timeValue(session.preferred_start_time), timeValue(session.preferred_end_time)]
+    .filter(Boolean).join(' – ')
+  return times ? `${dateRange(session)} · ${times}` : dateRange(session)
+}
+
+// One badge when every session is at the same stage, otherwise a count per
+// status (e.g. "2 approved", "1 rejected") so nothing is hidden.
+function statusSummary(request) {
+  const counts = new Map()
+  for (const session of request.sessions) counts.set(session.status, (counts.get(session.status) || 0) + 1)
+  if (counts.size === 1) return [{ status: request.sessions[0].status, label: statusLabel(request.sessions[0].status) }]
+  return [...counts.entries()].map(([status, count]) => ({ status, label: `${count} ${statusLabel(status)}` }))
 }
 </script>
 
@@ -109,7 +141,7 @@ function dateRange(event) {
             :class="{ active: statusFilter === '' }"
             @click="statusFilter = ''"
           >
-            All<template v-if="statusFilter === '' && !loading && !error"> ({{ events.length }})</template>
+            All<template v-if="statusFilter === '' && !loading && !error"> ({{ requests.length }})</template>
           </button>
           <button
             v-for="status in STATUSES"
@@ -119,36 +151,54 @@ function dateRange(event) {
             :class="{ active: statusFilter === status }"
             @click="statusFilter = status"
           >
-            {{ statusLabel(status) }}<template v-if="statusFilter === status && !loading && !error"> ({{ events.length }})</template>
+            {{ statusLabel(status) }}<template v-if="statusFilter === status && !loading && !error"> ({{ requests.length }})</template>
           </button>
         </div>
 
-        <div class="list">
+        <div v-if="loading || error || requests.length === 0 || visibleRequests.length === 0" class="list">
           <p v-if="loading" class="message">Loading event requests...</p>
           <p v-else-if="error" class="message error" role="alert">{{ error }}</p>
-          <p v-else-if="events.length === 0" class="message">
+          <p v-else-if="requests.length === 0" class="message">
             No event requests to show{{ statusFilter ? ` with status "${statusFilter}"` : '' }}.
           </p>
-          <p v-else-if="visibleEvents.length === 0" class="message">
+          <p v-else class="message">
             No event requests match "{{ search }}".
           </p>
-          <template v-else>
-            <router-link
-              v-for="event in visibleEvents"
-              :key="event.id"
-              :to="`/events/${event.id}`"
-              class="row"
-            >
+        </div>
+
+        <ul v-else class="requests">
+          <li v-for="request in visibleRequests" :key="request.key" class="request">
+            <router-link :to="`/events/${request.sessions[0].id}`" class="row request-header">
               <div class="row-main">
-                <span class="row-name">{{ event.name }}</span>
+                <span class="row-name">{{ request.name }}</span>
                 <span class="row-meta">
-                  {{ dateRange(event) }}<template v-if="event.expected_attendance"> · {{ event.expected_attendance }} attendees</template>
+                  {{ requestDateRange(request) }}
+                  <template v-if="request.sessions.length > 1"> · {{ request.sessions.length }} sessions</template>
+                  <template v-else-if="request.sessions[0].expected_attendance"> · {{ request.sessions[0].expected_attendance }} attendees</template>
                 </span>
               </div>
-              <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
+              <span class="badges">
+                <span v-for="badge in statusSummary(request)" :key="badge.status" class="status" :class="`status-${badge.status}`">
+                  {{ badge.label }}
+                </span>
+              </span>
             </router-link>
-          </template>
-        </div>
+
+            <ol v-if="request.sessions.length > 1" class="sessions" :aria-label="`Sessions of ${request.name}`">
+              <li v-for="(session, index) in request.sessions" :key="session.id">
+                <router-link :to="`/events/${session.id}`" class="row session-row">
+                  <div class="row-main">
+                    <span class="session-name">Session {{ index + 1 }}</span>
+                    <span class="row-meta">
+                      {{ sessionWhen(session) }}<template v-if="session.expected_attendance"> · {{ session.expected_attendance }} attendees</template>
+                    </span>
+                  </div>
+                  <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+                </router-link>
+              </li>
+            </ol>
+          </li>
+        </ul>
       </div>
     </main>
   </div>
@@ -253,6 +303,47 @@ function dateRange(event) {
   border-radius: 6px;
   padding: 4px 18px;
   box-sizing: border-box;
+}
+.requests {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.request {
+  background: #ffffff;
+  border: 1px dashed #9a9a9a;
+  border-radius: 6px;
+  padding: 4px 18px;
+  box-sizing: border-box;
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.sessions {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0 0 0 14px;
+  border-left: 2px solid #e2e2e2;
+}
+.session-row {
+  padding: 10px 0;
+}
+.sessions li:last-child .session-row {
+  border-bottom: none;
+}
+.session-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #444444;
+}
+.session-row:hover .session-name {
+  text-decoration: underline;
 }
 .message {
   margin: 0;

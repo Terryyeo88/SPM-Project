@@ -12,6 +12,7 @@ env/
 .pytest_cache/
 .coverage
 .coverage.*
+htmlcov/
 
 # Node / Vue
 node_modules/
