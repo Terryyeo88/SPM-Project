@@ -252,3 +252,29 @@ export function validateSession(session, minimumDate) {
   validateQuantities(session)
   return Object.keys(session.errors).length === 0
 }
+
+// -- Grouping the events list into requests ------------------------------------
+// Each session of a request is its own events row; rows sharing a
+// shared_event_id are one request. Requests keep the order the rows came in
+// (the API's newest-first); sessions inside a request are in date/time
+// order. Rows created before sessions existed have no shared_event_id and
+// are a request of one.
+
+function compareRows(a, b) {
+  const left = `${a.preferred_start_date || '9999'}T${a.preferred_start_time || ''}`
+  const right = `${b.preferred_start_date || '9999'}T${b.preferred_start_time || ''}`
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+export function groupIntoRequests(rows) {
+  const requests = new Map()
+  for (const row of rows) {
+    const key = row.shared_event_id || row.id
+    if (!requests.has(key)) requests.set(key, { key, sessions: [] })
+    requests.get(key).sessions.push(row)
+  }
+  return [...requests.values()].map((request) => {
+    const sessions = request.sessions.slice().sort(compareRows)
+    return { ...request, sessions, name: sessions[0].name }
+  })
+}

@@ -155,14 +155,17 @@ def rule_event_create(user: Any, event: Any = None) -> Decision:
 
 # -- event.submit -------------------------------------------------------
 # Source: Event Status Management story -- "submitting a completed
-# request changes status to Submitted", organiser-only, and only from
-# draft (status precondition taken directly from that quote).
+# request changes status to Submitted", organiser-only. Allowed from
+# draft (first submission) and from rejected (resubmission after the
+# organiser fixes what the coordinator rejected -- "rejected requests
+# return to the organizer for corrections" only makes sense if the
+# corrected request can go back for review).
 
 
 def rule_event_submit(user: Any, event: Any) -> Decision:
     if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
         return Decision.DENY_NOT_FOUND
-    if not _event_status_in(event, "draft"):
+    if not _event_status_in(event, "draft", "rejected"):
         return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
 

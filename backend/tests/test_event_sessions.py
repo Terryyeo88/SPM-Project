@@ -21,6 +21,7 @@ from app.events.event_service import (
 )
 from app.shared.errors import ValidationError
 from tests.factories import make_user
+from tests.fake_supabase import FakeSupabase
 
 
 def _local(day: date, hour: int) -> str:
@@ -254,7 +255,8 @@ def _rejected_event():
     )
 
 
-def test_list_event_sessions_without_shared_id_is_a_group_of_one():
+def test_list_event_sessions_without_shared_id_is_a_group_of_one(monkeypatch):
+    monkeypatch.setattr(service, "supabase", FakeSupabase())
     event = _rejected_event()
     event.shared_event_id = None
 
@@ -262,6 +264,64 @@ def test_list_event_sessions_without_shared_id_is_a_group_of_one():
 
     assert [s["id"] for s in group["sessions"]] == ["event-1"]
     assert group["name"] == "n"
+
+
+# -- Rejection reason on rejected sessions -------------------------------------
+
+
+def _log_entry(event_id, reason, changed_at, to_status="rejected", by="Alice Tan"):
+    return {
+        "event_id": event_id,
+        "to_status": to_status,
+        "reason": reason,
+        "changed_at": changed_at,
+        "profiles": {"name": by},
+    }
+
+
+def test_rejected_sessions_carry_the_coordinators_latest_rejection(monkeypatch):
+    """A rejected session comes back with the coordinator's reason, who
+    rejected it and when -- the MOST RECENT rejection, since a session can
+    be rejected, fixed, resubmitted and rejected again. A session that
+    isn't rejected gets no rejection, even if it was rejected in the past."""
+    fake = FakeSupabase(
+        [
+            {"id": "r", "shared_event_id": "group-1", "organizer_id": "user-1", "coordinator_id": "coord-1",
+             "status": "rejected", "name": "Workshop"},
+            {"id": "ok", "shared_event_id": "group-1", "organizer_id": "user-1", "coordinator_id": "coord-1",
+             "status": "under_review", "name": "Workshop"},
+        ]
+    )
+    fake.tables["event_status_log"] = [
+        _log_entry("r", "Venue too small.", "2026-10-01T09:00:00+00:00"),
+        _log_entry("r", "Please add an accessible entrance.", "2026-10-03T09:00:00+00:00"),
+        _log_entry("r", None, "2026-10-02T09:00:00+00:00", to_status="under_review", by="Organiser"),
+        _log_entry("ok", "Old reason, since fixed.", "2026-10-01T09:00:00+00:00"),
+    ]
+    monkeypatch.setattr(service, "supabase", fake)
+
+    group = list_event_sessions(SimpleNamespace(**fake.get("r")), make_user(["event_organizer"]))
+
+    sessions = {s["id"]: s for s in group["sessions"]}
+    assert sessions["r"]["rejection"] == {
+        "reason": "Please add an accessible entrance.",
+        "rejected_at": "2026-10-03T09:00:00+00:00",
+        "rejected_by": "Alice Tan",
+    }
+    assert "rejection" not in sessions["ok"]
+
+
+def test_no_rejection_lookup_when_nothing_is_rejected(monkeypatch):
+    """Requests with no rejected session don't query the status log at all."""
+    fake = FakeSupabase(
+        [{"id": "a", "shared_event_id": "group-1", "organizer_id": "user-1", "coordinator_id": None,
+          "status": "draft", "name": "Workshop"}]
+    )
+    monkeypatch.setattr(service, "supabase", fake)
+
+    list_event_sessions(SimpleNamespace(**fake.get("a")), make_user(["event_organizer"]))
+
+    assert {call["table"] for call in fake.calls} == {"events"}
 
 
 def test_sessions_route_returns_group(client, signing_key, monkeypatch):

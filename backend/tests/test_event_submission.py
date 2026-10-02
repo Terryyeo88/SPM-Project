@@ -791,3 +791,65 @@ def test_is31_coordinator_edit_form_payload_is_saved(fake_db):
     assert row["registration_end_datetime"] == "2026-11-09T18:00:00+08:00"
     assert row["status"] == "under_review"
     assert row["coordinator_id"] == "coord-1"
+
+
+# -- Resubmitting a rejected request ---------------------------------------------
+
+
+def test_resubmit_route_accepts_a_rejected_request(client, signing_key, monkeypatch):
+    """The organiser can submit their own rejected request again through
+    POST /events/<id>/submit -- it reaches the submit service (200)."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: _submitted_event(status="rejected"))
+    calls = []
+    monkeypatch.setattr(
+        routes_module,
+        "submit_event_request",
+        lambda event_id, event: calls.append(event_id) or {"id": event_id, "status": "under_review"},
+    )
+
+    response = _post(client, signing_key, "/events/event-1/submit", {})
+
+    assert response.status_code == 200
+    assert calls == ["event-1"]
+
+
+def test_resubmit_returns_every_rejected_session_to_its_coordinator(fake_db, assigned):
+    """Resubmitting from one rejected session sends every rejected session of
+    the request back to the coordinator who rejected them, as under_review
+    -- no new coordinator is picked, so the request keeps its one
+    coordinator. A sibling with its own outcome (approved) is untouched,
+    and each resubmission is recorded in the status audit log."""
+    fake_db.rows = [
+        _session_row("r1", status="rejected", coordinator_id="coord-7"),
+        _session_row("r2", status="rejected", coordinator_id="coord-7"),
+        _session_row("ok", status="approved", coordinator_id="coord-7"),
+    ]
+
+    resubmitted = submit_event_request("r1", SimpleNamespace(**fake_db.get("r1")))
+
+    assert fake_db.get("r1")["status"] == fake_db.get("r2")["status"] == "under_review"
+    assert {fake_db.get(i)["coordinator_id"] for i in ("r1", "r2", "ok")} == {"coord-7"}
+    assert fake_db.get("ok")["status"] == "approved"
+    assert assigned == []
+    assert resubmitted["id"] == "r1"
+    log = fake_db.tables["event_status_log"]
+    assert sorted(entry["event_id"] for entry in log) == ["r1", "r2"]
+    assert {(entry["from_status"], entry["to_status"], entry["changed_by"]) for entry in log} == {
+        ("rejected", "under_review", "user-1")
+    }
+
+
+def test_resubmit_validates_every_rejected_session_before_any_moves(fake_db, assigned):
+    """A rejected session that still isn't complete blocks the whole
+    resubmission -- every session stays rejected and nothing is logged."""
+    fake_db.rows = [
+        _session_row("r1", status="rejected", coordinator_id="coord-7"),
+        _session_row("r2", status="rejected", coordinator_id="coord-7", expected_attendance=None),
+    ]
+
+    with pytest.raises(ValidationError, match="^Session 2: Missing required fields: expected_attendance"):
+        submit_event_request("r1", SimpleNamespace(**fake_db.get("r1")))
+
+    assert {row["status"] for row in fake_db.rows} == {"rejected"}
+    assert "event_status_log" not in fake_db.tables

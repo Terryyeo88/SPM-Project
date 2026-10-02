@@ -76,6 +76,10 @@ function onRegistrationToggle() {
       </button>
     </div>
 
+    <!-- Optional message shown at the top of the card, e.g. the coordinator's
+         reason when this session was rejected. -->
+    <slot name="notice" />
+
     <div class="grid-2">
       <label class="field" :class="{ invalid: session.errors.preferred_start_datetime }">
         <span class="field-label">Preferred Start Date &amp; Time</span>

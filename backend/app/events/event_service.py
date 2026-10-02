@@ -461,10 +461,11 @@ def validate_event_group(payload, *, for_submission: bool) -> list[dict]:
     ]
 
 
-def _load_draft_sessions(event: SimpleNamespace) -> list[dict]:
-    """Every still-draft session of the same request as `event` (owned by
-    the same organiser), oldest-first by date. A request created before
-    sessions existed has no shared_event_id and is a group of one."""
+def _load_sessions_with_status(event: SimpleNamespace, status: str) -> list[dict]:
+    """Every session of the same request as `event` (owned by the same
+    organiser) currently in `status`, oldest-first by date. A request
+    created before sessions existed has no shared_event_id and is a group
+    of one."""
     shared_event_id = getattr(event, "shared_event_id", None)
     if not shared_event_id:
         return [dict(vars(event))]
@@ -473,10 +474,15 @@ def _load_draft_sessions(event: SimpleNamespace) -> list[dict]:
         .select("*")
         .eq("shared_event_id", shared_event_id)
         .eq("organizer_id", event.organizer_id)
-        .eq("status", "draft")
+        .eq("status", status)
         .execute()
     )
     return sorted(result.data or [], key=_session_sort_key)
+
+
+def _load_draft_sessions(event: SimpleNamespace) -> list[dict]:
+    """Every still-draft session of the same request as `event`."""
+    return _load_sessions_with_status(event, "draft")
 
 
 def _insert_sessions(organizer_id: str, rows: list[dict], shared_event_id: str) -> list[dict]:
@@ -491,13 +497,30 @@ def _insert_sessions(organizer_id: str, rows: list[dict], shared_event_id: str) 
     return result.data or []
 
 
-def _submit_sessions(event_ids: list[str]) -> list[dict]:
+def _submit_sessions(
+    event_ids: list[str], from_status: str = "draft", submitted_by: str | None = None
+) -> list[dict]:
+    """Moves these sessions from `from_status` ("draft", or "rejected" for
+    a resubmission) to "submitted", then on to review."""
     for event_id in event_ids:
-        # Conditioned on still being a draft so a double submit can't
-        # re-run coordinator assignment on an already-submitted session.
+        # Conditioned on still being in from_status so a double submit
+        # can't re-run any of this on an already-submitted session.
         supabase.table("events").update({"status": "submitted"}).eq("id", event_id).eq(
-            "status", "draft"
+            "status", from_status
         ).execute()
+
+    sessions = supabase.table("events").select("*").in_("id", event_ids).execute().data or []
+    submitted = [session for session in sessions if session["status"] == "submitted"]
+
+    # A resubmitted session still has the coordinator who rejected it: it
+    # goes straight back to their review queue, keeping the request's one
+    # coordinator. Only sessions with nobody assigned go through
+    # assignment below.
+    for session in submitted:
+        if session.get("coordinator_id"):
+            supabase.table("events").update({"status": "under_review"}).eq("id", session["id"]).eq(
+                "status", "submitted"
+            ).execute()
 
     # Per Customer Briefing Step 3 / Event Status Management: submission
     # should trigger coordinator auto-assignment, moving the event to
@@ -506,15 +529,23 @@ def _submit_sessions(event_ids: list[str]) -> list[dict]:
     # own docstring, not an error here. Called ONCE, after every session
     # is submitted: the request gets one coordinator for all its sessions
     # (assign_initial_coordinator covers the request's other submitted
-    # sessions too).
-    if event_ids:
+    # sessions too, and reuses the request's coordinator if it has one).
+    unassigned = [session for session in submitted if not session.get("coordinator_id")]
+    if unassigned:
         try:
-            assign_initial_coordinator(event_ids[0])
+            assign_initial_coordinator(unassigned[0]["id"])
         except NoCoordinatorAvailableError:
             pass
 
     result = supabase.table("events").select("*").in_("id", event_ids).execute()
-    return result.data or []
+    rows = result.data or []
+
+    # A resubmission undoes a coordinator's decision, so it goes in the
+    # same audit trail as approve/reject (event_status_log).
+    if from_status == "rejected":
+        for row in rows:
+            _record_status_change(row["id"], "rejected", row["status"], submitted_by, "resubmitted by organiser")
+    return rows
 
 
 def create_event_request(organizer_id: str, payload: dict) -> dict:
@@ -641,10 +672,19 @@ def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
 
 
 def submit_event_request(event_id: str, event: SimpleNamespace):
-    """Submit every draft session of this request together. All sessions
-    are validated before any of them changes status. Returns the row for
-    `event_id` itself (the session the caller submitted from)."""
-    sessions = _load_draft_sessions(event)
+    """Submit this request (authz has checked the caller owns it and it's
+    "draft" or "rejected").
+
+    - draft: every draft session of the request is submitted together.
+    - rejected: a resubmission. Every rejected session of the request goes
+      back together -- the organiser fixes them on one page -- and sessions
+      with any other outcome (approved, in planning, ...) are untouched.
+
+    All the sessions are validated before any of them changes status.
+    Returns the row for `event_id` itself (the session the caller submitted
+    from).
+    """
+    sessions = _load_sessions_with_status(event, event.status)
     for index, session in enumerate(sessions, start=1):
         _validate_session(
             index,
@@ -652,21 +692,55 @@ def submit_event_request(event_id: str, event: SimpleNamespace):
             _from_database_event(SimpleNamespace(**session)),
             for_submission=True,
         )
-    submitted = _submit_sessions([session["id"] for session in sessions])
+    submitted = _submit_sessions(
+        [session["id"] for session in sessions], from_status=event.status, submitted_by=event.organizer_id
+    )
     return next(row for row in submitted if row["id"] == event_id)
 
 
+def _attach_rejections(rows: list[dict]) -> list[dict]:
+    """Adds `rejection` to each rejected session: the coordinator's most
+    recent rejection of it, {"reason", "rejected_at", "rejected_by"}, read
+    from event_status_log (where reject_event_request records it). Only the
+    latest one, since a session rejected, fixed and resubmitted can be
+    rejected again -- the organiser needs the reason that applies now.
+    Other sessions are returned unchanged."""
+    rejected_ids = [row["id"] for row in rows if row.get("status") == "rejected"]
+    if not rejected_ids:
+        return rows
+    result = (
+        supabase.table("event_status_log")
+        .select("event_id, reason, changed_at, profiles(name)")
+        .in_("event_id", rejected_ids)
+        .eq("to_status", "rejected")
+        .execute()
+    )
+    latest = {}
+    for entry in sorted(result.data or [], key=lambda entry: entry.get("changed_at") or ""):
+        latest[entry["event_id"]] = entry  # later entries overwrite earlier ones
+    for row in rows:
+        entry = latest.get(row["id"])
+        if row.get("status") == "rejected" and entry:
+            row["rejection"] = {
+                "reason": entry.get("reason"),
+                "rejected_at": entry.get("changed_at"),
+                "rejected_by": (entry.get("profiles") or {}).get("name"),
+            }
+    return rows
+
+
 def list_event_sessions(event: SimpleNamespace, user) -> dict:
-    """Every session of the same request as `event` that `user` may see.
+    """Every session of the same request as `event` that `user` may see,
+    with the coordinator's rejection reason on any rejected session.
     Sibling rows are filtered through the same event.view rule the route
     used for `event` itself -- e.g. a coordinator assigned to one session
     doesn't see siblings assigned to someone else."""
     shared_event_id = getattr(event, "shared_event_id", None)
     if not shared_event_id:
-        return _group_response([dict(vars(event))])
+        return _group_response(_attach_rejections([dict(vars(event))]))
     result = supabase.table("events").select("*").eq("shared_event_id", shared_event_id).execute()
     visible = [row for row in result.data or [] if can(user, EVENT_VIEW, SimpleNamespace(**row))]
-    return _group_response(visible)
+    return _group_response(_attach_rejections(visible))
 
 
 def _record_status_change(

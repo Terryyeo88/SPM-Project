@@ -5,21 +5,19 @@ import { apiDelete, apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
 import {
-  ACCESSIBILITY_OPTIONS,
   DRAFT_NAME,
-  EQUIPMENT_OPTIONS,
   emptySession,
   minimumStartDate,
   sessionFromEvent,
   sessionHasInvalidInput,
   sessionIsComplete,
   sessionPayload,
-  timeValue,
   validateSession,
 } from '../../lib/eventSessions'
 import CoordinatorEventReview from './CoordinatorEventReview.vue'
 import AppNavBar from '../../components/AppNavBar.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
+import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +32,7 @@ const submitting = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const saved = ref(false)
+const resubmitted = ref(false)
 const errors = reactive({})
 
 const form = reactive({
@@ -62,16 +61,27 @@ const backLink = computed(() => {
   return { to: '/events', label: 'Back to My Event Requests' }
 })
 
-const canEdit = computed(() => Boolean(
-  event.value
-  && ['draft', 'rejected'].includes(event.value.status)
-  && event.value.organizer_id === auth.profile?.id,
-))
-
-// A draft is edited as a whole request: every session together, and
-// sessions can be added or removed. A rejected session has already been
-// reviewed separately from its siblings, so only it is edited, on its own.
+const isOwner = computed(() => Boolean(event.value && event.value.organizer_id === auth.profile?.id))
 const isDraft = computed(() => event.value?.status === 'draft')
+
+// Every session of the request, on one page. How the organiser edits it:
+//   'draft'    -- the whole request: every session together, and sessions
+//                 can be added or removed.
+//   'rejected' -- the request has rejected session(s). Those are editable
+//                 inline; the other sessions (each with its own review
+//                 outcome) are shown read-only alongside them. Which
+//                 session the URL points at doesn't matter -- it's the
+//                 same page for the whole request.
+//   'readonly' -- nothing here is the organiser's to edit.
+const rejectedSessions = computed(() => (
+  isOwner.value && !isDraft.value ? visibleSessions.value.filter((s) => s.status === 'rejected') : []
+))
+const mode = computed(() => {
+  if (!isOwner.value) return 'readonly'
+  if (isDraft.value) return 'draft'
+  return rejectedSessions.value.length ? 'rejected' : 'readonly'
+})
+const canEdit = computed(() => mode.value !== 'readonly')
 
 // Deletion is narrower than editing: only a still-in-progress draft may be
 // deleted -- once submitted, it's left the organizer's hands (see
@@ -94,6 +104,14 @@ const hasInvalidInput = computed(() => form.sessions.some((session) => sessionHa
 
 const visibleSessions = computed(() => group.value?.sessions || (event.value ? [event.value] : []))
 
+// In 'rejected' mode: every session in date order, paired with its form
+// state when it's one of the editable (rejected) ones.
+const sessionEntries = computed(() => visibleSessions.value.map((row, index) => ({
+  row,
+  index,
+  form: form.sessions.find((session) => session.id === row.id) || null,
+})))
+
 function populateForm(value, sessions) {
   form.name = value.name === DRAFT_NAME ? '' : value.name || ''
   form.description = value.description || ''
@@ -102,6 +120,7 @@ function populateForm(value, sessions) {
 }
 
 function editableSessions() {
+  if (mode.value === 'rejected') return rejectedSessions.value
   if (!isDraft.value) return [event.value]
   const drafts = (group.value?.sessions || []).filter((session) => session.status === 'draft')
   return drafts.length ? drafts : [event.value]
@@ -111,6 +130,7 @@ async function loadEvent() {
   loading.value = true
   error.value = ''
   saved.value = false
+  resubmitted.value = false
   try {
     event.value = await apiGet(`/events/${route.params.eventId}`)
     group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
@@ -180,6 +200,58 @@ async function saveDraft() {
   }
 }
 
+// Rejected sessions are saved one at a time (the backend edits a rejected
+// session on its own, so its reviewed siblings are never touched), each
+// with the shared details from the top of the form.
+async function saveRejectedSessions() {
+  for (const session of form.sessions) {
+    await apiPost(`/events/${session.id}/draft`, {
+      name: form.name,
+      description: form.description,
+      purpose: form.purpose,
+      sessions: [sessionPayload(session)],
+    })
+  }
+}
+
+async function saveRejectedChanges() {
+  error.value = ''
+  saved.value = false
+  resubmitted.value = false
+  if (hasInvalidInput.value) return
+  saving.value = true
+  try {
+    await saveRejectedSessions()
+    await loadEvent()
+    saved.value = true
+  } catch (requestError) {
+    error.value = requestError.message
+  } finally {
+    saving.value = false
+  }
+}
+
+// Save the fixes, then send every rejected session back for review in one
+// submit -- they return to the coordinator who rejected them. Validated in
+// full first, the same as a first submission.
+async function resubmitRejected() {
+  error.value = ''
+  saved.value = false
+  resubmitted.value = false
+  if (!validateForm()) return
+  submitting.value = true
+  try {
+    await saveRejectedSessions()
+    await apiPost(`/events/${form.sessions[0].id}/submit`, {})
+    await loadEvent()
+    resubmitted.value = true
+  } catch (requestError) {
+    error.value = requestError.message
+  } finally {
+    submitting.value = false
+  }
+}
+
 async function submitEvent() {
   error.value = ''
   saved.value = false
@@ -220,23 +292,14 @@ async function deleteDraft() {
   }
 }
 
-const itemLabels = Object.fromEntries(
-  [...EQUIPMENT_OPTIONS, ...ACCESSIBILITY_OPTIONS].map((option) => [option.value, option.label]),
-)
-
-function describeItems(items) {
-  if (!items?.length) return 'None'
-  return items
-    .map((entry) => {
-      const quantity = entry.quantity && entry.item !== 'wifi' ? ` × ${entry.quantity}` : ''
-      const notes = entry.notes ? ` (${entry.notes})` : ''
-      return `${itemLabels[entry.item] ?? entry.item}${quantity}${notes}`
-    })
-    .join(', ')
-}
-
-function formatDateTime(value) {
-  return value ? new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not provided'
+// "Rejected by Alice Tan on 3 Oct 2026, 5:00 pm" (either part may be
+// missing on older records).
+function rejectionByline(rejection) {
+  const by = rejection.rejected_by ? `by ${rejection.rejected_by}` : ''
+  const when = rejection.rejected_at
+    ? `on ${new Date(rejection.rejected_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`
+    : ''
+  return ['Rejected', by, when].filter(Boolean).join(' ')
 }
 
 onMounted(loadEvent)
@@ -273,9 +336,14 @@ watch(() => route.params.eventId, (eventId) => {
             <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
           </div>
 
-          <form v-if="canEdit" class="container-form" novalidate @submit.prevent="submitEvent">
-            <p v-if="!isDraft && visibleSessions.length > 1" class="notice">
-              Only this rejected session is edited here. The request's other sessions are reviewed separately.
+          <form v-if="canEdit" class="container-form" novalidate @submit.prevent="mode === 'draft' ? submitEvent() : resubmitRejected()">
+            <p v-if="mode === 'rejected'" class="notice">
+              <template v-if="visibleSessions.length > 1">
+                {{ rejectedSessions.length }} of {{ visibleSessions.length }} sessions were rejected by the coordinator.
+                Edit them below, then resubmit them for review. The other sessions keep their own review outcome
+                and are shown for reference. Changes to the event details apply to the rejected sessions.
+              </template>
+              <template v-else>This request was rejected by the coordinator. Edit it below, then resubmit it for review.</template>
             </p>
 
             <section class="card" aria-labelledby="event-details-heading">
@@ -300,28 +368,62 @@ watch(() => route.params.eventId, (eventId) => {
             <div class="section-heading">
               <h2 class="section-title">Sessions</h2>
               <span class="section-subtitle">
-                {{ isDraft ? 'Add each session that is part of this event. Timing and requirements can differ per session.' : 'The session that was returned to you for changes.' }}
+                {{ isDraft ? 'Add each session that is part of this event. Timing and requirements can differ per session.' : 'Rejected sessions are editable; the rest are shown as they are.' }}
               </span>
             </div>
 
-            <EventSessionFields
-              v-for="(session, index) in form.sessions"
-              :key="session.key"
-              :session="session"
-              :index="index"
-              :minimum-date="minimumDate"
-              :removable="isDraft && form.sessions.length > 1"
-              @remove="removeSession(index)"
-            />
+            <template v-if="mode === 'draft'">
+              <EventSessionFields
+                v-for="(session, index) in form.sessions"
+                :key="session.key"
+                :session="session"
+                :index="index"
+                :minimum-date="minimumDate"
+                :removable="form.sessions.length > 1"
+                @remove="removeSession(index)"
+              />
+            </template>
+            <template v-else>
+              <template v-for="entry in sessionEntries" :key="entry.row.id">
+                <EventSessionFields
+                  v-if="entry.form"
+                  :session="entry.form"
+                  :index="entry.index"
+                  :minimum-date="minimumDate"
+                >
+                  <template #notice>
+                    <div class="rejection" role="note">
+                      <span class="rejection-title">Reason for rejection</span>
+                      <p class="rejection-reason">{{ entry.row.rejection?.reason || 'No reason was recorded.' }}</p>
+                      <span v-if="entry.row.rejection" class="rejection-meta">
+                        {{ rejectionByline(entry.row.rejection) }}
+                      </span>
+                    </div>
+                  </template>
+                </EventSessionFields>
+                <SessionSummaryCard v-else :session="entry.row" :index="entry.index" />
+              </template>
+            </template>
             <button v-if="isDraft" type="button" class="add-session" @click="addSession">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
               Add Another Session
             </button>
 
             <p v-if="error" class="message error" role="alert">{{ error }}</p>
-            <p v-if="saved" class="message success" role="status">Draft saved.</p>
+            <p v-if="saved" class="message success" role="status">{{ mode === 'draft' ? 'Draft saved.' : 'Changes saved.' }}</p>
 
-            <div class="form-footer">
+            <div v-if="mode === 'rejected'" class="form-footer">
+              <button type="button" class="btn btn-outline" :disabled="hasInvalidInput || saving || submitting" @click="saveRejectedChanges">
+                {{ saving ? 'Saving...' : 'Save Changes' }}
+              </button>
+              <button type="submit" class="btn btn-primary" :disabled="!canSubmit || saving || submitting">
+                {{ submitting ? 'Resubmitting...' : 'Resubmit Request' }}
+              </button>
+              <span class="footer-note">
+                {{ form.sessions.length }} rejected session(s) will be resubmitted for review
+              </span>
+            </div>
+            <div v-else class="form-footer">
               <button type="button" class="btn btn-outline" :disabled="hasInvalidInput || saving || submitting || deleting" @click="saveDraft">
                 {{ saving ? 'Saving...' : 'Save as Draft' }}
               </button>
@@ -336,6 +438,9 @@ watch(() => route.params.eventId, (eventId) => {
           </form>
 
           <template v-else>
+            <p v-if="resubmitted" class="message success" role="status">
+              Request resubmitted. It's back with the coordinator for review.
+            </p>
             <p class="notice">This event is {{ statusLabel(event.status).toLowerCase() }} and can't be edited here.</p>
 
             <section class="card" aria-labelledby="event-details-heading">
@@ -350,35 +455,13 @@ watch(() => route.params.eventId, (eventId) => {
               <h2 class="section-title">Sessions</h2>
             </div>
 
-            <section
+            <SessionSummaryCard
               v-for="(session, index) in visibleSessions"
               :key="session.id"
-              class="card session-card"
-              :class="{ current: session.id === event.id }"
-              :aria-labelledby="`session-${session.id}`"
-            >
-              <div class="card-header">
-                <h3 :id="`session-${session.id}`" class="card-title">
-                  <router-link v-if="session.id !== event.id" :to="`/events/${session.id}`">Session {{ index + 1 }}</router-link>
-                  <template v-else>Session {{ index + 1 }}</template>
-                </h3>
-                <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
-              </div>
-              <dl>
-                <dt>Preferred start</dt><dd>{{ session.preferred_start_date || 'Not provided' }}<template v-if="session.preferred_start_time"> at {{ timeValue(session.preferred_start_time) }}</template></dd>
-                <dt>Preferred end</dt><dd>{{ session.preferred_end_date || 'Not provided' }}<template v-if="session.preferred_end_time"> at {{ timeValue(session.preferred_end_time) }}</template></dd>
-                <dt>Expected attendance</dt><dd>{{ session.expected_attendance || 'Not provided' }}</dd>
-                <dt>Room layout</dt><dd class="capitalize">{{ session.room_layout || 'Not provided' }}</dd>
-                <dt>Accessibility needs</dt><dd>{{ describeItems(session.accessibility_needs) }}</dd>
-                <dt>Equipment</dt><dd>{{ describeItems(session.equipment_needed?.equipment) }}</dd>
-                <dt>Registration needed</dt><dd>{{ session.registration_needs ? 'Yes' : 'No' }}</dd>
-                <template v-if="session.registration_needs">
-                  <dt>Registration opens</dt><dd>{{ formatDateTime(session.registration_start_datetime) }}</dd>
-                  <dt>Registration closes</dt><dd>{{ formatDateTime(session.registration_end_datetime) }}</dd>
-                </template>
-                <dt>Special requests</dt><dd>{{ session.special_requests || 'None' }}</dd>
-              </dl>
-            </section>
+              :session="session"
+              :index="index"
+              :current="visibleSessions.length > 1 && session.id === event.id"
+            />
           </template>
         </template>
       </div>
@@ -390,13 +473,17 @@ watch(() => route.params.eventId, (eventId) => {
 <style scoped>
 .container-form { display: flex; flex-direction: column; gap: 18px; }
 .card-header .page-heading { min-width: 0; }
-.session-card.current { border-style: solid; border-color: #444444; }
 .card-title { margin: 0; }
-.card-title a { color: inherit; }
+.rejection {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 16px; border-left: 3px solid #b42318; border-radius: 4px; background: #fde8e6;
+}
+.rejection-title { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #b42318; }
+.rejection-reason { margin: 0; font-size: 14px; color: #2a2a2a; white-space: pre-line; }
+.rejection-meta { font-size: 12px; color: #6a6a6a; }
 dl { display: grid; grid-template-columns: 180px 1fr; gap: 10px 16px; margin: 0; font-size: 14px; }
 dt { font-weight: 600; color: #6a6a6a; }
 dd { margin: 0; color: #2a2a2a; }
-.capitalize { text-transform: capitalize; }
 @media (max-width: 640px) {
   dl { grid-template-columns: 1fr; gap: 4px; }
   dd { margin-bottom: 8px; }

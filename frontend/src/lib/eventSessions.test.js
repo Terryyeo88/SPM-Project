@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   emptySession,
+  groupIntoRequests,
   isoToLocalInput,
   localInputToIso,
   sessionFromEvent,
@@ -128,4 +129,40 @@ describe('payload round trip', () => {
     expect(session.registration_start_datetime).toBe('2026-11-01T09:30')
   })
 
+})
+
+describe('groupIntoRequests', () => {
+  const row = (id, shared, date, time, status = 'draft') => ({
+    id, shared_event_id: shared, name: `Event ${shared ?? id}`, preferred_start_date: date, preferred_start_time: time, status,
+  })
+
+  it('puts sessions sharing a shared_event_id in one request, in date and time order', () => {
+    const requests = groupIntoRequests([
+      row('b', 'g1', '2026-11-12', '09:00'),
+      row('a', 'g1', '2026-11-10', '14:00'),
+      row('c', 'g1', '2026-11-10', '09:00'),
+    ])
+    expect(requests).toHaveLength(1)
+    expect(requests[0].sessions.map((s) => s.id)).toEqual(['c', 'a', 'b'])
+    expect(requests[0].name).toBe('Event g1')
+  })
+
+  it('keeps the newest-first order requests arrive in', () => {
+    const requests = groupIntoRequests([
+      row('new-1', 'new', '2026-12-01', null),
+      row('old-1', 'old', '2026-11-01', null),
+      row('new-2', 'new', '2026-12-02', null),
+    ])
+    expect(requests.map((r) => r.key)).toEqual(['new', 'old'])
+  })
+
+  it('treats a row without a shared_event_id as a request of its own', () => {
+    const requests = groupIntoRequests([row('legacy-1', null, '2026-11-01', null), row('legacy-2', null, '2026-11-01', null)])
+    expect(requests.map((r) => r.sessions.map((s) => s.id))).toEqual([['legacy-1'], ['legacy-2']])
+  })
+
+  it('lists undated draft sessions after dated ones', () => {
+    const requests = groupIntoRequests([row('undated', 'g1', null, null), row('dated', 'g1', '2026-11-10', null)])
+    expect(requests[0].sessions.map((s) => s.id)).toEqual(['dated', 'undated'])
+  })
 })

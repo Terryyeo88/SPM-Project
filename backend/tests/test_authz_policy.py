@@ -298,12 +298,23 @@ def test_organiser_denied_event_submit_on_event_that_isnt_theirs():
         authorise(user, actions.EVENT_SUBMIT, event)
 
 
-def test_organiser_denied_event_submit_from_status_other_than_draft():
+@pytest.mark.parametrize("status", ["submitted", "under_review", "approved", "planning", "cancelled"])
+def test_organiser_denied_event_submit_from_status_other_than_draft_or_rejected(status):
+    """Only a draft (first submission) or a rejected request (resubmission)
+    can be submitted -- 403, since the organiser owns it."""
     user = make_user(["event_organizer"], user_id="org-1")
-    event = FakeEvent(organizer_id="org-1", status="submitted")
+    event = FakeEvent(organizer_id="org-1", status=status)
     assert can(user, actions.EVENT_SUBMIT, event) is False
     with pytest.raises(AuthorisationError):
         authorise(user, actions.EVENT_SUBMIT, event)
+
+
+def test_organiser_allowed_event_resubmit_after_rejection():
+    """A rejected request returns to the organiser for corrections, and
+    can then be submitted again."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", status="rejected")
+    assert can(user, actions.EVENT_SUBMIT, event) is True
 
 
 def test_organiser_allowed_event_submit_from_draft():
