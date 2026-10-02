@@ -69,17 +69,15 @@ decisions worth double-checking.
   a line from the story text — please confirm Venue Staff should have
   this access.
 
-- **Three orphan columns on `events`: who owns them?**
-  `shared_event_id` (uuid, no foreign key), `registration_start_datetime`
-  and `registration_end_datetime` (both timestamptz) exist in the live
-  database. They were added through the dashboard with no migration and are
-  now captured by `20260927000000_reconcile_events_with_live.sql` for
-  parity. No code, test or doc on any branch or in any commit references
-  them, and every live row has NULL in all three (checked 2026-09-27). The
-  names suggest registration-window work (Event Registration story) and
-  some kind of event grouping or recurrence, but that's a guess. Whoever
-  added them: please claim them, or agree to remove them in a new migration.
-  Until then, nobody should build on them.
+- **~~Three orphan columns on `events`: who owns them?~~ Resolved: now in
+  use by multi-session event requests.** `shared_event_id` links the
+  sessions of one event request. Each session is its own `events` row, and
+  the id is generated server-side in `app.events.event_service` when the
+  request is first created. `registration_start_datetime` and
+  `registration_end_datetime` hold each session's registration window,
+  which is required when `registration_needs` is true. The "ORPHAN" comments
+  in `20260927000000_reconcile_events_with_live.sql` are out of date. They
+  were left as is because that migration has already been applied.
 
 - **Test-suite network gap: JWKS is still fetched over the wire.** The
   unit-test guard (`tests/conftest.py`) blocks the *database* but not the

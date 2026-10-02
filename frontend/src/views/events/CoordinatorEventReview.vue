@@ -69,6 +69,10 @@ function time(value) {
   return value ? value.slice(0, 5) : ''
 }
 
+function dateTime(value) {
+  return value ? new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not specified'
+}
+
 const details = computed(() => {
   const e = props.event
   const times = [time(e.preferred_start_time), time(e.preferred_end_time)].filter(Boolean).join(' – ')
@@ -82,6 +86,9 @@ const details = computed(() => {
     { label: 'Accessibility Needs', value: describeItems(e.accessibility_needs) },
     { label: 'Equipment', value: describeItems(e.equipment_needed?.equipment) },
     { label: 'Registration Needed', value: e.registration_needs ? 'Yes' : 'No' },
+    ...(e.registration_needs
+      ? [{ label: 'Registration Period', value: `${dateTime(e.registration_start_datetime)} – ${dateTime(e.registration_end_datetime)}` }]
+      : []),
     { label: 'Special Requests', value: e.special_requests || 'None', block: Boolean(e.special_requests) },
   ]
 })

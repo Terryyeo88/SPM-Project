@@ -1,10 +1,26 @@
-"""Business logic for event request creation, editing, and submission."""
+"""Business logic for event request creation, editing, and submission.
+
+An event request is made of one or more SESSIONS. Each session is its own
+row in the events table (so each one is reviewed, assigned a coordinator
+and moves through the status lifecycle independently), and every session
+of the same request carries the same `shared_event_id`, generated here on
+the server when the request is first created. The name, description and
+purpose are shared by every session; everything else (dates/times,
+attendance, layout, accessibility, equipment, registration and its
+window, special requests) is per session.
+
+Request bodies for the create/draft endpoints are group-shaped:
+    {"name", "description", "purpose", "sessions": [{...session fields}]}
+"""
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+import uuid
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 
+from app.authz.actions import EVENT_VIEW
+from app.authz.policy import can
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
 from app.extensions import supabase
 from app.shared.errors import ValidationError
@@ -28,10 +44,8 @@ ACCESSIBILITY_NEEDS = {
     "removable_seats",
     "extra_legroom_seats",
 }
-EVENT_FIELDS = {
-    "name",
-    "description",
-    "purpose",
+SHARED_FIELDS = ("name", "description", "purpose")
+SESSION_FIELDS = {
     "preferred_start_date",
     "preferred_end_date",
     "preferred_start_time",
@@ -41,8 +55,18 @@ EVENT_FIELDS = {
     "room_layout",
     "equipment",
     "registration_needs",
+    "registration_start_datetime",
+    "registration_end_datetime",
     "special_requests",
 }
+EVENT_FIELDS = set(SHARED_FIELDS) | SESSION_FIELDS
+GROUP_FIELDS = {*SHARED_FIELDS, "sessions"}
+REGISTRATION_WINDOW_FIELDS = ("registration_start_datetime", "registration_end_datetime")
+# Venues are in Singapore, so session dates/times (date + time columns with
+# no timezone) are Singapore wall-clock time. Singapore has been a fixed
+# UTC+8 with no daylight saving since 1982, so a fixed offset is exact --
+# and unlike zoneinfo it needs no tzdata package on Windows.
+SINGAPORE_TZ = timezone(timedelta(hours=8), "SGT")
 REQUIRED_FIELDS = {
     "name",
     "description",
@@ -80,6 +104,79 @@ def _validate_item_list(value, field: str, allowed_items: set[str], *, quantity_
 
         validated.append(entry)
     return validated
+
+
+def _parse_registration_datetime(value, field: str) -> datetime:
+    """registration_*_datetime are timestamptz columns, so the value must
+    carry its own UTC offset -- a naive value would be silently read by
+    Postgres as UTC, shifting it by Singapore's 8 hours.
+
+    Returned in Singapore time (e.g. the browser's "2026-11-01T01:00:00Z"
+    becomes "2026-11-01T09:00:00+08:00"). It's the same instant either way
+    -- timestamptz stores an absolute moment in UTC -- but sending it with
+    +08:00 keeps what's written readable as Singapore time, and gives the
+    wall-clock value the session-start comparison below needs."""
+    if not isinstance(value, str):
+        raise ValidationError(f"{field} must be an ISO datetime with a timezone offset.")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError(f"{field} must be an ISO datetime with a timezone offset.") from exc
+    if parsed.tzinfo is None:
+        raise ValidationError(f"{field} must be an ISO datetime with a timezone offset.")
+    return parsed.astimezone(SINGAPORE_TZ)
+
+
+def _validate_registration_window(validated: dict, *, for_submission: bool) -> None:
+    """Registration period for a session: when registration_needs is true
+    the organiser must say when registration opens and closes. Mutates
+    `validated` in place (normalised ISO strings / None).
+
+    The session's own start is a date + time WITHOUT a timezone (Singapore
+    wall-clock time), while the registration window is timestamptz. To
+    compare the two, the registration close is converted to Singapore time
+    (by _parse_registration_datetime) and compared as wall-clock values --
+    independent of whatever timezone the server itself runs in.
+    """
+    if validated.get("registration_needs") is False:
+        # A session that doesn't need registration has no window; drop
+        # anything stale left over from when the checkbox was ticked.
+        for field in REGISTRATION_WINDOW_FIELDS:
+            validated[field] = None
+        return
+
+    if for_submission and validated.get("registration_needs") is True:
+        missing = [field for field in REGISTRATION_WINDOW_FIELDS if not validated.get(field)]
+        if missing:
+            raise ValidationError(
+                f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} "
+                "required when registration is needed."
+            )
+
+    parsed = {}
+    for field in REGISTRATION_WINDOW_FIELDS:
+        if validated.get(field) == "":
+            validated[field] = None
+        if field in validated and validated[field] is not None:
+            parsed[field] = _parse_registration_datetime(validated[field], field)
+            validated[field] = parsed[field].isoformat()
+
+    opens = parsed.get("registration_start_datetime")
+    closes = parsed.get("registration_end_datetime")
+    if opens and closes and opens >= closes:
+        raise ValidationError("registration_end_datetime must be after registration_start_datetime.")
+
+    if closes and validated.get("preferred_start_date"):
+        session_start = datetime.combine(
+            date.fromisoformat(validated["preferred_start_date"]),
+            time.fromisoformat(validated["preferred_start_time"])
+            if validated.get("preferred_start_time")
+            else time.min,
+        )
+        if closes.replace(tzinfo=None) > session_start:
+            raise ValidationError(
+                "registration_end_datetime must be on or before the session's preferred start date and time."
+            )
 
 
 def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
@@ -174,6 +271,8 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
         if validated["preferred_start_time"] >= validated["preferred_end_time"]:
             raise ValidationError("preferred_end_time must be after preferred_start_time.")
 
+    _validate_registration_window(validated, for_submission=for_submission)
+
     if "expected_attendance" in validated:
         if not isinstance(validated["expected_attendance"], int) or validated["expected_attendance"] <= 0:
             raise ValidationError("expected_attendance must be a positive integer.")
@@ -203,15 +302,13 @@ def _to_database_payload(payload: dict, existing: dict | None = None) -> dict:
     return database_payload
 
 
-def _draft_payload(payload: dict, existing: dict | None = None) -> dict:
-    if not isinstance(payload, dict):
-        raise ValidationError("The event request body must be a JSON object.")
-    unknown_fields = set(payload) - EVENT_FIELDS
-    if unknown_fields:
-        raise ValidationError(f"Unknown event fields: {', '.join(sorted(unknown_fields))}.")
-    if not any(value not in (None, "", [], False) for value in payload.values()):
-        raise ValidationError("At least one event field is required to save a draft.")
+def _has_draft_data(values) -> bool:
+    return any(value not in (None, "", [], False) for value in values)
 
+
+def _normalize_draft_row(payload: dict, existing: dict | None = None) -> dict:
+    """Blank-to-NULL normalisation for one draft row -- no completeness
+    checks, since a draft may be saved half-filled."""
     database_payload = dict(existing or {})
     database_payload.update(payload)
     database_payload["name"] = database_payload.get("name") or DRAFT_NAME
@@ -221,16 +318,34 @@ def _draft_payload(payload: dict, existing: dict | None = None) -> dict:
         "preferred_start_time",
         "preferred_end_time",
         "room_layout",
+        *REGISTRATION_WINDOW_FIELDS,
     )
     for field in nullable_fields:
         if database_payload.get(field) == "":
             database_payload[field] = None
     if database_payload.get("expected_attendance") == "":
         database_payload["expected_attendance"] = None
+    if database_payload.get("registration_needs") is False:
+        for field in REGISTRATION_WINDOW_FIELDS:
+            database_payload[field] = None
+    for field in REGISTRATION_WINDOW_FIELDS:
+        if database_payload.get(field) is not None:
+            database_payload[field] = _parse_registration_datetime(database_payload[field], field).isoformat()
     database_payload["equipment_needed"] = {
         "equipment": database_payload.pop("equipment", []),
     }
     return database_payload
+
+
+def _draft_payload(payload: dict, existing: dict | None = None) -> dict:
+    if not isinstance(payload, dict):
+        raise ValidationError("The event request body must be a JSON object.")
+    unknown_fields = set(payload) - EVENT_FIELDS
+    if unknown_fields:
+        raise ValidationError(f"Unknown event fields: {', '.join(sorted(unknown_fields))}.")
+    if not _has_draft_data(payload.values()):
+        raise ValidationError("At least one event field is required to save a draft.")
+    return _normalize_draft_row(payload, existing)
 
 
 def _from_database_event(event: SimpleNamespace) -> dict:
@@ -250,6 +365,10 @@ def _from_database_event(event: SimpleNamespace) -> dict:
         "room_layout": event.room_layout,
         "equipment": equipment_needed.get("equipment") or [],
         "registration_needs": event.registration_needs,
+        # getattr: rows created before the registration window existed (and
+        # test doubles) may not carry these attributes at all.
+        "registration_start_datetime": getattr(event, "registration_start_datetime", None),
+        "registration_end_datetime": getattr(event, "registration_end_datetime", None),
         "special_requests": event.special_requests,
     }
 
@@ -260,21 +379,165 @@ def _first_row(result) -> dict:
     return result.data[0] if isinstance(result.data, list) else result.data
 
 
-def create_event_request(organizer_id: str, payload: dict):
-    payload = validate_event_payload(payload, for_submission=False)
-    database_payload = _to_database_payload(payload)
-    database_payload["organizer_id"] = organizer_id
-    database_payload["status"] = "draft"
-    result = supabase.table("events").insert(database_payload).select("*").execute()
-    return _first_row(result)
+# -- Sessions (one event request = one or more rows sharing shared_event_id) --
 
 
-def create_draft_request(organizer_id: str, payload: dict):
-    database_payload = _draft_payload(payload)
-    database_payload["organizer_id"] = organizer_id
-    database_payload["status"] = "draft"
-    result = supabase.table("events").insert(database_payload).select("*").execute()
-    return _first_row(result)
+def _session_sort_key(row: dict):
+    """Chronological; sessions with no date yet (half-filled drafts) last."""
+    return (
+        row.get("preferred_start_date") or "9999-12-31",
+        row.get("preferred_start_time") or "",
+        row.get("created_at") or "",
+    )
+
+
+def _group_response(rows: list[dict]) -> dict:
+    rows = sorted(rows, key=_session_sort_key)
+    first = rows[0] if rows else {}
+    return {
+        "shared_event_id": first.get("shared_event_id"),
+        "name": first.get("name"),
+        "description": first.get("description"),
+        "purpose": first.get("purpose"),
+        "sessions": rows,
+    }
+
+
+def _split_group_payload(payload) -> tuple[dict, list[dict]]:
+    """Shape check for a group body; returns (shared fields, sessions)."""
+    if not isinstance(payload, dict):
+        raise ValidationError("The event request body must be a JSON object.")
+    unknown_fields = set(payload) - GROUP_FIELDS
+    if unknown_fields:
+        raise ValidationError(f"Unknown event fields: {', '.join(sorted(unknown_fields))}.")
+    sessions = payload.get("sessions")
+    if not isinstance(sessions, list) or not sessions or any(not isinstance(s, dict) for s in sessions):
+        raise ValidationError("sessions must be a non-empty list of session objects.")
+    for index, session in enumerate(sessions, start=1):
+        unknown_fields = set(session) - SESSION_FIELDS - {"id"}
+        if unknown_fields:
+            raise ValidationError(
+                f"Session {index}: unknown session fields: {', '.join(sorted(unknown_fields))}."
+            )
+    shared = {field: payload[field] for field in SHARED_FIELDS if field in payload}
+    return shared, sessions
+
+
+def _session_fields(session: dict) -> dict:
+    return {field: value for field, value in session.items() if field != "id"}
+
+
+def _validate_session(index: int, total: int, payload: dict, *, for_submission: bool) -> dict:
+    """validate_event_payload for one session, with the error message
+    saying WHICH session is wrong when there's more than one."""
+    try:
+        return validate_event_payload(payload, for_submission=for_submission)
+    except ValidationError as exc:
+        if total == 1:
+            raise
+        raise ValidationError(f"Session {index}: {exc.message}") from exc
+
+
+def validate_event_group(payload, *, for_submission: bool) -> list[dict]:
+    """Validates every session (merged with the shared fields) BEFORE
+    anything is written, so one bad session can't leave a half-created
+    request behind. Returns the validated rows, in request order."""
+    shared, sessions = _split_group_payload(payload)
+    # Shared fields first, so a missing name is reported once rather than
+    # as "Session 1: name is required."
+    validate_event_payload(
+        shared,
+        for_submission=False,
+    )
+    if for_submission:
+        missing = sorted(field for field in SHARED_FIELDS if shared.get(field) in (None, ""))
+        if missing:
+            raise ValidationError(f"Missing required fields: {', '.join(missing)}.")
+    return [
+        _validate_session(
+            index, len(sessions), {**shared, **_session_fields(session)}, for_submission=for_submission
+        )
+        for index, session in enumerate(sessions, start=1)
+    ]
+
+
+def _load_draft_sessions(event: SimpleNamespace) -> list[dict]:
+    """Every still-draft session of the same request as `event` (owned by
+    the same organiser), oldest-first by date. A request created before
+    sessions existed has no shared_event_id and is a group of one."""
+    shared_event_id = getattr(event, "shared_event_id", None)
+    if not shared_event_id:
+        return [dict(vars(event))]
+    result = (
+        supabase.table("events")
+        .select("*")
+        .eq("shared_event_id", shared_event_id)
+        .eq("organizer_id", event.organizer_id)
+        .eq("status", "draft")
+        .execute()
+    )
+    return sorted(result.data or [], key=_session_sort_key)
+
+
+def _insert_sessions(organizer_id: str, rows: list[dict], shared_event_id: str) -> list[dict]:
+    for row in rows:
+        row.pop("id", None)
+        row["organizer_id"] = organizer_id
+        row["status"] = "draft"
+        row["shared_event_id"] = shared_event_id
+    # One insert statement for all rows -- PostgREST runs it as a single
+    # statement, so either every session is created or none is.
+    result = supabase.table("events").insert(rows).select("*").execute()
+    return result.data or []
+
+
+def _submit_sessions(event_ids: list[str]) -> list[dict]:
+    for event_id in event_ids:
+        # Conditioned on still being a draft so a double submit can't
+        # re-run coordinator assignment on an already-submitted session.
+        supabase.table("events").update({"status": "submitted"}).eq("id", event_id).eq(
+            "status", "draft"
+        ).execute()
+
+        # Per Customer Briefing Step 3 / Event Status Management: submission
+        # should trigger coordinator auto-assignment, moving the event to
+        # "under_review". If nobody's available, it stays "submitted" and
+        # unassigned -- an intentionally open case per coordinator_service's
+        # own docstring, not an error here. Each session is assigned on its
+        # own, since each one is reviewed as its own event record.
+        try:
+            assign_initial_coordinator(event_id)
+        except NoCoordinatorAvailableError:
+            pass
+
+    result = supabase.table("events").select("*").in_("id", event_ids).execute()
+    return result.data or []
+
+
+def create_event_request(organizer_id: str, payload: dict) -> dict:
+    """Create AND submit a new multi-session request in one step: every
+    session must pass submission validation before any row is written."""
+    rows = [_to_database_payload(row) for row in validate_event_group(payload, for_submission=True)]
+    # Submitting without ever saving a draft: the request's shared_event_id
+    # is generated here, server-side, and stamped on every session row.
+    shared_event_id = str(uuid.uuid4())
+    inserted = _insert_sessions(organizer_id, rows, shared_event_id)
+    if not inserted:
+        raise ValidationError("The event database operation did not return an event.")
+    return _group_response(_submit_sessions([row["id"] for row in inserted]))
+
+
+def create_draft_request(organizer_id: str, payload: dict) -> dict:
+    shared, sessions = _split_group_payload(payload)
+    if not _has_draft_data([*shared.values(), *(v for s in sessions for v in _session_fields(s).values())]):
+        raise ValidationError("At least one event field is required to save a draft.")
+    rows = [_normalize_draft_row({**shared, **_session_fields(session)}) for session in sessions]
+    # First save of a new draft: shared_event_id is generated here, server-side.
+    shared_event_id = str(uuid.uuid4())
+    inserted = _insert_sessions(organizer_id, rows, shared_event_id)
+    if not inserted:
+        raise ValidationError("The event database operation did not return an event.")
+    return _group_response(inserted)
 
 
 def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
@@ -286,47 +549,121 @@ def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
     return _first_row(result)
 
 
-def save_draft_request(event_id: str, event: SimpleNamespace, payload: dict):
-    database_payload = _draft_payload(payload, _from_database_event(event))
-    result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
-    return _first_row(result)
+def save_draft_request(event_id: str, event: SimpleNamespace, payload: dict) -> dict:
+    """Save edits to an editable request (authz has already checked the
+    caller owns it and it's "draft" or "rejected").
+
+    - draft: the whole request is edited together. Sessions in the body
+      with an `id` update that session, sessions without one are added,
+      and draft sessions missing from the body are removed.
+    - rejected: only this one session is edited -- its siblings have
+      their own review outcome and aren't touched. Adding or removing
+      sessions isn't allowed.
+    """
+    shared, sessions = _split_group_payload(payload)
+    if not _has_draft_data([*shared.values(), *(v for s in sessions for v in _session_fields(s).values())]):
+        raise ValidationError("At least one event field is required to save a draft.")
+
+    if event.status != "draft":
+        if len(sessions) != 1 or sessions[0].get("id", event_id) != event_id:
+            raise ValidationError("A rejected event request can only be edited one session at a time.")
+        row = _normalize_draft_row(
+            {**shared, **_session_fields(sessions[0])}, _from_database_event(event)
+        )
+        result = supabase.table("events").update(row).eq("id", event_id).select("*").execute()
+        return _group_response([_first_row(result)])
+
+    existing = {row["id"]: row for row in _load_draft_sessions(event)}
+    # A legacy single-row draft gets its group id the first time it's saved.
+    shared_event_id = getattr(event, "shared_event_id", None) or str(uuid.uuid4())
+
+    updates, inserts = [], []
+    for index, session in enumerate(sessions, start=1):
+        session_id = session.get("id")
+        if session_id is not None and session_id not in existing:
+            raise ValidationError(f"Session {index} does not belong to this draft event request.")
+        current = _from_database_event(SimpleNamespace(**existing[session_id])) if session_id else None
+        row = _normalize_draft_row({**shared, **_session_fields(session)}, current)
+        row["shared_event_id"] = shared_event_id
+        if session_id:
+            updates.append((session_id, row))
+        else:
+            inserts.append(row)
+    removed = set(existing) - {session_id for session_id, _ in updates}
+
+    # Not one transaction (supabase-py has none to offer), so order matters:
+    # write the new state first and remove dropped sessions last, so a
+    # failure part-way leaves extra sessions behind rather than lost ones.
+    for session_id, row in updates:
+        supabase.table("events").update(row).eq("id", session_id).eq("status", "draft").execute()
+    if inserts:
+        _insert_sessions(event.organizer_id, inserts, shared_event_id)
+    if removed:
+        supabase.table("events").delete().in_("id", sorted(removed)).eq("status", "draft").execute()
+
+    result = (
+        supabase.table("events")
+        .select("*")
+        .eq("shared_event_id", shared_event_id)
+        .eq("organizer_id", event.organizer_id)
+        .eq("status", "draft")
+        .execute()
+    )
+    return _group_response(result.data or [])
 
 
 def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
-    """Permanently remove a draft event request.
+    """Permanently remove a draft event request -- every one of its
+    sessions, since they're only separate rows, not separate requests.
 
     Callers must gate this through app.authz's event.delete action first
     (rule_event_delete restricts it to the owning organizer while status
-    is still "draft") -- this function itself performs no status check,
-    the same trust boundary edit_event_request/submit_event_request rely
-    on for their own authz-gated preconditions.
+    is still "draft") -- this function only re-checks status on the
+    SIBLING rows, which authz never saw, the same trust boundary
+    edit_event_request/submit_event_request rely on for their own
+    authz-gated preconditions.
     """
-    supabase.table("events").delete().eq("id", event_id).execute()
+    shared_event_id = getattr(event, "shared_event_id", None)
+    if not shared_event_id:
+        supabase.table("events").delete().eq("id", event_id).execute()
+        return
+    (
+        supabase.table("events")
+        .delete()
+        .eq("shared_event_id", shared_event_id)
+        .eq("organizer_id", event.organizer_id)
+        .eq("status", "draft")
+        .execute()
+    )
 
 
 def submit_event_request(event_id: str, event: SimpleNamespace):
-    validate_event_payload(_from_database_event(event), for_submission=True)
-    result = (
-        supabase.table("events")
-        .update({"status": "submitted"})
-        .eq("id", event_id)
-        .select("*")
-        .execute()
-    )
-    submitted_event = _first_row(result)
+    """Submit every draft session of this request together. All sessions
+    are validated before any of them changes status. Returns the row for
+    `event_id` itself (the session the caller submitted from)."""
+    sessions = _load_draft_sessions(event)
+    for index, session in enumerate(sessions, start=1):
+        _validate_session(
+            index,
+            len(sessions),
+            _from_database_event(SimpleNamespace(**session)),
+            for_submission=True,
+        )
+    submitted = _submit_sessions([session["id"] for session in sessions])
+    return next(row for row in submitted if row["id"] == event_id)
 
-    # Per Customer Briefing Step 3 / Event Status Management: submission
-    # should trigger coordinator auto-assignment, moving the event to
-    # "under_review". If nobody's available, it stays "submitted" and
-    # unassigned -- an intentionally open case per coordinator_service's
-    # own docstring, not an error here.
-    try:
-        assign_initial_coordinator(event_id)
-    except NoCoordinatorAvailableError:
-        return submitted_event
 
-    result = supabase.table("events").select("*").eq("id", event_id).single().execute()
-    return result.data
+def list_event_sessions(event: SimpleNamespace, user) -> dict:
+    """Every session of the same request as `event` that `user` may see.
+    Sibling rows are filtered through the same event.view rule the route
+    used for `event` itself -- e.g. a coordinator assigned to one session
+    doesn't see siblings assigned to someone else."""
+    shared_event_id = getattr(event, "shared_event_id", None)
+    if not shared_event_id:
+        return _group_response([dict(vars(event))])
+    result = supabase.table("events").select("*").eq("shared_event_id", shared_event_id).execute()
+    visible = [row for row in result.data or [] if can(user, EVENT_VIEW, SimpleNamespace(**row))]
+    return _group_response(visible)
 
 
 def _record_status_change(

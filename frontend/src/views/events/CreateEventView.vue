@@ -1,29 +1,29 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { apiGet, apiPost } from '../../lib/api'
+import {
+  DRAFT_NAME,
+  emptySession,
+  minimumStartDate,
+  sessionFromEvent,
+  sessionHasData,
+  sessionHasInvalidInput,
+  sessionIsComplete,
+  sessionPayload,
+  validateSession,
+} from '../../lib/eventSessions'
 import AppNavBar from '../../components/AppNavBar.vue'
+import EventSessionFields from '../../components/EventSessionFields.vue'
 
+// Holds the id of ONE session of the saved draft -- any session of a request
+// addresses the whole request on the backend.
 const draftStorageKey = 'connectsphere-event-draft-id'
 
-const roomLayouts = ['theatre', 'classroom', 'boardroom', 'seminar', 'banquet', 'networking']
-const equipment = [
-  { value: 'microphone', label: 'Microphones', hasQuantity: true },
-  { value: 'projector', label: 'Projectors', hasQuantity: true },
-  { value: 'screen', label: 'Screens', hasQuantity: true },
-  { value: 'wifi', label: 'WiFi', hasQuantity: false },
-]
-const accessibilityNeeds = [
-  { value: 'wheelchair_access', label: 'Wheelchair access', hasQuantity: false },
-  { value: 'lift_access', label: 'Lift access', hasQuantity: false },
-  { value: 'removable_seats', label: 'Removable seats', hasQuantity: true },
-  { value: 'extra_legroom_seats', label: 'Seats with extra legroom', hasQuantity: true },
-]
-
+// name/description/purpose are shared by every session; everything else is
+// per session (see lib/eventSessions).
 const form = reactive({
-  name: '', description: '', purpose: '', preferred_start_datetime: '', preferred_end_datetime: '',
-  expected_attendance: '', accessibility_needs: [],
-  room_layout: '', equipment: [],
-  registration_needs: false, special_requests: '',
+  name: '', description: '', purpose: '',
+  sessions: [emptySession()],
 })
 const error = ref('')
 const errors = reactive({})
@@ -33,30 +33,14 @@ const savingDraft = ref(false)
 const draftId = ref(null)
 const draftSaved = ref(false)
 
-function localDateString(date) {
-  const offset = date.getTimezoneOffset()
-  return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 10)
-}
+const minimumDate = minimumStartDate()
 
-const minimumDate = localDateString(new Date(Date.now() + 24 * 60 * 60 * 1000))
-
-function timeInputValue(value) {
-  return value ? value.slice(0, 5) : ''
-}
-
-// The two DB fields (a date column + a time column) are combined into one
-// <input type="datetime-local"> value ("YYYY-MM-DDTHH:mm") for display, and
-// split back apart in payload() before anything is sent to the backend --
-// the backend only ever knows about the separate date/time columns.
-function combineDateTime(datePart, timePart) {
-  if (!datePart) return ''
-  return `${datePart}T${timeInputValue(timePart) || '00:00'}`
-}
-
-function splitDateTime(value) {
-  if (!value) return { date: '', time: '' }
-  const [date, time] = value.split('T')
-  return { date: date || '', time: time || '' }
+function populateForm(group) {
+  form.name = group.name === DRAFT_NAME ? '' : group.name || ''
+  form.description = group.description || ''
+  form.purpose = group.purpose || ''
+  form.sessions = group.sessions.length ? group.sessions.map(sessionFromEvent) : [emptySession()]
+  draftId.value = group.sessions[0]?.id || null
 }
 
 async function loadSavedDraft() {
@@ -64,23 +48,13 @@ async function loadSavedDraft() {
   if (!savedDraftId) return
 
   try {
-    const event = await apiGet(`/events/${savedDraftId}`)
-    if (!['draft', 'rejected'].includes(event.status)) {
+    const group = await apiGet(`/events/${savedDraftId}/sessions`)
+    const drafts = group.sessions.filter((session) => session.status === 'draft')
+    if (drafts.length === 0) {
       localStorage.removeItem(draftStorageKey)
       return
     }
-    draftId.value = event.id
-    form.name = event.name === 'Untitled event request' ? '' : event.name || ''
-    form.description = event.description || ''
-    form.purpose = event.purpose || ''
-    form.preferred_start_datetime = combineDateTime(event.preferred_start_date, event.preferred_start_time)
-    form.preferred_end_datetime = combineDateTime(event.preferred_end_date, event.preferred_end_time)
-    form.expected_attendance = event.expected_attendance || ''
-    form.accessibility_needs = event.accessibility_needs || []
-    form.room_layout = event.room_layout || ''
-    form.equipment = event.equipment_needed?.equipment || []
-    form.registration_needs = event.registration_needs || false
-    form.special_requests = event.special_requests || ''
+    populateForm({ ...group, sessions: drafts })
   } catch (requestError) {
     localStorage.removeItem(draftStorageKey)
   }
@@ -88,179 +62,70 @@ async function loadSavedDraft() {
 
 onMounted(loadSavedDraft)
 
-function findItem(field, value) {
-  return form[field].find((entry) => entry.item === value)
+function addSession() {
+  form.sessions.push(emptySession())
 }
 
-function toggleItem(field, value, selected) {
-  const index = form[field].findIndex((entry) => entry.item === value)
-  if (selected && index === -1) {
-    const option = [...equipment, ...accessibilityNeeds].find((item) => item.value === value)
-    const entry = { item: value }
-    if (option?.hasQuantity || value === 'wifi') entry.quantity = 1
-    form[field].push(entry)
-  }
-  if (!selected && index !== -1) form[field].splice(index, 1)
-}
-
-function updateQuantity(field, value, quantity) {
-  const entry = findItem(field, value)
-  if (entry) entry.quantity = Number(quantity)
-}
-
-function updateNotes(value, notes) {
-  const entry = findItem('accessibility_needs', value)
-  if (entry) entry.notes = notes
+function removeSession(index) {
+  form.sessions.splice(index, 1)
 }
 
 function payload() {
-  const start = splitDateTime(form.preferred_start_datetime)
-  const end = splitDateTime(form.preferred_end_datetime)
   return {
     name: form.name,
     description: form.description,
     purpose: form.purpose,
-    preferred_start_date: start.date,
-    preferred_start_time: start.time,
-    preferred_end_date: end.date,
-    preferred_end_time: end.time,
-    expected_attendance: Number(form.expected_attendance),
-    accessibility_needs: form.accessibility_needs,
-    room_layout: form.room_layout,
-    equipment: form.equipment,
-    registration_needs: form.registration_needs,
-    special_requests: form.special_requests,
+    sessions: form.sessions.map(sessionPayload),
   }
 }
 
-const hasDraftData = computed(() => [
-  form.name,
-  form.description,
-  form.purpose,
-  form.preferred_start_datetime,
-  form.preferred_end_datetime,
-  form.expected_attendance,
-  form.room_layout,
-  form.special_requests,
-].some((value) => String(value ?? '').trim() !== '')
-  || form.registration_needs
-  || form.accessibility_needs.length > 0
-  || form.equipment.length > 0)
+const hasDraftData = computed(() => [form.name, form.description, form.purpose]
+  .some((value) => String(value ?? '').trim() !== '')
+  || form.sessions.some(sessionHasData))
 
 const canSubmit = computed(() => {
-  const hasRequiredFields = [
-    form.name,
-    form.description,
-    form.purpose,
-    form.preferred_start_datetime,
-    form.preferred_end_datetime,
-    form.room_layout,
-  ].every((value) => String(value ?? '').trim() !== '')
-  const hasAttendance = Number(form.expected_attendance) > 0
-  const hasValidStart = splitDateTime(form.preferred_start_datetime).date >= minimumDate
-  // Plain string comparison is valid here because datetime-local values are
-  // "YYYY-MM-DDTHH:mm", which sorts lexicographically the same as
-  // chronologically -- this is the combined start-before-end check (not two
-  // separate date/time rules), so an end time earlier than the start time is
-  // correctly allowed as long as the end DATE is later (e.g. 22:00 on day
-  // one to 06:00 on day two).
-  const hasValidRange = form.preferred_end_datetime > form.preferred_start_datetime
-  const hasValidQuantities = form.equipment.every((entry) => entry.quantity >= 1)
-    && form.accessibility_needs.every((entry) => entry.quantity === undefined || entry.quantity >= 1)
-  return hasRequiredFields && hasAttendance && hasValidStart && hasValidRange && hasValidQuantities
+  const hasSharedFields = [form.name, form.description, form.purpose]
+    .every((value) => String(value ?? '').trim() !== '')
+  return hasSharedFields && form.sessions.every((session) => sessionIsComplete(session, minimumDate))
 })
 
-const hasInvalidInput = computed(() => {
-  const hasInvalidAttendance = form.expected_attendance !== '' && Number(form.expected_attendance) <= 0
-  const startDate = splitDateTime(form.preferred_start_datetime).date
-  const hasInvalidStart = startDate && startDate < minimumDate
-  const hasInvalidRange = form.preferred_start_datetime
-    && form.preferred_end_datetime
-    && form.preferred_end_datetime <= form.preferred_start_datetime
-  const hasInvalidEquipmentQuantity = form.equipment.some((entry) => entry.quantity < 1)
-  const hasInvalidAccessibilityQuantity = form.accessibility_needs.some(
-    (entry) => entry.quantity !== undefined && entry.quantity < 1,
-  )
-  return hasInvalidAttendance
-    || hasInvalidStart
-    || hasInvalidRange
-    || hasInvalidEquipmentQuantity
-    || hasInvalidAccessibilityQuantity
-})
-
-function validateDateRange() {
-  delete errors.preferred_start_datetime
-  delete errors.preferred_end_datetime
-  const startDate = splitDateTime(form.preferred_start_datetime).date
-  if (!form.preferred_start_datetime) {
-    errors.preferred_start_datetime = 'Preferred start date and time is required.'
-  } else if (startDate < minimumDate) {
-    errors.preferred_start_datetime = 'Preferred start date must be after today.'
-  }
-  // Deliberately does NOT flag a still-empty end date here -- this runs on
-  // every keystroke in either field (see the @input bindings below), and
-  // the end field is naturally still empty while the user is filling in
-  // the start field first. That "required" check only belongs in
-  // validateForm(), which runs once, at actual submit time. An end date
-  // that IS filled in but out of order is still flagged immediately,
-  // since that's a genuine mistake worth catching right away.
-  if (form.preferred_end_datetime && form.preferred_start_datetime) {
-    if (form.preferred_end_datetime <= form.preferred_start_datetime) {
-      errors.preferred_end_datetime = 'End date and time must be after the start date and time.'
-    }
-  }
-}
-
-function validateAttendance() {
-  delete errors.expected_attendance
-  if (form.expected_attendance !== '' && Number(form.expected_attendance) <= 0) {
-    errors.expected_attendance = 'Expected attendance must be greater than zero.'
-  }
-}
+const hasInvalidInput = computed(() => form.sessions.some((session) => sessionHasInvalidInput(session, minimumDate)))
 
 function validateForm() {
   Object.keys(errors).forEach((field) => delete errors[field])
-
   const requiredText = [
     ['name', 'Event name is required.'],
     ['description', 'Description is required.'],
     ['purpose', 'Purpose is required.'],
-    ['room_layout', 'Please select a room layout.'],
-    ['special_requests', null],
   ]
   requiredText.forEach(([field, message]) => {
-    if (message && !form[field].trim()) errors[field] = message
+    if (!form[field].trim()) errors[field] = message
   })
-
-  validateDateRange()
-  if (!form.preferred_end_datetime) {
-    errors.preferred_end_datetime = 'Preferred end date and time is required.'
-  }
-
-  validateAttendance()
-
-  form.equipment.forEach((entry) => {
-    if (entry.quantity < 1) errors.equipment = 'Equipment quantities must be at least 1.'
-  })
-  form.accessibility_needs.forEach((entry) => {
-    if (entry.quantity !== undefined && entry.quantity < 1) errors.accessibility_needs = 'Accessibility quantities must be at least 1.'
-  })
-  return Object.keys(errors).length === 0
+  // map, not every(): every session is validated so all of their errors
+  // show at once, not just the first failing session's.
+  const sessionResults = form.sessions.map((session) => validateSession(session, minimumDate))
+  return Object.keys(errors).length === 0 && sessionResults.every(Boolean)
 }
 
 async function submitRequest() {
   error.value = ''
   success.value = false
+  draftSaved.value = false
   if (!validateForm()) return
   submitting.value = true
   try {
-    const draft = draftId.value
-      ? await apiPost(`/events/${draftId.value}/draft`, payload())
-      : await apiPost('/events', payload())
-    draftId.value = draft.id
-    await apiPost(`/events/${draft.id}/submit`, {})
+    if (draftId.value) {
+      // Save the latest edits to the draft first, then submit every session of it.
+      populateForm(await apiPost(`/events/${draftId.value}/draft`, payload()))
+      await apiPost(`/events/${draftId.value}/submit`, {})
+    } else {
+      // A brand-new request: the backend validates every session, creates
+      // them all under one server-generated shared_event_id, and submits them.
+      await apiPost('/events', payload())
+    }
     // localStorage is to store data locally on a user's machine
     localStorage.removeItem(draftStorageKey)
+    draftId.value = null
     success.value = true
   } catch (requestError) {
     error.value = requestError.message
@@ -276,11 +141,11 @@ async function saveDraft() {
   if (!hasDraftData.value) return
   savingDraft.value = true
   try {
-    const draft = draftId.value
+    const group = draftId.value
       ? await apiPost(`/events/${draftId.value}/draft`, payload())
       : await apiPost('/events/draft', payload())
-    draftId.value = draft.id
-    localStorage.setItem(draftStorageKey, draft.id)
+    populateForm(group)
+    localStorage.setItem(draftStorageKey, draftId.value)
     draftSaved.value = true
   } catch (requestError) {
     error.value = requestError.message
@@ -296,59 +161,26 @@ async function saveDraft() {
   <main class="events-page">
     <p><router-link to="/">&larr; Back</router-link></p>
     <h1>Create an event request</h1>
-    <p class="intro">Complete the event brief so a coordinator can review and plan it.</p>
+    <p class="intro">Complete the event brief so a coordinator can review and plan it. Add a session for each date and time the event runs. Each session can have its own requirements.</p>
 
     <form novalidate @submit.prevent="submitRequest">
       <fieldset>
         <legend>Event details</legend>
-        <label :class="{ invalid: errors.name }">Event name <input v-model.trim="form.name" /> <span v-if="errors.name" class="field-error">{{ errors.name }}</span></label>
-        <label :class="{ invalid: errors.description }">Description <textarea v-model.trim="form.description" /> <span v-if="errors.description" class="field-error">{{ errors.description }}</span></label>
-        <label :class="{ invalid: errors.purpose }">Purpose of the event <textarea v-model.trim="form.purpose" /> <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span></label>
-        <div class="grid">
-          <label :class="{ invalid: errors.preferred_start_datetime }">Preferred start date &amp; time <input v-model="form.preferred_start_datetime" type="datetime-local" :min="`${minimumDate}T00:00`" @input="validateDateRange" /> <span v-if="errors.preferred_start_datetime" class="field-error">{{ errors.preferred_start_datetime }}</span></label>
-          <label :class="{ invalid: errors.preferred_end_datetime }">Preferred end date &amp; time <input v-model="form.preferred_end_datetime" type="datetime-local" :min="form.preferred_start_datetime || `${minimumDate}T00:00`" @input="validateDateRange" /> <span v-if="errors.preferred_end_datetime" class="field-error">{{ errors.preferred_end_datetime }}</span></label>
-          <label :class="{ invalid: errors.expected_attendance }">Expected attendance <input v-model="form.expected_attendance" type="number" min="1" @input="validateAttendance" /> <span v-if="errors.expected_attendance" class="field-error">{{ errors.expected_attendance }}</span></label>
-        </div>
+        <label :class="{ invalid: errors.name }">Event name <input v-model.trim="form.name" @input="delete errors.name" /> <span v-if="errors.name" class="field-error">{{ errors.name }}</span></label>
+        <label :class="{ invalid: errors.description }">Description <textarea v-model.trim="form.description" @input="delete errors.description" /> <span v-if="errors.description" class="field-error">{{ errors.description }}</span></label>
+        <label :class="{ invalid: errors.purpose }">Purpose of the event <textarea v-model.trim="form.purpose" @input="delete errors.purpose" /> <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span></label>
       </fieldset>
 
-      <fieldset>
-        <legend>Venue and access</legend>
-        <span class="label" :class="{ invalid: errors.accessibility_needs }">Accessibility needs</span>
-        <div v-for="item in accessibilityNeeds" :key="item.value" class="item-row">
-          <label class="check">
-            <input type="checkbox" :checked="Boolean(findItem('accessibility_needs', item.value))" @change="toggleItem('accessibility_needs', item.value, $event.target.checked)" />
-            {{ item.label }}
-          </label>
-          <input v-if="findItem('accessibility_needs', item.value) && item.hasQuantity" type="number" min="1" placeholder="Quantity" :value="findItem('accessibility_needs', item.value).quantity" @input="updateQuantity('accessibility_needs', item.value, $event.target.value)" />
-          <input v-if="findItem('accessibility_needs', item.value) && item.value === 'removable_seats'" type="text" placeholder="Notes" :value="findItem('accessibility_needs', item.value).notes || ''" @input="updateNotes(item.value, $event.target.value)" />
-        </div>
-        <span v-if="errors.accessibility_needs" class="field-error">{{ errors.accessibility_needs }}</span>
-        <label :class="{ invalid: errors.room_layout }">Room layout
-          <select v-model="form.room_layout">
-            <option value="" disabled>Select a layout</option>
-            <option v-for="layout in roomLayouts" :key="layout" :value="layout">{{ layout }}</option>
-          </select>
-          <span v-if="errors.room_layout" class="field-error">{{ errors.room_layout }}</span>
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Equipment and registration</legend>
-        <span class="label" :class="{ invalid: errors.equipment }">Equipment</span>
-        <div v-for="item in equipment" :key="item.value" class="item-row">
-          <label class="check">
-            <input type="checkbox" :checked="Boolean(findItem('equipment', item.value))" @change="toggleItem('equipment', item.value, $event.target.checked)" />
-            {{ item.label }}
-          </label>
-          <input v-if="findItem('equipment', item.value) && item.hasQuantity" type="number" min="1" placeholder="Quantity" :value="findItem('equipment', item.value).quantity" @input="updateQuantity('equipment', item.value, $event.target.value)" />
-        </div>
-        <span v-if="errors.equipment" class="field-error">{{ errors.equipment }}</span>
-        <label class="check">
-          <input v-model="form.registration_needs" type="checkbox" />
-          Registration needs
-        </label>
-        <label>Special requests <textarea v-model.trim="form.special_requests" /></label>
-      </fieldset>
+      <EventSessionFields
+        v-for="(session, index) in form.sessions"
+        :key="session.key"
+        :session="session"
+        :index="index"
+        :minimum-date="minimumDate"
+        :removable="form.sessions.length > 1"
+        @remove="removeSession(index)"
+      />
+      <button type="button" class="add-session" @click="addSession">+ Add session</button>
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="draftSaved" class="success" role="status">Draft saved.</p>
@@ -357,7 +189,9 @@ async function saveDraft() {
         <button type="button" class="draft-button" :disabled="!hasDraftData || hasInvalidInput || savingDraft || submitting" @click="saveDraft">
           {{ savingDraft ? 'Saving...' : 'Save as Draft' }}
         </button>
-        <button type="submit" :disabled="!canSubmit || submitting || savingDraft">{{ submitting ? 'Submitting...' : 'Submit request' }}</button>
+        <button type="submit" :disabled="!canSubmit || submitting || savingDraft">
+          {{ submitting ? 'Submitting...' : form.sessions.length > 1 ? `Submit request (${form.sessions.length} sessions)` : 'Submit request' }}
+        </button>
       </div>
     </form>
   </main>
@@ -370,20 +204,17 @@ async function saveDraft() {
 .intro { color: #52606d; }
 form { display: grid; gap: 1rem; }
 fieldset { display: grid; gap: .75rem; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; }
-legend, .label { font-weight: 700; }
+legend { font-weight: 700; }
 label { display: grid; gap: .35rem; }
-input, textarea, select { box-sizing: border-box; width: 100%; padding: .6rem; border: 1px solid #94a3b8; border-radius: 4px; font: inherit; }
+input, textarea { box-sizing: border-box; width: 100%; padding: .6rem; border: 1px solid #94a3b8; border-radius: 4px; font: inherit; }
 textarea { min-height: 5rem; resize: vertical; }
-.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
-.check { display: block; }
-.check input { width: auto; margin-right: .5rem; }
 button { width: fit-content; padding: .7rem 1.1rem; border: 0; border-radius: 4px; background: #0f766e; color: white; font: inherit; cursor: pointer; }
 button:disabled { opacity: .6; cursor: not-allowed; }
+.add-session { background: #ffffff; color: #0f766e; border: 1px dashed #0f766e; }
 .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
 .draft-button { background: #475569; }
 .error { color: #b42318; }
-.invalid input, .invalid textarea, .invalid select { border-color: #b42318; }
+.invalid input, .invalid textarea { border-color: #b42318; }
 .field-error { color: #b42318; font-size: .85rem; }
 .success { color: #067647; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
 </style>

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 import app.auth.context as context_module
 import app.events.routes as routes_module
-from app.events.event_service import validate_event_payload
+from app.events.event_service import SINGAPORE_TZ, validate_event_payload
 from app.shared.errors import ValidationError
 
 
@@ -54,6 +54,9 @@ def _complete_payload():
     same-day comparison rather than the combined-datetime, multi-day one.
     """
     start_date = (date.today() + timedelta(days=1)).isoformat()
+    # Registration opens today and closes at noon today -- before every
+    # session start any test below sets (all of them are tomorrow or later).
+    registration_opens = datetime.combine(date.today(), time.min, tzinfo=SINGAPORE_TZ)
     return {
         "name": "Community Conference",
         "description": "A community conference.",
@@ -67,6 +70,8 @@ def _complete_payload():
         "room_layout": "theatre",
         "equipment": [{"item": "projector", "quantity": 1}],
         "registration_needs": True,
+        "registration_start_datetime": registration_opens.isoformat(),
+        "registration_end_datetime": (registration_opens + timedelta(hours=12)).isoformat(),
         "special_requests": "Near the main entrance.",
     }
 
