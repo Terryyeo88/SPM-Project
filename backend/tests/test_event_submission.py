@@ -382,31 +382,39 @@ def fake_db(monkeypatch):
 
 @pytest.fixture
 def assigned(monkeypatch, fake_db):
-    """Stands in for coordinator auto-assignment: assigns "coord-1" to each
-    submitted session and records which sessions it was called for."""
+    """Stands in for coordinator auto-assignment. Like the real
+    assign_initial_coordinator, one call assigns "coord-1" to every
+    submitted session of the request (one coordinator per request).
+    Records which event id it was called with."""
     calls = []
 
     def fake_assign(event_id):
         calls.append(event_id)
-        row = fake_db.get(event_id)
-        row.update(coordinator_id="coord-1", status="under_review")
+        shared_event_id = fake_db.get(event_id)["shared_event_id"]
+        for row in fake_db.rows:
+            if row["id"] == event_id or (row["shared_event_id"] == shared_event_id and row["status"] == "submitted"):
+                row.update(coordinator_id="coord-1", status="under_review")
+        return {"id": "coord-1"}
 
     monkeypatch.setattr(service, "assign_initial_coordinator", fake_assign)
     return calls
 
 
 def test_submit_from_one_session_submits_every_draft_session(fake_db, assigned):
-    """Submitting from one session submits every draft session of the request. Each
-    session is assigned a coordinator separately, and the response is the
-    session the organiser submitted from."""
+    """Submitting from one session submits every draft session of the request.
+    Coordinator assignment runs once, for the whole request, so every
+    session ends up with the same coordinator. The response is the session
+    the organiser submitted from."""
 
     fake_db.rows = [_session_row("a"), _session_row("b")]
 
     submitted = submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
 
     assert {row["status"] for row in fake_db.rows} == {"under_review"}
-    # Each session is its own event record, so each gets its own assignment.
-    assert sorted(assigned) == ["a", "b"]
+    # One assignment for the request, after every session is submitted --
+    # not one per session.
+    assert len(assigned) == 1
+    assert {row["coordinator_id"] for row in fake_db.rows} == {"coord-1"}
     # The response is the session the caller submitted from.
     assert submitted["id"] == "a"
     assert submitted["status"] == "under_review"
@@ -495,8 +503,8 @@ def _group_body(*sessions):
 
 def test_create_event_request_inserts_and_submits_every_session(fake_db, assigned):
     """Submitting without saving a draft first inserts every session under one
-    shared_event_id, owned by the organiser, and submits each of them (each
-    gets a coordinator). A session without registration is stored with no
+    shared_event_id, owned by the organiser, and submits all of them under
+    one coordinator. A session without registration is stored with no
     registration window."""
 
     group = create_event_request(
@@ -508,7 +516,8 @@ def test_create_event_request_inserts_and_submits_every_session(fake_db, assigne
     assert len({row["shared_event_id"] for row in fake_db.rows}) == 1
     uuid.UUID(fake_db.rows[0]["shared_event_id"])  # a real uuid, generated on the server
     assert all(row["organizer_id"] == "user-1" for row in fake_db.rows)
-    assert sorted(assigned) == sorted(row["id"] for row in fake_db.rows)
+    assert len(assigned) == 1
+    assert {row["coordinator_id"] for row in fake_db.rows} == {"coord-1"}
     assert {row["status"] for row in group["sessions"]} == {"under_review"}
     assert group["shared_event_id"] == fake_db.rows[0]["shared_event_id"]
     # A session without registration is stored with no window at all.
@@ -745,3 +754,40 @@ def test_is31_assigned_coordinator_can_edit_the_request(client, signing_key, mon
 
     assert response.status_code == 200
     assert calls == [("event-1", {"expected_attendance": 500})]
+
+
+def test_is31_coordinator_edit_form_payload_is_saved(fake_db):
+    """AC3: the coordinator's "Edit Details" form (CoordinatorEventReview)
+    sends the whole session in one body -- shared fields plus every session
+    field, with the registration window in UTC. edit_event_request accepts
+    exactly that shape and writes it to the event's own row, leaving the
+    status and the assigned coordinator as they were."""
+    fake_db.rows = [_session_row("a", status="under_review", coordinator_id="coord-1")]
+    form_body = {
+        "name": "Community Conference (revised)",
+        "description": "Updated by the coordinator.",
+        "purpose": "Knowledge sharing.",
+        "preferred_start_date": "2026-11-10",
+        "preferred_start_time": "10:00",
+        "preferred_end_date": "2026-11-10",
+        "preferred_end_time": "16:00",
+        "expected_attendance": 120,
+        "accessibility_needs": [{"item": "lift_access"}],
+        "room_layout": "banquet",
+        "equipment": [{"item": "screen", "quantity": 2}],
+        "registration_needs": True,
+        "registration_start_datetime": "2026-11-01T01:00:00.000Z",
+        "registration_end_datetime": "2026-11-09T10:00:00.000Z",
+        "special_requests": "",
+    }
+
+    service.edit_event_request("a", SimpleNamespace(**fake_db.get("a")), form_body)
+
+    row = fake_db.get("a")
+    assert row["name"] == "Community Conference (revised)"
+    assert row["expected_attendance"] == 120
+    assert row["room_layout"] == "banquet"
+    assert row["equipment_needed"] == {"equipment": [{"item": "screen", "quantity": 2}]}
+    assert row["registration_end_datetime"] == "2026-11-09T18:00:00+08:00"
+    assert row["status"] == "under_review"
+    assert row["coordinator_id"] == "coord-1"

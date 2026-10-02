@@ -499,14 +499,17 @@ def _submit_sessions(event_ids: list[str]) -> list[dict]:
             "status", "draft"
         ).execute()
 
-        # Per Customer Briefing Step 3 / Event Status Management: submission
-        # should trigger coordinator auto-assignment, moving the event to
-        # "under_review". If nobody's available, it stays "submitted" and
-        # unassigned -- an intentionally open case per coordinator_service's
-        # own docstring, not an error here. Each session is assigned on its
-        # own, since each one is reviewed as its own event record.
+    # Per Customer Briefing Step 3 / Event Status Management: submission
+    # should trigger coordinator auto-assignment, moving the event to
+    # "under_review". If nobody's available, it stays "submitted" and
+    # unassigned -- an intentionally open case per coordinator_service's
+    # own docstring, not an error here. Called ONCE, after every session
+    # is submitted: the request gets one coordinator for all its sessions
+    # (assign_initial_coordinator covers the request's other submitted
+    # sessions too).
+    if event_ids:
         try:
-            assign_initial_coordinator(event_id)
+            assign_initial_coordinator(event_ids[0])
         except NoCoordinatorAvailableError:
             pass
 

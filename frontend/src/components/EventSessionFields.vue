@@ -18,8 +18,15 @@ const props = defineProps({
   index: { type: Number, required: true },
   minimumDate: { type: String, required: true },
   removable: { type: Boolean, default: false },
+  // Replaces the "Session N" heading (and its status badge) where the form
+  // edits a single session on its own, e.g. the coordinator's review page.
+  title: { type: String, default: '' },
 })
 defineEmits(['remove'])
+
+// Ties the card's heading to the section for screen readers. Keyed by the
+// session's own key, so ids stay unique with several sessions on one page.
+const headingId = `session-heading-${props.session.key}`
 
 function findItem(field, value) {
   return props.session[field].find((entry) => entry.item === value)
@@ -57,30 +64,40 @@ function onRegistrationToggle() {
 </script>
 
 <template>
-  <fieldset class="session">
-    <legend>
-      Session {{ index + 1 }}
-      <span v-if="session.status && session.status !== 'draft'" class="session-status">{{ session.status }}</span>
-    </legend>
-    <div v-if="removable" class="session-actions">
-      <button v-if="removable" type="button" class="remove" @click="$emit('remove')">Remove session</button>
+  <section class="card session" :aria-labelledby="headingId">
+    <div class="card-header">
+      <h3 :id="headingId" class="card-title">
+        {{ title || `Session ${index + 1}` }}
+        <span v-if="!title && session.status && session.status !== 'draft'" class="status" :class="`status-${session.status}`">{{ session.status.replace('_', ' ') }}</span>
+      </h3>
+      <button v-if="removable" type="button" class="remove-session" aria-label="Remove session" @click="$emit('remove')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+        Remove
+      </button>
     </div>
 
-    <div class="grid">
-      <label :class="{ invalid: session.errors.preferred_start_datetime }">Preferred start date &amp; time
-        <input v-model="session.preferred_start_datetime" type="datetime-local" :min="`${minimumDate}T00:00`" @input="validateDateRange(session, minimumDate)" />
+    <div class="grid-2">
+      <label class="field" :class="{ invalid: session.errors.preferred_start_datetime }">
+        <span class="field-label">Preferred Start Date &amp; Time</span>
+        <input v-model="session.preferred_start_datetime" class="input" type="datetime-local" :min="`${minimumDate}T00:00`" @input="validateDateRange(session, minimumDate)" />
         <span v-if="session.errors.preferred_start_datetime" class="field-error">{{ session.errors.preferred_start_datetime }}</span>
       </label>
-      <label :class="{ invalid: session.errors.preferred_end_datetime }">Preferred end date &amp; time
-        <input v-model="session.preferred_end_datetime" type="datetime-local" :min="session.preferred_start_datetime || `${minimumDate}T00:00`" @input="validateDateRange(session, minimumDate)" />
+      <label class="field" :class="{ invalid: session.errors.preferred_end_datetime }">
+        <span class="field-label">Preferred End Date &amp; Time</span>
+        <input v-model="session.preferred_end_datetime" class="input" type="datetime-local" :min="session.preferred_start_datetime || `${minimumDate}T00:00`" @input="validateDateRange(session, minimumDate)" />
         <span v-if="session.errors.preferred_end_datetime" class="field-error">{{ session.errors.preferred_end_datetime }}</span>
       </label>
-      <label :class="{ invalid: session.errors.expected_attendance }">Expected attendance
-        <input v-model="session.expected_attendance" type="number" min="1" @input="validateAttendance(session)" />
+    </div>
+
+    <div class="grid-2">
+      <label class="field" :class="{ invalid: session.errors.expected_attendance }">
+        <span class="field-label">Expected Attendance</span>
+        <input v-model="session.expected_attendance" class="input" type="number" min="1" placeholder="e.g. 150" @input="validateAttendance(session)" />
         <span v-if="session.errors.expected_attendance" class="field-error">{{ session.errors.expected_attendance }}</span>
       </label>
-      <label :class="{ invalid: session.errors.room_layout }">Room layout
-        <select v-model="session.room_layout" @change="delete session.errors.room_layout">
+      <label class="field" :class="{ invalid: session.errors.room_layout }">
+        <span class="field-label">Room Layout</span>
+        <select v-model="session.room_layout" class="input" @change="delete session.errors.room_layout">
           <option value="" disabled>Select a layout</option>
           <option v-for="layout in ROOM_LAYOUTS" :key="layout" :value="layout">{{ layout }}</option>
         </select>
@@ -88,61 +105,64 @@ function onRegistrationToggle() {
       </label>
     </div>
 
-    <span class="label" :class="{ invalid: session.errors.accessibility_needs }">Accessibility needs</span>
-    <div v-for="item in ACCESSIBILITY_OPTIONS" :key="item.value" class="item-row">
-      <label class="check">
-        <input type="checkbox" :checked="Boolean(findItem('accessibility_needs', item.value))" @change="toggleItem('accessibility_needs', item, $event.target.checked)" />
-        {{ item.label }}
-      </label>
-      <input v-if="findItem('accessibility_needs', item.value) && item.hasQuantity" type="number" min="1" placeholder="Quantity" :value="findItem('accessibility_needs', item.value).quantity" @input="updateQuantity('accessibility_needs', item.value, $event.target.value)" />
-      <input v-if="findItem('accessibility_needs', item.value) && item.value === 'removable_seats'" type="text" placeholder="Notes" :value="findItem('accessibility_needs', item.value).notes || ''" @input="updateNotes(item.value, $event.target.value)" />
+    <div class="field" :class="{ invalid: session.errors.accessibility_needs }">
+      <span class="field-label">Accessibility Needs <span class="optional">(optional)</span></span>
+      <div class="option-list">
+        <div v-for="item in ACCESSIBILITY_OPTIONS" :key="item.value" class="option-row">
+          <label class="check">
+            <input type="checkbox" :checked="Boolean(findItem('accessibility_needs', item.value))" @change="toggleItem('accessibility_needs', item, $event.target.checked)" />
+            {{ item.label }}
+          </label>
+          <input v-if="findItem('accessibility_needs', item.value) && item.hasQuantity" class="input small" type="number" min="1" placeholder="Quantity" :aria-label="`${item.label} quantity`" :value="findItem('accessibility_needs', item.value).quantity" @input="updateQuantity('accessibility_needs', item.value, $event.target.value)" />
+          <input v-if="findItem('accessibility_needs', item.value) && item.value === 'removable_seats'" class="input small notes" type="text" placeholder="Notes" :aria-label="`${item.label} notes`" :value="findItem('accessibility_needs', item.value).notes || ''" @input="updateNotes(item.value, $event.target.value)" />
+        </div>
+      </div>
+      <span v-if="session.errors.accessibility_needs" class="field-error">{{ session.errors.accessibility_needs }}</span>
     </div>
-    <span v-if="session.errors.accessibility_needs" class="field-error">{{ session.errors.accessibility_needs }}</span>
 
-    <span class="label" :class="{ invalid: session.errors.equipment }">Equipment</span>
-    <div v-for="item in EQUIPMENT_OPTIONS" :key="item.value" class="item-row">
-      <label class="check">
-        <input type="checkbox" :checked="Boolean(findItem('equipment', item.value))" @change="toggleItem('equipment', item, $event.target.checked)" />
-        {{ item.label }}
-      </label>
-      <input v-if="findItem('equipment', item.value) && item.hasQuantity" type="number" min="1" placeholder="Quantity" :value="findItem('equipment', item.value).quantity" @input="updateQuantity('equipment', item.value, $event.target.value)" />
+    <div class="field" :class="{ invalid: session.errors.equipment }">
+      <span class="field-label">Equipment &amp; Technical Requirements <span class="optional">(optional)</span></span>
+      <div class="option-list">
+        <div v-for="item in EQUIPMENT_OPTIONS" :key="item.value" class="option-row">
+          <label class="check">
+            <input type="checkbox" :checked="Boolean(findItem('equipment', item.value))" @change="toggleItem('equipment', item, $event.target.checked)" />
+            {{ item.label }}
+          </label>
+          <input v-if="findItem('equipment', item.value) && item.hasQuantity" class="input small" type="number" min="1" placeholder="Quantity" :aria-label="`${item.label} quantity`" :value="findItem('equipment', item.value).quantity" @input="updateQuantity('equipment', item.value, $event.target.value)" />
+        </div>
+      </div>
+      <span v-if="session.errors.equipment" class="field-error">{{ session.errors.equipment }}</span>
     </div>
-    <span v-if="session.errors.equipment" class="field-error">{{ session.errors.equipment }}</span>
 
-    <label class="check">
-      <input v-model="session.registration_needs" type="checkbox" @change="onRegistrationToggle" />
-      Registration needed
-    </label>
-    <div v-if="session.registration_needs" class="grid">
-      <label :class="{ invalid: session.errors.registration_start_datetime }">Registration opens
-        <input v-model="session.registration_start_datetime" type="datetime-local" :max="session.preferred_start_datetime || undefined" @input="validateRegistrationWindow(session, minimumDate)" />
+    <div class="field">
+      <span class="field-label">Registration</span>
+      <label class="check">
+        <input v-model="session.registration_needs" type="checkbox" @change="onRegistrationToggle" />
+        Registration needed
+      </label>
+    </div>
+    <div v-if="session.registration_needs" class="grid-2">
+      <label class="field" :class="{ invalid: session.errors.registration_start_datetime }">
+        <span class="field-label">Registration Opens</span>
+        <input v-model="session.registration_start_datetime" class="input" type="datetime-local" :max="session.preferred_start_datetime || undefined" @input="validateRegistrationWindow(session, minimumDate)" />
         <span v-if="session.errors.registration_start_datetime" class="field-error">{{ session.errors.registration_start_datetime }}</span>
       </label>
-      <label :class="{ invalid: session.errors.registration_end_datetime }">Registration closes
-        <input v-model="session.registration_end_datetime" type="datetime-local" :min="session.registration_start_datetime || undefined" :max="session.preferred_start_datetime || undefined" @input="validateRegistrationWindow(session, minimumDate)" />
+      <label class="field" :class="{ invalid: session.errors.registration_end_datetime }">
+        <span class="field-label">Registration Closes</span>
+        <input v-model="session.registration_end_datetime" class="input" type="datetime-local" :min="session.registration_start_datetime || undefined" :max="session.preferred_start_datetime || undefined" @input="validateRegistrationWindow(session, minimumDate)" />
         <span v-if="session.errors.registration_end_datetime" class="field-error">{{ session.errors.registration_end_datetime }}</span>
       </label>
     </div>
 
-    <label>Special requests <textarea v-model.trim="session.special_requests" /></label>
-  </fieldset>
+    <label class="field">
+      <span class="field-label">Special Requests <span class="optional">(optional)</span></span>
+      <textarea v-model.trim="session.special_requests" class="input" rows="2" placeholder="e.g. near the main entrance, quiet room for speakers" />
+    </label>
+  </section>
 </template>
 
+<style scoped src="../styles/event-form.css"></style>
 <style scoped>
-fieldset { display: grid; gap: .75rem; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; }
-legend, .label { font-weight: 700; }
-label { display: grid; gap: .35rem; }
-input, textarea, select { box-sizing: border-box; width: 100%; padding: .6rem; border: 1px solid #94a3b8; border-radius: 4px; font: inherit; }
-textarea { min-height: 4rem; resize: vertical; }
-.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
-.check { display: block; }
-.check input { width: auto; margin-right: .5rem; }
-.item-row { display: grid; gap: .35rem; }
-.session-status { margin-left: .5rem; padding: .1rem .45rem; background: #e2e8f0; border-radius: 4px; font-weight: 400; text-transform: capitalize; }
-.session-actions { display: flex; gap: .5rem; justify-content: flex-end; }
-.session-actions button { width: fit-content; padding: .45rem .8rem; border: 0; border-radius: 4px; color: white; font: inherit; cursor: pointer; }
-.remove { background: #b42318; }
-.invalid input, .invalid textarea, .invalid select { border-color: #b42318; }
-.field-error { color: #b42318; font-size: .85rem; font-weight: 400; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card-title { margin: 0; display: flex; align-items: center; gap: 8px; }
+.input.notes { width: 220px; }
 </style>

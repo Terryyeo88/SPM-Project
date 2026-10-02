@@ -141,6 +141,9 @@ def test_submit_without_draft_creates_linked_sessions_against_supabase(organizer
     for row in (first, second):
         assert row["status"] in ("submitted", "under_review")
         assert (row["coordinator_id"] is not None) == (row["status"] == "under_review")
+    # One coordinator per request: both sessions got the same one (or,
+    # if nobody was free for both, neither got one).
+    assert first["coordinator_id"] == second["coordinator_id"]
 
 
 def test_save_draft_adds_updates_and_removes_sessions_against_supabase(organizer):

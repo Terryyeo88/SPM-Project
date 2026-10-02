@@ -9,9 +9,10 @@ which rows were inserted, updated or deleted, and how each query was scoped
 
     monkeypatch.setattr(event_service, "supabase", FakeSupabase())
 
-It models only what event_service uses on the events table:
-table().select / insert / update / delete, filtered by .eq() / .in_(),
-then .execute().
+It models only what event_service and coordinator_service use:
+table().select / insert / update / delete, filtered by .eq() / .neq() /
+.in_(), then .execute(). Any table name works; rows for "events" are also
+reachable as `fake.rows`, other tables through `fake.tables[name]`.
 """
 
 from __future__ import annotations
@@ -20,18 +21,26 @@ from types import SimpleNamespace
 
 
 class FakeSupabase:
-    """Rows live in `rows`; every executed query is appended to `calls` as
-    {"op", "payload", "filters"} so a test can assert on exactly what was
-    written, and how it was filtered."""
+    """Rows live in `tables` (events also as `rows`); every executed query
+    is appended to `calls` as {"table", "op", "payload", "filters"} so a
+    test can assert on exactly what was written, and how it was filtered."""
 
     def __init__(self, rows=()):
-        self.rows = [dict(row) for row in rows]
+        self.tables = {"events": [dict(row) for row in rows]}
         self.calls = []
         self._next_id = 0
 
+    @property
+    def rows(self):
+        return self.tables["events"]
+
+    @rows.setter
+    def rows(self, value):
+        self.tables["events"] = value
+
     def table(self, name):
-        assert name == "events", f"FakeSupabase only models the events table, not {name!r}"
-        return _FakeQuery(self)
+        self.tables.setdefault(name, [])
+        return _FakeQuery(self, name)
 
     def new_id(self):
         self._next_id += 1
@@ -42,11 +51,13 @@ class FakeSupabase:
 
 
 class _FakeQuery:
-    def __init__(self, db):
+    def __init__(self, db, name):
         self.db = db
+        self.name = name
         self.op = "select"
         self.payload = None
         self.filters = []
+        self.single_row = False
 
     def select(self, *args, **kwargs):
         return self  # after insert/update this just asks for the rows back
@@ -63,8 +74,16 @@ class _FakeQuery:
         self.op = "delete"
         return self
 
+    def single(self):
+        self.single_row = True  # .data becomes one row (or None), not a list
+        return self
+
     def eq(self, column, value):
         self.filters.append(("eq", column, value))
+        return self
+
+    def neq(self, column, value):
+        self.filters.append(("neq", column, value))
         return self
 
     def in_(self, column, values):
@@ -75,25 +94,33 @@ class _FakeQuery:
         for kind, column, value in self.filters:
             if kind == "eq" and row.get(column) != value:
                 return False
+            if kind == "neq" and row.get(column) == value:
+                return False
             if kind == "in" and row.get(column) not in value:
                 return False
         return True
 
     def execute(self):
-        self.db.calls.append({"op": self.op, "payload": self.payload, "filters": list(self.filters)})
+        self.db.calls.append(
+            {"table": self.name, "op": self.op, "payload": self.payload, "filters": list(self.filters)}
+        )
+        rows = self.db.tables[self.name]
         if self.op == "insert":
             new_rows = self.payload if isinstance(self.payload, list) else [self.payload]
             created = []
             for row in new_rows:
                 stored = {"id": self.db.new_id(), "coordinator_id": None, **row}
-                self.db.rows.append(stored)
+                rows.append(stored)
                 created.append(dict(stored))
             return SimpleNamespace(data=created)
 
-        matched = [row for row in self.db.rows if self._matches(row)]
+        matched = [row for row in rows if self._matches(row)]
         if self.op == "update":
             for row in matched:
                 row.update(self.payload)
         elif self.op == "delete":
-            self.db.rows = [row for row in self.db.rows if row not in matched]
-        return SimpleNamespace(data=[dict(row) for row in matched])
+            self.db.tables[self.name] = [row for row in rows if row not in matched]
+        data = [dict(row) for row in matched]
+        if self.single_row:
+            return SimpleNamespace(data=data[0] if data else None)
+        return SimpleNamespace(data=data)

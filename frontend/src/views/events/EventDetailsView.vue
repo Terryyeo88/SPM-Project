@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiDelete, apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
-import { tabForStatus } from '../../lib/coordinatorDashboard'
+import { statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
 import {
   ACCESSIBILITY_OPTIONS,
   DRAFT_NAME,
@@ -57,9 +57,9 @@ const isAssignedCoordinator = computed(() => Boolean(
 const backLink = computed(() => {
   const tab = tabForStatus(event.value?.status)
   if (tab && event.value.coordinator_id === auth.profile?.id) {
-    return { to: { name: 'dashboard', query: { tab } }, label: 'My Assigned Events' }
+    return { to: { name: 'dashboard', query: { tab } }, label: 'Back to My Assigned Events' }
   }
-  return { to: '/events', label: 'Events' }
+  return { to: '/events', label: 'Back to My Event Requests' }
 })
 
 const canEdit = computed(() => Boolean(
@@ -113,7 +113,7 @@ async function loadEvent() {
   saved.value = false
   try {
     event.value = await apiGet(`/events/${route.params.eventId}`)
-    group.value = isAssignedCoordinator.value ? null : await apiGet(`/events/${route.params.eventId}/sessions`)
+    group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
     populateForm(event.value, editableSessions())
   } catch (requestError) {
     event.value = null
@@ -248,122 +248,157 @@ watch(() => route.params.eventId, (eventId) => {
 </script>
 
 <template>
-  <div class="app-page">
+  <div class="page">
     <AppNavBar />
-  <main class="event-details">
-    <p><router-link :to="backLink.to">&larr; {{ backLink.label }}</router-link></p>
-    <p v-if="loading">Loading event...</p>
-    <p v-else-if="error && !event" class="error" role="alert">{{ error }}</p>
-    <CoordinatorEventReview v-else-if="event && isAssignedCoordinator" :event="event" @updated="event = $event" />
-    <template v-else-if="event">
-      <header>
-        <div>
-          <p class="eyebrow">Event request<template v-if="visibleSessions.length > 1"> · {{ visibleSessions.length }} sessions</template></p>
-          <h1>{{ event.name }}</h1>
-        </div>
-        <strong class="status">{{ event.status }}</strong>
-      </header>
+    <main class="content">
+      <div class="container">
+        <router-link :to="backLink.to" class="back-link">&larr; {{ backLink.label }}</router-link>
 
-      <form v-if="canEdit" novalidate @submit.prevent="submitEvent">
-        <p v-if="!isDraft && visibleSessions.length > 1" class="notice">
-          Only this rejected session is edited here. The request's other sessions are reviewed separately.
-        </p>
-        <fieldset>
-          <legend>Event details</legend>
-          <label :class="{ invalid: errors.name }">Event name <input v-model.trim="form.name" @input="delete errors.name" /> <span v-if="errors.name" class="field-error">{{ errors.name }}</span></label>
-          <label :class="{ invalid: errors.description }">Description <textarea v-model.trim="form.description" @input="delete errors.description" /> <span v-if="errors.description" class="field-error">{{ errors.description }}</span></label>
-          <label :class="{ invalid: errors.purpose }">Purpose <textarea v-model.trim="form.purpose" @input="delete errors.purpose" /> <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span></label>
-        </fieldset>
-
-        <EventSessionFields
-          v-for="(session, index) in form.sessions"
-          :key="session.key"
-          :session="session"
-          :index="index"
-          :minimum-date="minimumDate"
-          :removable="isDraft && form.sessions.length > 1"
-          @remove="removeSession(index)"
+        <p v-if="loading" class="message">Loading event...</p>
+        <p v-else-if="error && !event" class="message error" role="alert">{{ error }}</p>
+        <CoordinatorEventReview
+          v-else-if="event && isAssignedCoordinator"
+          :event="event"
+          :sessions="visibleSessions"
+          @updated="event = $event"
         />
-        <button v-if="isDraft" type="button" class="add-session" @click="addSession">+ Add session</button>
+        <template v-else-if="event">
+          <div class="card-header">
+            <div class="page-heading">
+              <h1 class="page-title">{{ event.name }}</h1>
+              <span class="page-subtitle">
+                {{ canEdit && isDraft ? 'Draft event request' : 'Event request' }}<template v-if="visibleSessions.length > 1"> · {{ visibleSessions.length }} sessions</template>
+              </span>
+            </div>
+            <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
+          </div>
 
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <p v-if="saved" class="success" role="status">Draft saved.</p>
-        <div class="actions">
-          <button type="button" :disabled="hasInvalidInput || saving || submitting || deleting" @click="saveDraft">Save as Draft</button>
-          <button type="submit" :disabled="!canSubmit || submitting || saving || deleting">{{ submitting ? 'Submitting...' : 'Submit request' }}</button>
-          <button v-if="canDelete" type="button" class="delete-button" :disabled="saving || submitting || deleting" @click="deleteDraft">
-            {{ deleting ? 'Deleting...' : 'Delete draft' }}
-          </button>
-        </div>
-      </form>
+          <form v-if="canEdit" class="container-form" novalidate @submit.prevent="submitEvent">
+            <p v-if="!isDraft && visibleSessions.length > 1" class="notice">
+              Only this rejected session is edited here. The request's other sessions are reviewed separately.
+            </p>
 
-      <section v-else class="read-only">
-        <p class="notice">This event is {{ event.status }} and cannot be edited here.</p>
-        <dl>
-          <dt>Description</dt><dd>{{ event.description || 'Not provided' }}</dd>
-          <dt>Purpose</dt><dd>{{ event.purpose || 'Not provided' }}</dd>
-        </dl>
-        <article
-          v-for="(session, index) in visibleSessions"
-          :key="session.id"
-          class="session-card"
-          :class="{ current: session.id === event.id }"
-        >
-          <h2>
-            <router-link v-if="session.id !== event.id" :to="`/events/${session.id}`">Session {{ index + 1 }}</router-link>
-            <template v-else>Session {{ index + 1 }}</template>
-            <span class="session-status">{{ session.status }}</span>
-          </h2>
-          <dl>
-            <dt>Preferred start</dt><dd>{{ session.preferred_start_date || 'Not provided' }}<template v-if="session.preferred_start_time"> at {{ timeValue(session.preferred_start_time) }}</template></dd>
-            <dt>Preferred end</dt><dd>{{ session.preferred_end_date || 'Not provided' }}<template v-if="session.preferred_end_time"> at {{ timeValue(session.preferred_end_time) }}</template></dd>
-            <dt>Expected attendance</dt><dd>{{ session.expected_attendance || 'Not provided' }}</dd>
-            <dt>Room layout</dt><dd>{{ session.room_layout || 'Not provided' }}</dd>
-            <dt>Accessibility needs</dt><dd>{{ describeItems(session.accessibility_needs) }}</dd>
-            <dt>Equipment</dt><dd>{{ describeItems(session.equipment_needed?.equipment) }}</dd>
-            <dt>Registration needed</dt><dd>{{ session.registration_needs ? 'Yes' : 'No' }}</dd>
-            <template v-if="session.registration_needs">
-              <dt>Registration opens</dt><dd>{{ formatDateTime(session.registration_start_datetime) }}</dd>
-              <dt>Registration closes</dt><dd>{{ formatDateTime(session.registration_end_datetime) }}</dd>
-            </template>
-            <dt>Special requests</dt><dd>{{ session.special_requests || 'None' }}</dd>
-          </dl>
-        </article>
-      </section>
-    </template>
-  </main>
+            <section class="card" aria-labelledby="event-details-heading">
+              <h2 id="event-details-heading" class="card-title">Event Details</h2>
+              <label class="field" :class="{ invalid: errors.name }">
+                <span class="field-label">Event Name</span>
+                <input v-model.trim="form.name" class="input" type="text" placeholder="e.g. Annual Tech Conference 2026" @input="delete errors.name" />
+                <span v-if="errors.name" class="field-error">{{ errors.name }}</span>
+              </label>
+              <label class="field" :class="{ invalid: errors.description }">
+                <span class="field-label">Description</span>
+                <textarea v-model.trim="form.description" class="input" rows="3" @input="delete errors.description" />
+                <span v-if="errors.description" class="field-error">{{ errors.description }}</span>
+              </label>
+              <label class="field" :class="{ invalid: errors.purpose }">
+                <span class="field-label">Purpose of the Event</span>
+                <textarea v-model.trim="form.purpose" class="input" rows="3" @input="delete errors.purpose" />
+                <span v-if="errors.purpose" class="field-error">{{ errors.purpose }}</span>
+              </label>
+            </section>
+
+            <div class="section-heading">
+              <h2 class="section-title">Sessions</h2>
+              <span class="section-subtitle">
+                {{ isDraft ? 'Add each session that is part of this event. Timing and requirements can differ per session.' : 'The session that was returned to you for changes.' }}
+              </span>
+            </div>
+
+            <EventSessionFields
+              v-for="(session, index) in form.sessions"
+              :key="session.key"
+              :session="session"
+              :index="index"
+              :minimum-date="minimumDate"
+              :removable="isDraft && form.sessions.length > 1"
+              @remove="removeSession(index)"
+            />
+            <button v-if="isDraft" type="button" class="add-session" @click="addSession">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              Add Another Session
+            </button>
+
+            <p v-if="error" class="message error" role="alert">{{ error }}</p>
+            <p v-if="saved" class="message success" role="status">Draft saved.</p>
+
+            <div class="form-footer">
+              <button type="button" class="btn btn-outline" :disabled="hasInvalidInput || saving || submitting || deleting" @click="saveDraft">
+                {{ saving ? 'Saving...' : 'Save as Draft' }}
+              </button>
+              <button type="submit" class="btn btn-primary" :disabled="!canSubmit || submitting || saving || deleting">
+                {{ submitting ? 'Submitting...' : 'Submit Request' }}
+              </button>
+              <span class="footer-note">{{ form.sessions.length }} session(s) will be submitted with this request</span>
+              <button v-if="canDelete" type="button" class="btn btn-danger push-right" :disabled="saving || submitting || deleting" @click="deleteDraft">
+                {{ deleting ? 'Deleting...' : 'Delete Draft' }}
+              </button>
+            </div>
+          </form>
+
+          <template v-else>
+            <p class="notice">This event is {{ statusLabel(event.status).toLowerCase() }} and can't be edited here.</p>
+
+            <section class="card" aria-labelledby="event-details-heading">
+              <h2 id="event-details-heading" class="card-title">Event Details</h2>
+              <dl>
+                <dt>Description</dt><dd>{{ event.description || 'Not provided' }}</dd>
+                <dt>Purpose</dt><dd>{{ event.purpose || 'Not provided' }}</dd>
+              </dl>
+            </section>
+
+            <div class="section-heading">
+              <h2 class="section-title">Sessions</h2>
+            </div>
+
+            <section
+              v-for="(session, index) in visibleSessions"
+              :key="session.id"
+              class="card session-card"
+              :class="{ current: session.id === event.id }"
+              :aria-labelledby="`session-${session.id}`"
+            >
+              <div class="card-header">
+                <h3 :id="`session-${session.id}`" class="card-title">
+                  <router-link v-if="session.id !== event.id" :to="`/events/${session.id}`">Session {{ index + 1 }}</router-link>
+                  <template v-else>Session {{ index + 1 }}</template>
+                </h3>
+                <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+              </div>
+              <dl>
+                <dt>Preferred start</dt><dd>{{ session.preferred_start_date || 'Not provided' }}<template v-if="session.preferred_start_time"> at {{ timeValue(session.preferred_start_time) }}</template></dd>
+                <dt>Preferred end</dt><dd>{{ session.preferred_end_date || 'Not provided' }}<template v-if="session.preferred_end_time"> at {{ timeValue(session.preferred_end_time) }}</template></dd>
+                <dt>Expected attendance</dt><dd>{{ session.expected_attendance || 'Not provided' }}</dd>
+                <dt>Room layout</dt><dd class="capitalize">{{ session.room_layout || 'Not provided' }}</dd>
+                <dt>Accessibility needs</dt><dd>{{ describeItems(session.accessibility_needs) }}</dd>
+                <dt>Equipment</dt><dd>{{ describeItems(session.equipment_needed?.equipment) }}</dd>
+                <dt>Registration needed</dt><dd>{{ session.registration_needs ? 'Yes' : 'No' }}</dd>
+                <template v-if="session.registration_needs">
+                  <dt>Registration opens</dt><dd>{{ formatDateTime(session.registration_start_datetime) }}</dd>
+                  <dt>Registration closes</dt><dd>{{ formatDateTime(session.registration_end_datetime) }}</dd>
+                </template>
+                <dt>Special requests</dt><dd>{{ session.special_requests || 'None' }}</dd>
+              </dl>
+            </section>
+          </template>
+        </template>
+      </div>
+    </main>
   </div>
 </template>
 
+<style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.app-page { min-height: 100vh; background: #ffffff; }
-.event-details { max-width: 760px; margin: 2rem auto; padding: 0 1rem 3rem; }
-header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
-.eyebrow { font-weight: 700; }
-h1 { margin-top: .25rem; }
-h2 { display: flex; gap: .5rem; align-items: center; margin: 0 0 .75rem; font-size: 1.05rem; }
-.status, .session-status { padding: .35rem .6rem; background: #e2e8f0; border-radius: 4px; text-transform: capitalize; }
-.session-status { padding: .1rem .45rem; font-size: .85rem; font-weight: 400; }
-form, .read-only { display: grid; gap: 1rem; }
-fieldset { display: grid; gap: .75rem; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; }
-legend { font-weight: 700; }
-label { display: grid; gap: .35rem; }
-input, textarea { box-sizing: border-box; width: 100%; padding: .6rem; border: 1px solid #94a3b8; border-radius: 4px; font: inherit; }
-textarea { min-height: 5rem; resize: vertical; }
-.actions { display: flex; gap: .75rem; flex-wrap: wrap; }
-button { width: fit-content; padding: .7rem 1rem; border: 0; border-radius: 4px; background: #0f766e; color: white; font: inherit; cursor: pointer; }
-button:disabled { opacity: .6; cursor: not-allowed; }
-.add-session { background: #ffffff; color: #0f766e; border: 1px dashed #0f766e; }
-.delete-button { background: #b42318; margin-left: auto; }
-.error { color: #b42318; }
-.invalid input, .invalid textarea { border-color: #b42318; }
-.field-error { color: #b42318; font-size: .85rem; }
-.success { color: #067647; }
-.notice { margin: 0; padding: .75rem; background: #f1f5f9; }
-.session-card { padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; }
-.session-card.current { border-color: #0f766e; }
-dl { display: grid; grid-template-columns: 180px 1fr; gap: .75rem 1rem; margin: 0; }
-dt { font-weight: 700; }
-dd { margin: 0; }
-@media (max-width: 560px) { dl { grid-template-columns: 1fr; } }
+.container-form { display: flex; flex-direction: column; gap: 18px; }
+.card-header .page-heading { min-width: 0; }
+.session-card.current { border-style: solid; border-color: #444444; }
+.card-title { margin: 0; }
+.card-title a { color: inherit; }
+dl { display: grid; grid-template-columns: 180px 1fr; gap: 10px 16px; margin: 0; font-size: 14px; }
+dt { font-weight: 600; color: #6a6a6a; }
+dd { margin: 0; color: #2a2a2a; }
+.capitalize { text-transform: capitalize; }
+@media (max-width: 640px) {
+  dl { grid-template-columns: 1fr; gap: 4px; }
+  dd { margin-bottom: 8px; }
+}
 </style>

@@ -34,6 +34,14 @@ as long as it is fair and technically possible"):
     rather than double-booking someone -- the client hasn't specified
     what should happen in that case, so this is flagged as an open
     question rather than guessed at.
+  - One coordinator per event REQUEST, not per session. A request with
+    several sessions is stored as several events rows sharing a
+    shared_event_id (see app.events.event_service); all of them get the
+    same coordinator, who can then view and edit every session. So
+    assignment and reassignment act on the whole request: the
+    coordinator must be free for EVERY session, and every session moves
+    together. Each session still gets its own coordinator_assignment_log
+    row, since each is its own event record.
 """
 
 from __future__ import annotations
@@ -110,7 +118,11 @@ def _get_all_coordinators() -> list[dict]:
     return [row["profiles"] for row in result.data if row.get("profiles")]
 
 
-def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: str) -> list[dict]:
+def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_ids) -> list[dict]:
+    """This coordinator's active events, minus `exclude_event_ids` (a
+    single id or a collection) -- the sessions being assigned shouldn't
+    count as a clash with themselves or with each other."""
+    excluded = {exclude_event_ids} if isinstance(exclude_event_ids, str) else set(exclude_event_ids)
     result = (
         supabase.table("events")
         .select(
@@ -118,11 +130,21 @@ def _get_active_events_for_coordinator(coordinator_id: str, exclude_event_id: st
             "preferred_start_time, preferred_end_time, status"
         )
         .eq("coordinator_id", coordinator_id)
-        .neq("id", exclude_event_id)
         .in_("status", ACTIVE_STATUSES)
         .execute()
     )
-    return result.data
+    return [row for row in result.data or [] if row["id"] not in excluded]
+
+
+def _request_sessions(event: dict) -> list[dict]:
+    """Every session of the same request as `event` -- the rows sharing
+    its shared_event_id. A request created before sessions existed has
+    no shared_event_id and is just itself."""
+    shared_event_id = event.get("shared_event_id")
+    if not shared_event_id:
+        return [event]
+    result = supabase.table("events").select("*").eq("shared_event_id", shared_event_id).execute()
+    return result.data or [event]
 
 
 def list_coordinators() -> list[dict]:
@@ -136,10 +158,16 @@ def list_coordinators() -> list[dict]:
 def _is_available(coordinator_id: str, event: dict) -> bool:
     """A coordinator is available if none of their other active events'
     date/time spans (see _event_span) overlap this event's span."""
-    for other in _get_active_events_for_coordinator(coordinator_id, event["id"]):
-        if _spans_overlap(event, other):
-            return False
-    return True
+    return _is_available_for_all(coordinator_id, [event])
+
+
+def _is_available_for_all(coordinator_id: str, sessions: list[dict]) -> bool:
+    """Available for a whole request: none of the coordinator's OTHER
+    active events overlaps any of these sessions. The sessions themselves
+    are excluded, so a request's own sessions never clash with each
+    other."""
+    others = _get_active_events_for_coordinator(coordinator_id, [session["id"] for session in sessions])
+    return not any(_spans_overlap(session, other) for session in sessions for other in others)
 
 
 def _workload(coordinator_id: str) -> int:
@@ -178,13 +206,20 @@ def _get_coordinator_profile(coordinator_id: str) -> dict:
 
 def assign_initial_coordinator(event_id: str) -> dict:
     """
-    Auto-assign an Event Coordinator to the given event.
+    Auto-assign an Event Coordinator to the given event -- and to every
+    other session of the same request still waiting for one, so the whole
+    request has one coordinator.
+
+    If another session of the request already has a coordinator, that
+    same coordinator is reused rather than a new one picked, so a request
+    never ends up split between coordinators.
 
     Returns the assigned coordinator's profile dict (id, name, email).
 
     Raises:
         ValueError                  - event not found, or already has a coordinator
         NoCoordinatorAvailableError - no coordinators exist, or all are occupied
+                                       on at least one of the sessions
     """
     event = _get_event(event_id)
 
@@ -194,37 +229,56 @@ def assign_initial_coordinator(event_id: str) -> dict:
             "(use the reassignment flow instead)."
         )
 
-    coordinators = _get_all_coordinators()
-    if not coordinators:
-        raise NoCoordinatorAvailableError("No users hold the event_coordinator role yet.")
+    sessions = _request_sessions(event)
+    # The sessions this assignment covers: submitted and still unassigned
+    # (always including `event` itself). Drafts and sessions already
+    # handled aren't touched.
+    to_assign = [
+        session for session in sessions
+        if session["id"] == event_id or (session.get("status") == "submitted" and not session.get("coordinator_id"))
+    ]
+    existing = next((s["coordinator_id"] for s in sessions if s.get("coordinator_id")), None)
 
-    available = [c for c in coordinators if _is_available(c["id"], event)]
-    if not available:
-        raise NoCoordinatorAvailableError(
-            f"Every coordinator is already occupied on {event.get('preferred_start_date')}."
-        )
+    if existing:
+        chosen = _get_coordinator_profile(existing)
+    else:
+        coordinators = _get_all_coordinators()
+        if not coordinators:
+            raise NoCoordinatorAvailableError("No users hold the event_coordinator role yet.")
 
-    # Fair, workload-based pick: fewest active events first, stable tiebreak by id.
-    chosen = min(available, key=lambda c: (_workload(c["id"]), c["id"]))
+        available = [c for c in coordinators if _is_available_for_all(c["id"], to_assign)]
+        if not available:
+            dates = sorted({s.get("preferred_start_date") or "" for s in to_assign})
+            raise NoCoordinatorAvailableError(
+                f"Every coordinator is already occupied on {', '.join(d for d in dates if d)}."
+            )
 
-    supabase.table("events").update(
-        {
-            "coordinator_id": chosen["id"],
-            # Assignment is what moves a submitted request into review,
-            # per Event Status Management (Aaralyn) / Week4 clarification.
-            "status": "under_review" if event["status"] == "submitted" else event["status"],
-        }
-    ).eq("id", event_id).execute()
+        # Fair, workload-based pick: fewest active events first, stable tiebreak by id.
+        chosen = min(available, key=lambda c: (_workload(c["id"]), c["id"]))
+
+    for session in to_assign:
+        supabase.table("events").update(
+            {
+                "coordinator_id": chosen["id"],
+                # Assignment is what moves a submitted request into review,
+                # per Event Status Management (Aaralyn) / Week4 clarification.
+                "status": "under_review" if session["status"] == "submitted" else session["status"],
+            }
+        ).eq("id", session["id"]).execute()
 
     supabase.table("coordinator_assignment_log").insert(
-        {
-            "event_id": event_id,
-            "previous_coordinator_id": None,
-            "new_coordinator_id": chosen["id"],
-            "reason": "initial auto-assignment",
-        }
+        [
+            {
+                "event_id": session["id"],
+                "previous_coordinator_id": None,
+                "new_coordinator_id": chosen["id"],
+                "reason": "initial auto-assignment",
+            }
+            for session in to_assign
+        ]
     ).execute()
 
+    # One notification for the request, not one per session.
     _notify_coordinator_assigned(event, chosen)
 
     return chosen
@@ -290,9 +344,17 @@ def reassign_coordinator(
 
     new_coordinator = _get_coordinator_profile(new_coordinator_id)
 
-    if not _is_available(new_coordinator_id, event):
+    # The whole request moves together: every session currently held by
+    # the outgoing coordinator, so the request keeps one coordinator.
+    sessions = [
+        session for session in _request_sessions(event)
+        if session["id"] == event_id or session.get("coordinator_id") == previous_coordinator_id
+    ]
+
+    if not _is_available_for_all(new_coordinator_id, sessions):
+        dates = sorted({s.get("preferred_start_date") or "" for s in sessions})
         raise NoCoordinatorAvailableError(
-            f"{new_coordinator['name']} is already occupied on {event.get('preferred_start_date')}."
+            f"{new_coordinator['name']} is already occupied on {', '.join(d for d in dates if d)}."
         )
 
     # coordinator_id is a single column, so this update alone enforces
@@ -302,15 +364,18 @@ def reassign_coordinator(
     # lifecycle, only who's running it.
     supabase.table("events").update(
         {"coordinator_id": new_coordinator_id}
-    ).eq("id", event_id).execute()
+    ).in_("id", [session["id"] for session in sessions]).execute()
 
     supabase.table("coordinator_assignment_log").insert(
-        {
-            "event_id": event_id,
-            "previous_coordinator_id": previous_coordinator_id,
-            "new_coordinator_id": new_coordinator_id,
-            "reason": reason or "reassignment",
-        }
+        [
+            {
+                "event_id": session["id"],
+                "previous_coordinator_id": previous_coordinator_id,
+                "new_coordinator_id": new_coordinator_id,
+                "reason": reason or "reassignment",
+            }
+            for session in sessions
+        ]
     ).execute()
 
     _notify_coordinator_assigned(event, new_coordinator)
