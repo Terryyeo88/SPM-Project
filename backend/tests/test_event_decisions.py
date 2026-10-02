@@ -1,6 +1,8 @@
 """
 Event Review and Approval -- the coordinator's Approve / Reject decision,
-plus GET /events/coordinators (the Reassign dropdown's choices).
+the rejection reason the organiser then sees, the events list (organiser's
+list / coordinator's queue), plus GET /events/coordinators (the Reassign
+dropdown's choices).
 
 Unit-level like test_events_routes.py: no real Supabase. Route tests
 monkeypatch the loader/service functions to test routing + authz wiring;
@@ -22,6 +24,7 @@ from app.authz import actions
 from app.authz.policy import can
 from app.shared.errors import ValidationError
 from tests.factories import FakeEvent, make_user
+from tests.fake_supabase import FakeSupabase
 
 
 def _mock_profile(monkeypatch, roles):
@@ -250,3 +253,156 @@ def test_second_decision_is_refused_once_no_longer_under_review(fake_db):
         service_module.reject_event_request("event-1", _loaded(), "coord-1", "changed my mind")
     assert fake_db.events[0]["status"] == "approved"
     assert len(fake_db.inserts) == 1
+
+
+# -- service: list_event_requests (organiser's list / coordinator's queue) --------
+# Unit level, with an in-memory client; test_event_list_integration.py checks
+# the same scoping against a real database.
+
+_LIST_ROWS = [
+    {"id": "org-old", "organizer_id": "org-1", "coordinator_id": None, "status": "draft",
+     "created_at": "2026-10-01T00:00:00+00:00"},
+    {"id": "org-new", "organizer_id": "org-1", "coordinator_id": "coord-1", "status": "under_review",
+     "created_at": "2026-10-04T00:00:00+00:00"},
+    {"id": "queue", "organizer_id": "org-2", "coordinator_id": "coord-1", "status": "approved",
+     "created_at": "2026-10-03T00:00:00+00:00"},
+    {"id": "unrelated", "organizer_id": "org-2", "coordinator_id": "coord-2", "status": "under_review",
+     "created_at": "2026-10-05T00:00:00+00:00"},
+]
+
+
+@pytest.fixture
+def list_db(monkeypatch):
+    db = FakeSupabase(_LIST_ROWS)
+    monkeypatch.setattr(service_module, "supabase", db)
+    return db
+
+
+@pytest.mark.parametrize(
+    ("roles", "user_id", "expected"),
+    [
+        (["event_organizer"], "org-1", ["org-new", "org-old"]),
+        (["event_coordinator"], "coord-1", ["org-new", "queue"]),
+    ],
+)
+def test_list_shows_only_the_callers_own_events_newest_first(list_db, roles, user_id, expected):
+    """An organiser sees the requests they created; a coordinator sees the
+    ones assigned to them (their review queue). Newest first."""
+    events = service_module.list_event_requests(make_user(roles, user_id=user_id))
+
+    assert [event["id"] for event in events] == expected
+
+
+def test_list_for_a_user_with_both_roles_is_the_union(list_db):
+    """Someone who is both an organiser and a coordinator sees what they
+    organised AND what they're assigned, not just one of the two."""
+    list_db.rows.append(
+        {"id": "both-assigned", "organizer_id": "org-9", "coordinator_id": "org-1", "status": "under_review",
+         "created_at": "2026-10-02T00:00:00+00:00"}
+    )
+
+    events = service_module.list_event_requests(make_user(["event_organizer", "event_coordinator"], user_id="org-1"))
+
+    assert [event["id"] for event in events] == ["org-new", "both-assigned", "org-old"]
+
+
+def test_list_status_filter_narrows_within_the_callers_events(list_db):
+    """The status filter applies on top of the role scoping -- it never
+    widens what the caller can see."""
+    events = service_module.list_event_requests(make_user(["event_coordinator"], user_id="coord-1"), "approved")
+
+    assert [event["id"] for event in events] == ["queue"]
+
+
+def test_list_rejects_an_unknown_status_filter(list_db):
+    with pytest.raises(ValidationError, match="status must be one of"):
+        service_module.list_event_requests(make_user(["event_organizer"], user_id="org-1"), "archived")
+
+
+def test_list_for_a_user_without_a_listing_role_is_empty_and_never_queries(list_db):
+    """Defence in depth behind rule_event_list: a caller with neither role
+    gets an empty list, and the database is never queried."""
+    assert service_module.list_event_requests(make_user(["attendee"], user_id="someone")) == []
+    assert list_db.calls == []
+
+
+# -- service: rejection reason shown to the organiser ----------------------------
+# reject_event_request records the reason in event_status_log; the organiser
+# sees it on their event page through list_event_sessions.
+
+
+@pytest.fixture
+def rejection_db(monkeypatch):
+    db = FakeSupabase()
+    monkeypatch.setattr(service_module, "supabase", db)
+    return db
+
+
+def _session(event_id, status, shared_event_id="group-1"):
+    return {
+        "id": event_id,
+        "shared_event_id": shared_event_id,
+        "organizer_id": "user-1",
+        "coordinator_id": "coord-1",
+        "status": status,
+        "name": "Community Conference",
+    }
+
+
+def _log_entry(event_id, reason, changed_at, to_status="rejected", by="Alice Tan"):
+    return {
+        "event_id": event_id,
+        "to_status": to_status,
+        "reason": reason,
+        "changed_at": changed_at,
+        "profiles": {"name": by},
+    }
+
+
+def test_rejected_sessions_carry_the_coordinators_latest_rejection(rejection_db):
+    """A rejected session comes back with the coordinator's reason, who
+    rejected it and when -- the MOST RECENT rejection, since a session can
+    be rejected, fixed, resubmitted and rejected again. A session that
+    isn't rejected gets no rejection, even if it was rejected in the past."""
+    rejection_db.rows = [_session("r", "rejected"), _session("ok", "under_review")]
+    rejection_db.tables["event_status_log"] = [
+        _log_entry("r", "Venue too small.", "2026-10-01T09:00:00+00:00"),
+        _log_entry("r", "Please add an accessible entrance.", "2026-10-03T09:00:00+00:00"),
+        _log_entry("r", None, "2026-10-02T09:00:00+00:00", to_status="under_review", by="Organiser"),
+        _log_entry("ok", "Old reason, since fixed.", "2026-10-01T09:00:00+00:00"),
+    ]
+
+    group = service_module.list_event_sessions(
+        SimpleNamespace(**rejection_db.get("r")), make_user(["event_organizer"])
+    )
+
+    sessions = {s["id"]: s for s in group["sessions"]}
+    assert sessions["r"]["rejection"] == {
+        "reason": "Please add an accessible entrance.",
+        "rejected_at": "2026-10-03T09:00:00+00:00",
+        "rejected_by": "Alice Tan",
+    }
+    assert "rejection" not in sessions["ok"]
+
+
+def test_no_rejection_lookup_when_nothing_is_rejected(rejection_db):
+    """Requests with no rejected session don't query the status log at all."""
+    rejection_db.rows = [_session("a", "under_review")]
+
+    service_module.list_event_sessions(SimpleNamespace(**rejection_db.get("a")), make_user(["event_organizer"]))
+
+    assert {call["table"] for call in rejection_db.calls} == {"events"}
+
+
+def test_legacy_rejected_request_is_a_group_of_one_with_its_reason(rejection_db):
+    """A request created before sessions existed (no shared_event_id) is
+    listed as a single session -- itself -- and still shows the
+    coordinator's rejection reason."""
+    legacy = _session("legacy", "rejected", shared_event_id=None)
+    rejection_db.tables["event_status_log"] = [_log_entry("legacy", "Dates clash.", "2026-10-01T09:00:00+00:00")]
+
+    group = service_module.list_event_sessions(SimpleNamespace(**legacy), make_user(["event_organizer"]))
+
+    assert [s["id"] for s in group["sessions"]] == ["legacy"]
+    assert group["sessions"][0]["rejection"]["reason"] == "Dates clash."
+    assert group["name"] == "Community Conference"

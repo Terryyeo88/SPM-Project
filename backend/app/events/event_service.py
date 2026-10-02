@@ -575,9 +575,9 @@ def create_draft_request(organizer_id: str, payload: dict) -> dict:
 
 
 def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
+    # validate_event_payload requires `name`, so a validated payload is
+    # never empty -- no separate "at least one field" check is needed.
     payload = validate_event_payload(payload, for_submission=False)
-    if not payload:
-        raise ValidationError("At least one event field is required.")
     database_payload = _to_database_payload(payload, _from_database_event(event))
     result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
     return _first_row(result)

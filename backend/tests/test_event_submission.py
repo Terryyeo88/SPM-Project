@@ -853,3 +853,110 @@ def test_resubmit_validates_every_rejected_session_before_any_moves(fake_db, ass
 
     assert {row["status"] for row in fake_db.rows} == {"rejected"}
     assert "event_status_log" not in fake_db.tables
+
+
+# -- Malformed submissions and edge cases ------------------------------------------
+
+
+def test_submission_rejects_a_body_that_is_not_an_object():
+    with pytest.raises(ValidationError, match="must be a JSON object"):
+        validate_event_payload(["not", "an", "object"], for_submission=True)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"venue": "Hall A"}, "Unknown event fields: venue"),
+        ({"description": 42}, "description must be a non-empty string"),
+        ({"special_requests": 42}, "special_requests must be a string"),
+        ({"registration_needs": "yes"}, "registration_needs must be true or false"),
+        ({"preferred_start_date": "next tuesday"}, "preferred_start_date must be an ISO date"),
+        ({"preferred_end_date": "2026/11/10"}, "preferred_end_date must be an ISO date"),
+        ({"preferred_start_time": "25:00"}, "preferred_start_time must be an ISO time"),
+        ({"equipment": "projector"}, "equipment must be a list of objects"),
+        (
+            {"accessibility_needs": [{"item": "removable_seats", "quantity": 2, "notes": "   "}]},
+            "Accessibility notes must be a non-empty string",
+        ),
+    ],
+)
+def test_submission_rejects_malformed_fields(changes, message):
+    """Each field of a submitted request is type- and format-checked, with a
+    message naming the field that's wrong."""
+    payload = {**_complete_payload(), **changes}
+
+    with pytest.raises(ValidationError, match=message):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_rejects_registration_closing_when_it_opens():
+    """The registration period must close strictly after it opens -- a
+    zero-length window is refused."""
+    payload = _complete_payload()
+    payload["registration_end_datetime"] = payload["registration_start_datetime"]
+
+    with pytest.raises(ValidationError, match="after registration_start_datetime"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_edit_normalizes_blank_optional_fields_and_trims_notes():
+    """On an edit (not a submission), emptied optional inputs arrive as ""
+    and are stored as NULL, and accessibility notes are trimmed."""
+    validated = validate_event_payload(
+        {
+            "name": "Workshop",
+            "preferred_end_date": "",
+            "preferred_start_time": "",
+            "preferred_end_time": "",
+            "registration_start_datetime": "",
+            "accessibility_needs": [{"item": "removable_seats", "quantity": 2, "notes": "  front row  "}],
+        },
+        for_submission=False,
+    )
+
+    assert validated["preferred_end_date"] is None
+    assert validated["preferred_start_time"] is None
+    assert validated["preferred_end_time"] is None
+    assert validated["registration_start_datetime"] is None
+    assert validated["accessibility_needs"] == [{"item": "removable_seats", "quantity": 2, "notes": "front row"}]
+
+
+def test_edit_orders_times_even_without_both_dates():
+    """An edit carrying only the start and end times (no date pair) is still
+    checked as a same-day range: the end must be after the start."""
+    with pytest.raises(ValidationError, match="preferred_end_time must be after preferred_start_time"):
+        validate_event_payload(
+            {"name": "Workshop", "preferred_start_time": "17:00", "preferred_end_time": "09:00"},
+            for_submission=False,
+        )
+
+
+def test_create_event_request_requires_every_shared_field(fake_db, assigned):
+    """A request body with a shared field missing altogether (not just
+    blank) is refused on submission, naming the field, and nothing is
+    written."""
+    body = _group_body()
+    del body["description"]
+
+    with pytest.raises(ValidationError, match="^Missing required fields: description"):
+        create_event_request("user-1", body)
+    assert fake_db.calls == []
+
+
+def test_create_event_request_errors_if_the_database_returns_no_rows(fake_db, assigned, monkeypatch):
+    """If the insert comes back with no rows, submission stops with a clear
+    error and no coordinator is assigned."""
+    monkeypatch.setattr(service, "_insert_sessions", lambda *args: [])
+
+    with pytest.raises(ValidationError, match="did not return an event"):
+        create_event_request("user-1", _group_body())
+    assert assigned == []
+
+
+def test_edit_of_a_session_that_no_longer_exists_is_refused(fake_db):
+    """Editing a session that was deleted in the meantime updates nothing,
+    and the coordinator gets a clear error instead of an empty response."""
+    stale = SimpleNamespace(**_session_row("gone", status="under_review", coordinator_id="coord-1"))
+
+    with pytest.raises(ValidationError, match="did not return an event"):
+        service.edit_event_request("gone", stale, {"name": "Community Conference", "expected_attendance": 50})

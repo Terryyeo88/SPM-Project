@@ -422,3 +422,81 @@ def test_delete_legacy_draft_without_shared_id_removes_only_that_row(fake_db):
     delete_draft_request("legacy", SimpleNamespace(**fake_db.get("legacy")))
 
     assert [row["id"] for row in fake_db.rows] == ["unrelated"]
+
+
+# -- Malformed drafts and edge cases -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("not an object", "must be a JSON object"),
+        ({"description": "A draft.", "venue": "Hall A"}, "Unknown event fields: venue"),
+        (
+            {"description": "", "room_layout": "", "equipment": [], "registration_needs": False},
+            "At least one event field",
+        ),
+    ],
+)
+def test_draft_payload_rejects_malformed_bodies(body, message):
+    """A single-session draft body must be an object of known fields with at
+    least one meaningful value -- blanks, empty lists and an unticked
+    checkbox don't count as data."""
+    with pytest.raises(ValidationError, match=message):
+        _draft_payload(body)
+
+
+def test_draft_payload_normalizes_blank_attendance_to_null():
+    """An emptied attendance box arrives as "" and is stored as NULL, not as
+    an empty string in an integer column."""
+    payload = _draft_payload({"description": "A draft.", "expected_attendance": ""})
+
+    assert payload["expected_attendance"] is None
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("not an object", "must be a JSON object"),
+        ({"name": "Workshop", "venue": "Hall A", "sessions": [{}]}, "Unknown event fields: venue"),
+        (
+            {"name": "Workshop", "sessions": [{"expected_attendance": 5}, {"venue": "Hall A"}]},
+            "Session 2: unknown session fields: venue",
+        ),
+    ],
+)
+def test_create_draft_request_rejects_malformed_bodies(fake_db, body, message):
+    """A multi-session draft body must be an object with only the shared
+    fields and `sessions` at the top, and only session fields inside each
+    session (the error names which session). Nothing is written."""
+    with pytest.raises(ValidationError, match=message):
+        create_draft_request("organizer-1", body)
+    assert fake_db.calls == []
+
+
+def test_create_draft_request_rejects_an_entirely_empty_request(fake_db):
+    """A new draft with no meaningful value anywhere -- shared fields or any
+    session -- is rejected before anything is written."""
+    with pytest.raises(ValidationError, match="At least one event field"):
+        create_draft_request("organizer-1", {"name": "", "sessions": [{}, {"room_layout": ""}]})
+    assert fake_db.calls == []
+
+
+def test_create_draft_request_errors_if_the_database_returns_no_rows(fake_db, monkeypatch):
+    """If the insert comes back with no rows, the organiser gets a clear error
+    instead of an empty draft they can't open."""
+    monkeypatch.setattr(service, "_insert_sessions", lambda *args: [])
+
+    with pytest.raises(ValidationError, match="did not return an event"):
+        create_draft_request("organizer-1", {"name": "Workshop", "sessions": [{}]})
+
+
+def test_save_draft_treats_malformed_stored_equipment_as_none(fake_db):
+    """A row whose equipment_needed isn't the expected {"equipment": [...]}
+    object (e.g. written by hand) doesn't break saving -- it's read as no
+    equipment and written back in the right shape."""
+    fake_db.rows = [_row("a", equipment_needed=["projector"])]
+
+    save_draft_request("a", SimpleNamespace(**fake_db.get("a")), {"sessions": [{"id": "a", "expected_attendance": 40}]})
+
+    assert fake_db.get("a")["equipment_needed"] == {"equipment": []}

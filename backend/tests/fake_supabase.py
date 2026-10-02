@@ -11,7 +11,8 @@ which rows were inserted, updated or deleted, and how each query was scoped
 
 It models only what event_service and coordinator_service use:
 table().select / insert / update / delete, filtered by .eq() / .neq() /
-.in_(), then .execute(). Any table name works; rows for "events" are also
+.in_() / .or_() (only "column.eq.value" conditions), optionally .order(),
+then .execute(). Any table name works; rows for "events" are also
 reachable as `fake.rows`, other tables through `fake.tables[name]`.
 """
 
@@ -58,6 +59,7 @@ class _FakeQuery:
         self.payload = None
         self.filters = []
         self.single_row = False
+        self.ordering = None
 
     def select(self, *args, **kwargs):
         return self  # after insert/update this just asks for the rows back
@@ -90,6 +92,16 @@ class _FakeQuery:
         self.filters.append(("in", column, tuple(values)))
         return self
 
+    def or_(self, conditions):
+        # PostgREST syntax "a.eq.1,b.eq.2": a row matches if ANY condition does.
+        parsed = tuple(tuple(condition.split(".eq.", 1)) for condition in conditions.split(","))
+        self.filters.append(("or", None, parsed))
+        return self
+
+    def order(self, column, desc=False):
+        self.ordering = (column, desc)
+        return self
+
     def _matches(self, row):
         for kind, column, value in self.filters:
             if kind == "eq" and row.get(column) != value:
@@ -97,6 +109,8 @@ class _FakeQuery:
             if kind == "neq" and row.get(column) == value:
                 return False
             if kind == "in" and row.get(column) not in value:
+                return False
+            if kind == "or" and not any(str(row.get(col)) == val for col, val in value):
                 return False
         return True
 
@@ -121,6 +135,9 @@ class _FakeQuery:
         elif self.op == "delete":
             self.db.tables[self.name] = [row for row in rows if row not in matched]
         data = [dict(row) for row in matched]
+        if self.ordering:
+            column, desc = self.ordering
+            data.sort(key=lambda row: row.get(column) or "", reverse=desc)
         if self.single_row:
             return SimpleNamespace(data=data[0] if data else None)
         return SimpleNamespace(data=data)
