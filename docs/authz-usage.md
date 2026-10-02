@@ -30,7 +30,7 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_LIST` | organiser or coordinator | role only — **see warning below** |
 | `EVENT_CREATE` | organiser | role only |
 | `EVENT_SUBMIT` | organiser (own event) | status must be `draft` |
-| `EVENT_EDIT` | organiser (own, `draft`) **or** coordinator (assigned, `planning`) | either relationship, its own status window |
+| `EVENT_EDIT` | organiser (own, `draft`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |

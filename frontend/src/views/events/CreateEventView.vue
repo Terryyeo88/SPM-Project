@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { apiGet, apiPost } from '../../lib/api'
+import { computed, reactive, ref } from 'vue'
+import { apiPost } from '../../lib/api'
 import {
   DRAFT_NAME,
   emptySession,
@@ -15,10 +15,6 @@ import {
 import AppNavBar from '../../components/AppNavBar.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 
-// Holds the id of ONE session of the saved draft -- any session of a request
-// addresses the whole request on the backend.
-const draftStorageKey = 'connectsphere-event-draft-id'
-
 // name/description/purpose are shared by every session; everything else is
 // per session (see lib/eventSessions).
 const form = reactive({
@@ -30,6 +26,12 @@ const errors = reactive({})
 const success = ref(false)
 const submitting = ref(false)
 const savingDraft = ref(false)
+// Every visit to this page starts a brand-new request with a blank form --
+// nothing is restored from an earlier visit. A saved draft is reopened from
+// the events list instead (EventDetailsView). draftId only lives for this
+// visit: once "Save as Draft" has created the draft, further saves and the
+// final submit update THAT draft rather than creating another one. It's the
+// id of one session; any session of a request addresses the whole request.
 const draftId = ref(null)
 const draftSaved = ref(false)
 
@@ -43,24 +45,19 @@ function populateForm(group) {
   draftId.value = group.sessions[0]?.id || null
 }
 
-async function loadSavedDraft() {
-  const savedDraftId = localStorage.getItem(draftStorageKey)
-  if (!savedDraftId) return
-
-  try {
-    const group = await apiGet(`/events/${savedDraftId}/sessions`)
-    const drafts = group.sessions.filter((session) => session.status === 'draft')
-    if (drafts.length === 0) {
-      localStorage.removeItem(draftStorageKey)
-      return
-    }
-    populateForm({ ...group, sessions: drafts })
-  } catch (requestError) {
-    localStorage.removeItem(draftStorageKey)
-  }
+// A fresh, blank form after a successful submit, so the next request
+// doesn't start from (or accidentally resubmit) the one just sent.
+// emptySession() gives each new session its own key, so every
+// EventSessionFields re-mounts with no leftover per-session errors.
+function resetForm() {
+  form.name = ''
+  form.description = ''
+  form.purpose = ''
+  form.sessions = [emptySession()]
+  Object.keys(errors).forEach((field) => delete errors[field])
+  draftId.value = null
+  draftSaved.value = false
 }
-
-onMounted(loadSavedDraft)
 
 function addSession() {
   form.sessions.push(emptySession())
@@ -123,9 +120,7 @@ async function submitRequest() {
       // them all under one server-generated shared_event_id, and submits them.
       await apiPost('/events', payload())
     }
-    // localStorage is to store data locally on a user's machine
-    localStorage.removeItem(draftStorageKey)
-    draftId.value = null
+    resetForm()
     success.value = true
   } catch (requestError) {
     error.value = requestError.message
@@ -145,7 +140,6 @@ async function saveDraft() {
       ? await apiPost(`/events/${draftId.value}/draft`, payload())
       : await apiPost('/events/draft', payload())
     populateForm(group)
-    localStorage.setItem(draftStorageKey, draftId.value)
     draftSaved.value = true
   } catch (requestError) {
     error.value = requestError.message

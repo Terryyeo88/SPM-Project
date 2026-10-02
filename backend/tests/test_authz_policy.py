@@ -63,15 +63,24 @@ def test_organiser_allowed_edit_after_rejection():
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
-def test_coordinator_allowed_edit_assigned_event_in_planning():
+@pytest.mark.parametrize("status", ["under_review", "planning"])
+def test_coordinator_allowed_edit_assigned_event_under_review_or_planning(status):
+    """The assigned coordinator may edit while reviewing the request
+    (IS-31: after submission only the coordinator can edit) and during
+    planning (Event Information Management)."""
     user = make_user(["event_coordinator"], user_id="coord-1")
-    event = FakeEvent(coordinator_id="coord-1", status="planning")
+    event = FakeEvent(coordinator_id="coord-1", status=status)
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
-def test_coordinator_denied_edit_assigned_event_outside_planning():
+@pytest.mark.parametrize("status", ["submitted", "approved", "confirmed", "completed", "cancelled", "rejected"])
+def test_coordinator_denied_edit_assigned_event_outside_review_and_planning(status):
+    """Outside under_review and planning, even the assigned coordinator
+    can't edit -- 403, since the relationship exists. "submitted" is the
+    moment before a coordinator is assigned; "rejected" goes back to the
+    organiser."""
     user = make_user(["event_coordinator"], user_id="coord-1")
-    event = FakeEvent(coordinator_id="coord-1", status="approved")
+    event = FakeEvent(coordinator_id="coord-1", status=status)
     assert can(user, actions.EVENT_EDIT, event) is False
     with pytest.raises(AuthorisationError):
         authorise(user, actions.EVENT_EDIT, event)

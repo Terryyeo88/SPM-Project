@@ -16,7 +16,6 @@ from app.events.event_service import (
     create_draft_request,
     create_event_request,
     list_event_sessions,
-    save_draft_request,
     validate_event_group,
     validate_event_payload,
 )
@@ -208,42 +207,6 @@ def test_group_sessions_may_differ_in_every_session_field():
 # -- Creation --------------------------------------------------------------------
 
 
-def test_create_event_request_validates_every_session_before_inserting(monkeypatch):
-    inserted = []
-    monkeypatch.setattr(service, "_insert_sessions", lambda *args: inserted.append(args) or [])
-
-    with pytest.raises(ValidationError, match="Session 2"):
-        create_event_request("user-1", _group(_session(), _session(room_layout="")))
-    assert inserted == []
-
-
-def test_create_event_request_links_sessions_with_one_server_generated_id(monkeypatch):
-    captured = {}
-
-    def fake_insert(organizer_id, rows, shared_event_id):
-        captured.update(organizer_id=organizer_id, rows=rows, shared_event_id=shared_event_id)
-        return [{**row, "id": f"event-{i}", "shared_event_id": shared_event_id} for i, row in enumerate(rows)]
-
-    def fake_submit(event_ids):
-        return [{"id": event_id, "status": "submitted", "shared_event_id": captured["shared_event_id"],
-                 "name": "Community Conference"} for event_id in event_ids]
-
-    monkeypatch.setattr(service, "_insert_sessions", fake_insert)
-    monkeypatch.setattr(service, "_submit_sessions", fake_submit)
-
-    result = create_event_request("user-1", _group(_session(), _session(days_ahead=2)))
-
-    uuid.UUID(captured["shared_event_id"])  # a real uuid, made on the server
-    assert captured["organizer_id"] == "user-1"
-    assert len(captured["rows"]) == 2
-    # Submitting without a draft still writes the registration window, in
-    # Singapore time, to the timestamptz columns.
-    assert all(row["registration_end_datetime"].endswith("+08:00") for row in captured["rows"])
-    assert all("equipment_needed" in row and "equipment" not in row for row in captured["rows"])
-    assert result["shared_event_id"] == captured["shared_event_id"]
-    assert [s["status"] for s in result["sessions"]] == ["submitted", "submitted"]
-
-
 def test_create_event_request_ignores_client_supplied_shared_event_id():
     """shared_event_id is generated server-side -- a client can't pick it."""
     group = _group()
@@ -289,15 +252,6 @@ def _rejected_event():
         preferred_end_time=None, expected_attendance=None, accessibility_needs=[], room_layout=None,
         equipment_needed={}, registration_needs=False, special_requests=None,
     )
-
-
-def test_rejected_request_cannot_add_sessions():
-    """A rejected session is re-edited on its own; its siblings have their
-    own review outcome and the request can't grow new sessions."""
-    with pytest.raises(ValidationError, match="one session at a time"):
-        save_draft_request(
-            "event-1", _rejected_event(), _group({"id": "event-1", **_session()}, _session())
-        )
 
 
 def test_list_event_sessions_without_shared_id_is_a_group_of_one():

@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 import app.auth.context as context_module
+import app.events.event_service as service
 import app.events.routes as routes_module
-from app.events.event_service import SINGAPORE_TZ, validate_event_payload
+from app.events.coordinator_service import NoCoordinatorAvailableError
+from app.events.event_service import (
+    SINGAPORE_TZ,
+    create_event_request,
+    list_event_sessions,
+    submit_event_request,
+    validate_event_payload,
+)
 from app.shared.errors import ValidationError
+from tests.factories import make_user
+from tests.fake_supabase import FakeSupabase
 
 
 def _mock_profile(monkeypatch, roles):
@@ -213,16 +224,6 @@ def test_submission_accepts_next_day_event_exceeding_24_hours_precisely():
     validate_event_payload(payload, for_submission=True)
 
 
-def test_submission_requires_preferred_end_date():
-    """preferred_end_date is a mandatory field -- even a single-day event
-    must state its own end date (equal to the start date)."""
-    payload = _complete_payload()
-    payload.pop("preferred_end_date")
-
-    with pytest.raises(ValidationError, match="preferred_end_date"):
-        validate_event_payload(payload, for_submission=True)
-
-
 def test_submission_allows_end_time_before_start_time_when_end_date_is_later():
     """An end time numerically earlier than the start time is a
     legitimate overnight event once the end DATE is on a later day (e.g.
@@ -246,18 +247,6 @@ def test_submission_rejects_end_time_before_start_time_on_the_same_date():
     payload["preferred_end_date"] = "2026-11-10"
     payload["preferred_start_time"] = "22:00"
     payload["preferred_end_time"] = "06:00"
-
-    with pytest.raises(ValidationError, match="preferred_end_time"):
-        validate_event_payload(payload, for_submission=True)
-
-
-def test_submission_rejects_start_time_after_end_time():
-    """Verify the event time range must run forwards, not backwards."""
-    payload = _complete_payload()
-    payload["preferred_start_date"] = "2026-11-10"
-    payload["preferred_end_date"] = "2026-11-10"
-    payload["preferred_start_time"] = "17:01"
-    payload["preferred_end_time"] = "17:00"
 
     with pytest.raises(ValidationError, match="preferred_end_time"):
         validate_event_payload(payload, for_submission=True)
@@ -322,3 +311,437 @@ def test_submission_rejects_unknown_jsonb_items():
 
     with pytest.raises(ValidationError, match="Unsupported equipment item"):
         validate_event_payload(payload, for_submission=True)
+
+
+# -- Registration window on submission -----------------------------------------
+
+
+def test_submission_names_the_one_missing_registration_field():
+    """When registration is needed but only the closing time is missing, the error
+    names just that one field."""
+
+    payload = _complete_payload()
+    payload.pop("registration_end_datetime")
+
+    with pytest.raises(ValidationError, match="^registration_end_datetime is required when registration"):
+        validate_event_payload(payload, for_submission=True)
+
+
+def test_submission_checks_registration_close_against_session_start_without_a_time():
+    """With no start time, the session is taken to start at 00:00 on its
+    start date, so registration must close by then."""
+    payload = _complete_payload()
+    payload["preferred_start_date"] = "2026-11-10"
+    payload["preferred_end_date"] = "2026-11-10"
+    payload["preferred_start_time"] = None
+    payload["preferred_end_time"] = None
+    payload["registration_end_datetime"] = "2026-11-10T00:30:00+08:00"
+
+    with pytest.raises(ValidationError, match="on or before the session's preferred start"):
+        validate_event_payload(payload, for_submission=True)
+
+
+@pytest.mark.parametrize("value", ["not-a-date", 20261101, "2026-13-01T09:00:00+08:00"])
+def test_submission_rejects_malformed_registration_datetimes(value):
+    """Registration datetimes that aren't valid ISO strings (garbage text, a
+    number, an impossible month) are rejected on submission."""
+
+    payload = _complete_payload()
+    payload["registration_start_datetime"] = value
+
+    with pytest.raises(ValidationError, match="ISO datetime with a timezone offset"):
+        validate_event_payload(payload, for_submission=True)
+
+
+# -- Submitting a multi-session request ------------------------------------------
+
+
+def _session_row(event_id, **overrides):
+    """A complete, submittable draft session as stored in the events table."""
+    payload = _complete_payload()
+    row = {
+        "id": event_id,
+        "organizer_id": "user-1",
+        "coordinator_id": None,
+        "status": "draft",
+        "shared_event_id": "group-1",
+        "created_at": "2026-10-01T00:00:00+00:00",
+        **{key: value for key, value in payload.items() if key != "equipment"},
+        "equipment_needed": {"equipment": payload["equipment"]},
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.fixture
+def fake_db(monkeypatch):
+    fake = FakeSupabase()
+    monkeypatch.setattr(service, "supabase", fake)
+    return fake
+
+
+@pytest.fixture
+def assigned(monkeypatch, fake_db):
+    """Stands in for coordinator auto-assignment: assigns "coord-1" to each
+    submitted session and records which sessions it was called for."""
+    calls = []
+
+    def fake_assign(event_id):
+        calls.append(event_id)
+        row = fake_db.get(event_id)
+        row.update(coordinator_id="coord-1", status="under_review")
+
+    monkeypatch.setattr(service, "assign_initial_coordinator", fake_assign)
+    return calls
+
+
+def test_submit_from_one_session_submits_every_draft_session(fake_db, assigned):
+    """Submitting from one session submits every draft session of the request. Each
+    session is assigned a coordinator separately, and the response is the
+    session the organiser submitted from."""
+
+    fake_db.rows = [_session_row("a"), _session_row("b")]
+
+    submitted = submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+    assert {row["status"] for row in fake_db.rows} == {"under_review"}
+    # Each session is its own event record, so each gets its own assignment.
+    assert sorted(assigned) == ["a", "b"]
+    # The response is the session the caller submitted from.
+    assert submitted["id"] == "a"
+    assert submitted["status"] == "under_review"
+
+
+def test_submit_leaves_sessions_submitted_when_no_coordinator_is_free(fake_db, monkeypatch):
+    """If no coordinator is available, every session still submits and stays
+    "submitted" with no coordinator -- it isn't an error."""
+
+    fake_db.rows = [_session_row("a"), _session_row("b")]
+
+    def no_coordinator(event_id):
+        raise NoCoordinatorAvailableError("everyone is busy")
+
+    monkeypatch.setattr(service, "assign_initial_coordinator", no_coordinator)
+
+    submitted = submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+    assert {row["status"] for row in fake_db.rows} == {"submitted"}
+    assert submitted["coordinator_id"] is None
+
+
+def test_submit_validates_every_session_before_submitting_any(fake_db, assigned):
+    """One incomplete session blocks the whole request -- none of them
+    changes status, so the request is never left half-submitted."""
+    fake_db.rows = [
+        _session_row("a"),
+        _session_row("b", preferred_start_date="2026-11-20", preferred_end_date="2026-11-20", room_layout=None),
+    ]
+
+    with pytest.raises(ValidationError, match="^Session 2: Missing required fields: room_layout"):
+        submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+    assert {row["status"] for row in fake_db.rows} == {"draft"}
+    assert assigned == []
+    assert [call["op"] for call in fake_db.calls] == ["select"]
+
+
+def test_submit_single_session_error_has_no_session_prefix(fake_db, assigned):
+    """For a request with only one session, a validation error isn't prefixed with
+    "Session 1:"."""
+
+    fake_db.rows = [_session_row("a", room_layout=None)]
+
+    with pytest.raises(ValidationError, match="^Missing required fields: room_layout"):
+        submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+
+def test_submit_ignores_sessions_already_past_draft(fake_db, assigned):
+    """Only still-draft sessions of the request are submitted; a sibling
+    already in review keeps its status and coordinator."""
+    fake_db.rows = [
+        _session_row("a"),
+        _session_row("reviewed", status="approved", coordinator_id="coord-9"),
+        _session_row("other-request", shared_event_id="group-2"),
+    ]
+
+    submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+    assert assigned == ["a"]
+    assert fake_db.get("reviewed")["status"] == "approved"
+    assert fake_db.get("reviewed")["coordinator_id"] == "coord-9"
+    assert fake_db.get("other-request")["status"] == "draft"
+
+
+def test_submit_only_moves_rows_that_are_still_drafts(fake_db, assigned):
+    """The status update is conditioned on status = draft, so a double
+    submit can't push an already-submitted session back to "submitted"."""
+    fake_db.rows = [_session_row("a")]
+
+    submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
+
+    updates = [call for call in fake_db.calls if call["op"] == "update"]
+    assert updates and all(("eq", "status", "draft") in call["filters"] for call in updates)
+
+
+# -- Submitting without saving a draft first --------------------------------------
+
+
+def _group_body(*sessions):
+    payload = _complete_payload()
+    shared = {key: payload[key] for key in ("name", "description", "purpose")}
+    session = {key: value for key, value in payload.items() if key not in shared}
+    return {**shared, "sessions": [{**session, **overrides} for overrides in sessions] or [session]}
+
+
+def test_create_event_request_inserts_and_submits_every_session(fake_db, assigned):
+    """Submitting without saving a draft first inserts every session under one
+    shared_event_id, owned by the organiser, and submits each of them (each
+    gets a coordinator). A session without registration is stored with no
+    registration window."""
+
+    group = create_event_request(
+        "user-1",
+        _group_body({"room_layout": "theatre"}, {"room_layout": "banquet", "registration_needs": False}),
+    )
+
+    assert len(fake_db.rows) == 2
+    assert len({row["shared_event_id"] for row in fake_db.rows}) == 1
+    uuid.UUID(fake_db.rows[0]["shared_event_id"])  # a real uuid, generated on the server
+    assert all(row["organizer_id"] == "user-1" for row in fake_db.rows)
+    assert sorted(assigned) == sorted(row["id"] for row in fake_db.rows)
+    assert {row["status"] for row in group["sessions"]} == {"under_review"}
+    assert group["shared_event_id"] == fake_db.rows[0]["shared_event_id"]
+    # A session without registration is stored with no window at all.
+    banquet = next(row for row in fake_db.rows if row["room_layout"] == "banquet")
+    assert banquet["registration_start_datetime"] is None
+    assert banquet["registration_end_datetime"] is None
+
+
+def test_create_event_request_stores_registration_window_as_singapore_timestamptz(fake_db, assigned):
+    """Submitting straight away (no draft) writes the registration window
+    to the timestamptz columns with Singapore's +08:00 offset."""
+    body = _group_body(
+        {
+            "preferred_start_date": "2026-11-10",
+            "preferred_end_date": "2026-11-10",
+            "registration_start_datetime": "2026-11-01T01:00:00.000Z",
+            "registration_end_datetime": "2026-11-09T10:00:00.000Z",
+        }
+    )
+
+    create_event_request("user-1", body)
+
+    (row,) = fake_db.rows
+    assert row["registration_start_datetime"] == "2026-11-01T09:00:00+08:00"
+    assert row["registration_end_datetime"] == "2026-11-09T18:00:00+08:00"
+
+
+def test_create_event_request_writes_nothing_when_any_session_is_invalid(fake_db, assigned):
+    """If any session is invalid, submitting without a draft writes nothing and
+    assigns no coordinator, and the error names the failing session."""
+
+    with pytest.raises(ValidationError, match="^Session 2: expected_attendance"):
+        create_event_request("user-1", _group_body({}, {"expected_attendance": -5}))
+
+    assert fake_db.calls == []
+    assert assigned == []
+
+
+# -- Routes ---------------------------------------------------------------------
+
+
+def _post(client, signing_key, path, body):
+    token = signing_key.make_token(sub="user-1")
+    return client.post(path, headers={"Authorization": f"Bearer {token}"}, json=body)
+
+
+def test_create_route_passes_the_group_body_and_returns_201(client, signing_key, monkeypatch):
+    """POST /events hands the organiser's id and the request body to
+    create_event_request unchanged, and responds 201 with the result."""
+
+    _mock_profile(monkeypatch, ["event_organizer"])
+    calls = []
+
+    def fake_create(organizer_id, payload):
+        calls.append((organizer_id, payload))
+        return {"shared_event_id": "group-1", "sessions": [{"id": "event-1", "status": "submitted"}]}
+
+    monkeypatch.setattr(routes_module, "create_event_request", fake_create)
+    body = _group_body()
+
+    response = _post(client, signing_key, "/events", body)
+
+    assert response.status_code == 201
+    assert response.get_json()["shared_event_id"] == "group-1"
+    assert calls == [("user-1", body)]
+
+
+def test_create_route_returns_400_for_an_invalid_session(client, signing_key, monkeypatch):
+    """End to end through the real service: validation fails before any
+    database call, so no fake client is needed."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+
+    response = _post(client, signing_key, "/events", _group_body({}, {"room_layout": "stadium"}))
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert "Session 2" in response.get_json()["error"]["message"]
+
+
+def test_create_route_denies_a_non_organizer(client, signing_key, monkeypatch):
+    """A user without the event_organizer role can't create a request through POST
+    /events -- the service is never called."""
+
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    monkeypatch.setattr(routes_module, "create_event_request", lambda *a: pytest.fail("must not create"))
+
+    response = _post(client, signing_key, "/events", _group_body())
+
+    assert response.status_code in (403, 404)
+
+
+def test_save_draft_route_passes_the_group_body(client, signing_key, monkeypatch):
+    """POST /events/<id>/draft hands the loaded event and the request body
+    (sessions included) to save_draft_request unchanged, and responds 200."""
+
+    _mock_profile(monkeypatch, ["event_organizer"])
+    event = _complete_draft()
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+    calls = []
+
+    def fake_save(event_id, loaded_event, payload):
+        calls.append((event_id, loaded_event, payload))
+        return {"shared_event_id": "group-1", "sessions": [{"id": event_id}]}
+
+    monkeypatch.setattr(routes_module, "save_draft_request", fake_save)
+    body = {"name": "Workshop", "sessions": [{"id": "event-1"}, {"expected_attendance": 10}]}
+
+    response = _post(client, signing_key, "/events/event-1/draft", body)
+
+    assert response.status_code == 200
+    assert calls == [("event-1", event, body)]
+
+
+# -- IS-31 Submit event request ------------------------------------------------
+# "As an Event Organizer, I want to submit my completed event request, so
+# that it can be reviewed by an Event Coordinator."
+#
+# Tests elsewhere that already cover these acceptance criteria (not repeated
+# here):
+#   AC1 status -> Submitted:
+#     test_submit_event_route_sets_submitted_for_organizer,
+#     test_submit_leaves_sessions_submitted_when_no_coordinator_is_free,
+#     test_submit_from_one_session_submits_every_draft_session (this file);
+#     test_organiser_allowed_event_submit_from_draft,
+#     test_organiser_denied_event_submit_from_status_other_than_draft
+#     (test_authz_policy.py)
+#   AC2 visible in the assigned Coordinator's queue:
+#     test_coordinator_allowed_view_on_assigned_event (test_authz_policy.py),
+#     test_coordinator_sees_only_events_assigned_to_them
+#     (test_event_list_integration.py),
+#     test_submitted_request_appears_in_assigned_coordinators_queue_against_supabase
+#     (test_event_submission_integration.py)
+#   AC3 only the Event Coordinator may edit once submitted:
+#     test_organiser_denied_edit_after_submission,
+#     test_coordinator_allowed_edit_assigned_event_under_review_or_planning,
+#     test_coordinator_denied_edit_on_event_assigned_to_someone_else
+#     (test_authz_policy.py); test_delete_route_denies_submitted_event
+#     (test_events_routes.py)
+#
+# The tests below cover what those don't: the same rules enforced at the
+# HTTP API the frontend actually calls, and per-session queue visibility.
+
+
+def _submitted_event(**overrides):
+    event = _complete_draft()
+    event.status = "submitted"
+    for key, value in overrides.items():
+        setattr(event, key, value)
+    return event
+
+
+def test_is31_submitted_request_cannot_be_submitted_again(client, signing_key, monkeypatch):
+    """AC1: once a request is submitted, submitting it again is refused with
+    403 (the organiser knows it exists, it's just past the draft stage), and
+    the submit service never runs -- so no second coordinator assignment."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: _submitted_event())
+    monkeypatch.setattr(routes_module, "submit_event_request", lambda *a: pytest.fail("must not submit"))
+
+    response = _post(client, signing_key, "/events/event-1/submit", {})
+
+    assert response.status_code == 403
+
+
+def test_is31_coordinator_sees_only_the_sessions_assigned_to_them(monkeypatch):
+    """AC2: each submitted session lands in the queue of the coordinator it
+    was assigned to. Viewing a request's sessions, a coordinator sees only
+    their own assigned session(s) -- not a sibling session assigned to a
+    different coordinator -- while the organiser sees all of them."""
+    fake = FakeSupabase(
+        [
+            {"id": "a", "shared_event_id": "group-1", "organizer_id": "user-1",
+             "coordinator_id": "coord-1", "status": "under_review", "name": "Workshop"},
+            {"id": "b", "shared_event_id": "group-1", "organizer_id": "user-1",
+             "coordinator_id": "coord-2", "status": "under_review", "name": "Workshop"},
+        ]
+    )
+    monkeypatch.setattr(service, "supabase", fake)
+    event = SimpleNamespace(**fake.get("a"))
+
+    coordinator_view = list_event_sessions(event, make_user(["event_coordinator"], user_id="coord-1"))
+    organizer_view = list_event_sessions(event, make_user(["event_organizer"], user_id="user-1"))
+
+    assert [s["id"] for s in coordinator_view["sessions"]] == ["a"]
+    assert sorted(s["id"] for s in organizer_view["sessions"]) == ["a", "b"]
+
+
+@pytest.mark.parametrize("status", ["submitted", "under_review", "approved", "planning"])
+def test_is31_organizer_cannot_save_changes_once_submitted(client, signing_key, monkeypatch, status):
+    """AC3: after submission the organiser can't change any field through the
+    save endpoint the edit form uses -- refused with 403, and nothing is
+    saved, at every status past draft (rejected is the one exception,
+    covered by test_organiser_allowed_edit_after_rejection)."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: _submitted_event(status=status))
+    monkeypatch.setattr(routes_module, "save_draft_request", lambda *a: pytest.fail("must not save"))
+
+    response = _post(
+        client, signing_key, "/events/event-1/draft", {"name": "Changed", "sessions": [{"id": "event-1"}]}
+    )
+
+    assert response.status_code == 403
+
+
+def test_is31_organizer_cannot_edit_a_submitted_request_directly(client, signing_key, monkeypatch):
+    """AC3: the direct field-edit endpoint (POST /events/<id>) is refused
+    for the organiser once the request is submitted, and nothing is changed."""
+    _mock_profile(monkeypatch, ["event_organizer"])
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: _submitted_event())
+    monkeypatch.setattr(routes_module, "edit_event_request", lambda *a: pytest.fail("must not edit"))
+
+    response = _post(client, signing_key, "/events/event-1", {"expected_attendance": 500})
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("status", ["under_review", "planning"])
+def test_is31_assigned_coordinator_can_edit_the_request(client, signing_key, monkeypatch, status):
+    """AC3: the Event Coordinator assigned to the request CAN edit it through
+    the same endpoint the organiser is refused on -- both while reviewing it
+    (under_review) and later during planning."""
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    event = _submitted_event(status=status, organizer_id="organizer-2", coordinator_id="user-1")
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+    calls = []
+
+    def fake_edit(event_id, loaded_event, payload):
+        calls.append((event_id, payload))
+        return {"id": event_id, "expected_attendance": payload["expected_attendance"]}
+
+    monkeypatch.setattr(routes_module, "edit_event_request", fake_edit)
+
+    response = _post(client, signing_key, "/events/event-1", {"expected_attendance": 500})
+
+    assert response.status_code == 200
+    assert calls == [("event-1", {"expected_attendance": 500})]

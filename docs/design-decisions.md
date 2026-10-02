@@ -151,10 +151,13 @@ independently-gated branch for the coordinator. Chose the second: it's the
 same verb (change the event's own fields) on the same resource, just with a
 different role and a different status window, and a second action would
 only move the real complexity into "why are there two actions for editing
-one resource" instead of removing it. The coordinator's window is `planning`
-only — a direct match to the story's literal wording ("during planning"),
-not an inference the way `event.cancel`'s range is, so there's no
-open-questions.md entry for this one. One real bug came out of building
+one resource" instead of removing it. The coordinator's window was first
+`planning` only, a direct match to the Event Information Management story's
+wording ("during planning"). It was widened to `under_review` and `planning`
+for IS-31 Submit event request, whose acceptance criteria say that once a
+request is submitted "only the Event Coordinator is allowed to edit the
+event request". With `planning` alone, nobody could correct a request
+while it was under review. One real bug came out of building
 this: the first version of the rule returned on whichever relationship
 (organiser or coordinator) it found FIRST, regardless of that branch's own
 status outcome — which would wrongly deny a user who happens to be both the

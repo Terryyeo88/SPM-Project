@@ -174,15 +174,14 @@ def rule_event_submit(user: Any, event: Any) -> Decision:
 #
 #   organiser:   draft only. Source: "an organiser cannot edit directly
 #                after submission; changes go via the coordinator".
-#   coordinator: assigned, AND status == "planning". Source: the Event
-#                Information Management story, which has the coordinator
-#                updating event information during planning, read
-#                together with the migration's own lifecycle ordering
-#                (... approved -> planning -> confirmed ...) to pin down
-#                which single status that is. This is a direct match to
-#                the story's literal wording ("during planning"), not an
-#                inference the way event.cancel's status set is -- no
-#                open-questions.md entry needed for this one.
+#   coordinator: assigned, AND status in ("under_review", "planning").
+#                Sources: the Event Information Management story, which
+#                has the coordinator updating event information during
+#                planning; and IS-31 Submit event request, where once a
+#                request is submitted "only the Event Coordinator is
+#                allowed to edit the event request" -- so the assigned
+#                coordinator can also correct it while reviewing it
+#                (under_review), instead of nobody being able to.
 #
 # A second action (e.g. event.update_planning) was the alternative and
 # was rejected: the rule below is two clearly separate branches (check
@@ -213,7 +212,7 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
             return Decision.ALLOW
     if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
         has_relationship = True
-        if _event_status_in(event, "planning"):
+        if _event_status_in(event, "under_review", "planning"):
             return Decision.ALLOW
     if has_relationship:
         return Decision.DENY_FORBIDDEN
