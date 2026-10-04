@@ -10,6 +10,7 @@ import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
 import VenueDetailView from '../views/venues/VenueDetailView.vue'
+import AttendeeEventView from '../views/registrations/AttendeeEventView.vue'
 
 // roles.js's ROUTE_ACCESS is the single source of truth for "which roles
 // can reach this named route" -- built into a lookup here and used
@@ -61,6 +62,12 @@ const routes = [
     name: 'event-details',
     component: EventDetailsView,
     meta: { roles: _rolesByRouteName.get('event-details') },
+  },
+  {
+    path: '/attend/:eventId',
+    name: 'attendee-event',
+    component: AttendeeEventView,
+    meta: { roles: _rolesByRouteName.get('attendee-event') },
   },
   {
     path: '/venues',

@@ -144,11 +144,28 @@ Not covered, because not built: "Relevant users should be notified when
 assignments or reassignments occur" (no notification system — see
 `docs/open-questions.md`).
 
+## Attendee Registration (Justin)
+
+Unit tests: `test_registrations.py` (rules, validation, service, routes), `frontend/src/lib/registrations.test.js`. Integration: `test_registrations_integration.py` (local stack). The database function was also exercised directly against Postgres 16, including 20 concurrent registrations.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Register only for an event that is confirmed and enabled for registration | `test_registrations.py::test_attendee_cannot_register_unless_confirmed_and_enabled`, `::test_register_route_hides_an_unconfirmed_session_from_attendees`, `test_registrations_integration.py::test_the_database_refuses_a_session_that_is_not_confirmed` | `rules.py::rule_event_register`; `register_attendee` (`not_open`) |
+| Register only during the permitted registration period | `test_registrations.py::test_register_explains_each_refusal`, `test_registrations_integration.py::test_registration_only_during_the_window` | `register_attendee` (`not_started` / `closed`, database clock) |
+| The Attendee can provide the required registration information | `test_registrations.py::test_email_is_required_valid_and_normalised`, `::test_phone_is_required`, `::test_phone_must_look_like_a_phone_number`, `::test_at_least_one_notification_channel_is_required`, `::test_name_and_organisation_cannot_be_submitted`, `::test_included_organisation_is_the_profiles`, `::test_notes_are_optional_trimmed_and_capped`, `registrations.test.js` (prefill) | `registration_service.validate_registration_details`; `RegistrationForm.vue` |
+| Capacity available → registration recorded as confirmed | `test_registrations.py::test_register_returns_the_recorded_registration[confirmed]`, `test_registrations_integration.py::test_capacity_fills_then_waitlists_first_come_first_served` | `register_attendee` (capacity = `expected_attendance`) |
+| Capacity reached and waiting list available → recorded as waitlisted | `test_registrations.py::test_register_returns_the_recorded_registration[waitlisted]`, `::test_my_registrations_show_waiting_list_position_first_come_first_served`, `test_registrations_integration.py::test_capacity_fills_then_waitlists_first_come_first_served` | `register_attendee`; `registration_service.list_my_registrations` (position) |
+| Only attendees register and see registrations | `test_registrations.py::test_only_attendees_register`, `::test_only_attendees_browse_and_list_their_registrations`, `::test_list_routes_are_attendee_only` | `rules.py::rule_event_register` / `rule_registration_list` |
+
+| Withdraw / leave the waiting list (attendee wireframe; Week 4 "register, view status, withdraw") | `test_registrations.py::test_withdraw_reports_whether_the_next_person_moved_up`, `::test_withdraw_without_a_registration_is_404`, `::test_withdraw_after_the_session_started_is_refused`, `::test_only_attendees_withdraw`, `test_registrations_integration.py::test_withdrawing_a_confirmed_place_moves_the_first_waitlisted_attendee_up` | `withdraw_registration` (promotes the first waitlisted); `AttendeeEventView.vue` |
+
+Not covered, because not built: notifications (see `docs/open-questions.md`).
+
 ## Explicitly deferred (not tested because not built)
 
-- Registration-related criteria ("an attendee cannot view another attendee's
-  registration") — no `registrations` table or attendee-event linkage
-  exists in the schema yet. No action, no rule, no test.
+- "An attendee cannot view another attendee's registration" — there is no
+  route that returns anyone else's registration (`/registrations/mine` is
+  scoped to the caller), so there is nothing to deny yet.
 - Field-level visibility ("an attendee sees no internal planning
   information") — a serialisation concern, not a `can()` decision; deferred
   to whoever builds the event routes/serialisers. See

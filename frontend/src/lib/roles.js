@@ -60,13 +60,13 @@ export function roleLabel(role) {
  * The roles whose links appear in the nav bar and as dashboard cards.
  * The Event Coordinator wireframe has no nav links -- a coordinator works
  * entirely from their "My Assigned Events" dashboard -- so that role
- * contributes none. The Event Coordinator Lead is the same: they work from
- * their own dashboard (unassigned queue / assignments / past). A user who
+ * contributes none. The Event Coordinator Lead and the Attendee are the
+ * same: each works from their own dashboard. A user who
  * ALSO holds another role still gets that role's links. (The routes
  * themselves stay reachable: this only affects which links are shown, not
  * ROUTE_ACCESS gating.)
  */
-const _DASHBOARD_ONLY_ROLES = [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD]
+const _DASHBOARD_ONLY_ROLES = [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD, ROLES.ATTENDEE]
 
 export function navRoles(userRoles) {
   return (userRoles ?? []).filter((role) => !_DASHBOARD_ONLY_ROLES.includes(role))
@@ -148,11 +148,14 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           above. Not a nav link: reached from the
  *                           venue catalogue list.
  *
- * Attendee and Technical Support Staff intentionally unlock nothing yet:
- * Attendee Registration and Equipment features aren't built this sprint
- * (see docs/traceability.md, "Explicitly deferred"). That's correct for
- * now, not a bug -- DashboardView shows a fallback message rather than a
- * blank/broken-looking nav for these roles.
+ *   attendee-event      -- Attendee Registration: "As an Attendee, I want to
+ *                           register for an event". Attendee only. Reached
+ *                           from the attendee dashboard, not the nav.
+ *
+ * Technical Support Staff intentionally unlock nothing yet: Equipment
+ * features aren't built (see docs/traceability.md, "Explicitly deferred").
+ * That's correct for now, not a bug -- DashboardView shows a fallback
+ * message rather than a blank/broken-looking nav for that role.
  */
 export const ROUTE_ACCESS = Object.freeze(
   [
@@ -190,6 +193,17 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'venue-details',
       label: 'Venue details',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    // Attendee Registration (Justin): the attendee's event page (register,
+    // withdraw). Attendee only, matching app/authz/rules.py::
+    // rule_event_view_public / rule_event_register. Not a nav link: the
+    // attendee works from their dashboard (Dashboard-Attendee wireframe),
+    // which links here.
+    {
+      routeName: 'attendee-event',
+      label: 'Event',
+      roles: [ROLES.ATTENDEE],
       inNav: false,
     },
     // Every signed-in user can see their own profile -- reached from the

@@ -460,3 +460,54 @@ def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
     if _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
+
+
+# -- event.register / registration.list (Attendee Registration, Justin) ---
+# Source: "The Attendee can register only for an event that is confirmed
+# and enabled for registration." An attendee has no relationship to any
+# event until they register, so the only sessions that exist as far as
+# they're concerned are the public ones: confirmed with registration
+# enabled. Anything else is a 404 for them, the same as an outsider gets.
+# Someone without the attendee role who can already see the event (its
+# organiser, coordinator, the Lead) gets a 403 instead.
+#
+# The registration PERIOD is not checked here: it's time-based, not a
+# property of (user, event), so the database function that records the
+# registration checks it (supabase/migrations/20261005000000_registrations.sql).
+
+
+def _is_public_for_registration(event: Any) -> bool:
+    return _event_status_in(event, "confirmed") and getattr(event, "registration_needs", None) is True
+
+
+def rule_event_register(user: Any, event: Any) -> Decision:
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW if _is_public_for_registration(event) else Decision.DENY_NOT_FOUND
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_event_view_public(user: Any, event: Any) -> Decision:
+    """The attendee's event page shows only public fields, so it has exactly
+    the same audience as registering: attendees, for public sessions."""
+    return rule_event_register(user, event)
+
+
+def rule_registration_withdraw(user: Any, event: Any) -> Decision:
+    """Any attendee may ask to withdraw from a session; whether they hold a
+    registration there is checked by the database function (no
+    registration -> 404), so this reveals nothing about non-public
+    sessions. Withdrawing stays possible after a session stops being
+    public (e.g. cancelled) -- the attendee already knew about it."""
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_registration_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN

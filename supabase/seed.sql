@@ -197,3 +197,79 @@ select 'Riverside Pavilion', 'East Campus, Ground Floor', 150,
   'maintenance'
 where not exists (select 1 from public.venues where name = 'Riverside Pavilion');
 
+
+-- ============================================================
+-- Attendee Registration demo (Justin)
+-- ============================================================
+-- Three attendee accounts and one CONFIRMED request with two sessions, so
+-- registration can be tested before the venue and equipment stories exist
+-- to confirm an event the normal way. Both sessions hold 2 people
+-- (expected_attendance), so the third attendee to register is waitlisted.
+--
+--   14:00 session -- registration already open
+--   10:00 session -- registration opens 2 hours after this runs
+--
+-- FRESH EVERY RUN: the demo request (and, by cascade, every registration
+-- for it) is deleted and recreated, dates relative to now -- so re-running
+-- gives a clean slate to test on. Also removes the older demo request
+-- ("Registration Demo: Tech Talk Series"). Nothing else is touched.
+-- Inserted directly as `confirmed` (a seed shortcut): there are no
+-- event_status_log rows for how it got there.
+do $$
+declare
+  v_id uuid;
+  v_org uuid;
+  v_coord uuid;
+  r record;
+begin
+  for r in
+    select * from (values
+      ('attendee1@example.com', 'Ethan Koh'),
+      ('attendee2@example.com', 'Fiona Ng'),
+      ('attendee3@example.com', 'Gavin Tan')
+    ) as t(email, name)
+  loop
+    select id into v_id from public.profiles where email = r.email;
+    if v_id is null then
+      v_id := gen_random_uuid();
+      insert into auth.users (
+        instance_id, id, aud, role, email, encrypted_password,
+        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+        created_at, updated_at, confirmation_token, email_change,
+        email_change_token_new, recovery_token
+      ) values (
+        '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+        r.email, crypt('Password123!', gen_salt('bf')), now(),
+        '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
+        now(), now(), '', '', '', ''
+      );
+      insert into public.profiles (id, name, email) values (v_id, r.name, r.email);
+    end if;
+    insert into public.user_roles (user_id, role) values (v_id, 'attendee') on conflict do nothing;
+  end loop;
+
+  select id into v_org from public.profiles where email = 'organizer1@example.com';
+  select id into v_coord from public.profiles where email = 'coordinator2@example.com';
+
+  -- Clean slate: registrations, status history and assignment log rows
+  -- cascade with their events.
+  delete from public.events
+  where name in ('Registration Demo: Tech Talk Series', 'Registration Demo: Community Workshop');
+
+  insert into public.events (
+    organizer_id, coordinator_id, shared_event_id, name, description, purpose, status,
+    preferred_start_date, preferred_end_date, preferred_start_time, preferred_end_time,
+    expected_attendance, room_layout, accessibility_needs, equipment_needed,
+    registration_needs, registration_start_datetime, registration_end_datetime, special_requests
+  )
+  select v_org, v_coord, shared.id, 'Registration Demo: Community Workshop',
+    'A hands-on community workshop in two sessions. Open to the public.', 'Community outreach', 'confirmed',
+    current_date + s.start_in, current_date + s.start_in, s.start_t, s.end_t,
+    2, 'classroom', '[]'::jsonb, '{"equipment": []}'::jsonb,
+    true, s.opens, ((current_date + s.start_in - 1)::text || ' 23:59:00+08')::timestamptz, ''
+  from (select gen_random_uuid() as id) as shared,
+    (values
+      (30, time '14:00', time '16:00', now() - interval '1 day'),
+      (37, time '10:00', time '12:00', now() + interval '2 hours')
+    ) as s(start_in, start_t, end_t, opens);
+end $$;

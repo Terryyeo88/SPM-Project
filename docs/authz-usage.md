@@ -41,6 +41,10 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |
 | `EVENT_COMPLETE` | coordinator (assigned) | status must be `confirmed` (IS-38) |
 | `COORDINATOR_LIST` | coordinator or Event Coordinator Lead | role only |
+| `EVENT_REGISTER` | attendee | session is `confirmed` with `registration_needs` true (otherwise 404 to attendees); the registration window is checked by the database function |
+| `REGISTRATION_LIST` | attendee | role only (browse open sessions, list own registrations) |
+| `EVENT_VIEW_PUBLIC` | attendee | same as `EVENT_REGISTER`: the attendee's event page shows public fields only |
+| `REGISTRATION_WITHDRAW` | attendee | any session (no registration → 404 from the database function); not once the session has started |
 | `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`

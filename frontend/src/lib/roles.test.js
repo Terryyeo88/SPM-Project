@@ -175,8 +175,13 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(visibleLinks([ROLES.VENUE_STAFF])).toEqual(['venues'])
   })
 
-  it('attendee sees nothing (Attendee Registration is explicitly deferred, not a bug)', () => {
+  it('attendee has no nav links but reaches the attendee event page (Attendee Registration)', () => {
     expect(visibleLinks([ROLES.ATTENDEE])).toEqual([])
+    expect(navRoles([ROLES.ATTENDEE])).toEqual([])
+    expect(reachableRoutes([ROLES.ATTENDEE])).toContain('attendee-event')
+    for (const role of Object.values(ROLES).filter((r) => r !== ROLES.ATTENDEE)) {
+      expect(reachableRoutes([role])).not.toContain('attendee-event')
+    }
   })
 
   it('event_coordinator_lead has no nav links -- they work from their dashboard (Week 7 change #5)', () => {
