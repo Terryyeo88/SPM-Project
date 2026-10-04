@@ -259,6 +259,57 @@ def test_second_decision_is_refused_once_no_longer_under_review(fake_db):
     assert len(fake_db.inserts) == 1
 
 
+# -- service: rejecting a multi-session request rejects every session --------
+
+
+def _request_rows():
+    base = {"shared_event_id": "group-1", "organizer_id": "org-1", "coordinator_id": "coord-1"}
+    return [
+        {**base, "id": "s1", "status": "under_review"},
+        {**base, "id": "s2", "status": "under_review"},
+        {**base, "id": "s3", "status": "approved"},  # already decided: left alone
+        {**base, "id": "s4", "status": "under_review", "coordinator_id": "coord-2"},  # not this coordinator's
+        {**base, "id": "other", "status": "under_review", "shared_event_id": "group-2"},  # another request
+    ]
+
+
+@pytest.fixture
+def request_db(monkeypatch):
+    db = FakeSupabase(_request_rows())
+    monkeypatch.setattr(service_module, "supabase", db)
+    monkeypatch.setattr(transitions_module, "supabase", db)
+    return db
+
+
+def _loaded_session(event_id="s1"):
+    return SimpleNamespace(
+        id=event_id, status="under_review", coordinator_id="coord-1",
+        organizer_id="org-1", shared_event_id="group-1",
+    )
+
+
+def test_reject_rejects_every_under_review_session_of_the_request(request_db):
+    result = service_module.reject_event_request("s1", _loaded_session(), "coord-1", " Venue clash ")
+
+    assert result["id"] == "s1"
+    statuses = {row["id"]: row["status"] for row in request_db.rows}
+    assert statuses == {
+        "s1": "rejected", "s2": "rejected", "s3": "approved", "s4": "under_review", "other": "under_review",
+    }
+    logs = request_db.tables["event_status_log"]
+    assert sorted(entry["event_id"] for entry in logs) == ["s1", "s2"]
+    assert all(entry["reason"] == "Venue clash" and entry["changed_by"] == "coord-1" for entry in logs)
+
+
+def test_reject_lost_race_on_the_opened_session_touches_no_sibling(request_db):
+    request_db.get("s1")["status"] = "approved"  # decided in another tab first
+
+    with pytest.raises(TransitionConflictError):
+        service_module.reject_event_request("s1", _loaded_session(), "coord-1", "Venue clash")
+    assert request_db.get("s2")["status"] == "under_review"
+    assert request_db.tables.get("event_status_log", []) == []
+
+
 # -- service: list_event_requests (organiser's list / coordinator's queue) --------
 # Unit level, with an in-memory client; test_event_list_integration.py checks
 # the same scoping against a real database.

@@ -779,8 +779,31 @@ def reject_event_request(event_id: str, event: SimpleNamespace, rejected_by: str
     rejected requests keep a record of the decision) so the organiser
     knows what to fix before resubmitting. Enforced (and trimmed) by
     transition() from transitions.REASON_REQUIRED, with the same message
-    as before."""
-    return _decide(event_id, event, "rejected", rejected_by, reason)
+    as before.
+
+    Rejection applies to the whole request, not just the session the
+    coordinator happened to open (Aaralyn, IS-46 follow-up): every
+    under_review sibling sharing its shared_event_id goes with it, so the
+    organiser fixes and resubmits them together (submit_event_request
+    already resubmits every rejected session of a request at once).
+
+    The session authz checked is decided first, so a lost race on it
+    (409 TransitionConflictError) refuses the whole rejection before any
+    sibling is touched. Siblings are then moved only if they are still
+    under_review AND assigned to this coordinator -- authz never saw those
+    rows, so the coordinator check is re-done here (one coordinator per
+    request makes it a no-op in practice). Each sibling goes through
+    transition() too, so each is guarded and logged with the same reason;
+    one that already left under_review is skipped, not overwritten."""
+    rejected = _decide(event_id, event, "rejected", rejected_by, reason)
+    for session in _load_sessions_with_status(event, "under_review"):
+        if session["id"] == event_id or session.get("coordinator_id") != rejected_by:
+            continue
+        try:
+            transition(session["id"], "rejected", rejected_by, reason=reason, expected_from="under_review")
+        except TransitionConflictError:
+            continue
+    return rejected
 
 
 def list_event_requests(user, status: str | None = None) -> list[dict]:
