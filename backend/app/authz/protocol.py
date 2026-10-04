@@ -21,3 +21,9 @@ class EventLike(Protocol):
     organizer_id: str
     coordinator_id: str | None
     status: str
+
+
+class VenueBookingLike(Protocol):
+    id: str
+    requested_by: str
+    status: str

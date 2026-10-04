@@ -61,3 +61,18 @@ COORDINATOR_LIST = "coordinator.list"
 
 VENUE_VIEW = "venue.view"
 VENUE_LIST = "venue.list"
+
+# -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
+# Source: "As an Event Coordinator, I want to submit a request to book a
+# venue for an event" (create) and "As a Venue Staff member, I want to
+# review pending venue booking requests and approve or reject them"
+# (approve/reject). Role split per rule_venue_list's own comment above,
+# which already anticipated this: event_coordinator requests,
+# venue_staff decides -- both inferred, not literal story text, flagged
+# in docs/open-questions.md same as that comment already is.
+
+VENUE_BOOKING_CREATE = "venue_booking.create"
+VENUE_BOOKING_VIEW = "venue_booking.view"
+VENUE_BOOKING_LIST = "venue_booking.list"
+VENUE_BOOKING_APPROVE = "venue_booking.approve"
+VENUE_BOOKING_REJECT = "venue_booking.reject"

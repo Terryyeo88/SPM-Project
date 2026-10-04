@@ -55,6 +55,11 @@ from app.authz.rules import (
     rule_event_request_clarification,
     rule_event_submit,
     rule_event_view,
+    rule_venue_booking_approve,
+    rule_venue_booking_create,
+    rule_venue_booking_list,
+    rule_venue_booking_reject,
+    rule_venue_booking_view,
     rule_venue_list,
     rule_venue_view,
 )
@@ -76,6 +81,11 @@ _RULES: dict[str, RuleFunc] = {
     actions.EVENT_REASSIGN_COORDINATOR: rule_event_reassign_coordinator,
     actions.VENUE_VIEW: rule_venue_view,
     actions.VENUE_LIST: rule_venue_list,
+    actions.VENUE_BOOKING_CREATE: rule_venue_booking_create,
+    actions.VENUE_BOOKING_VIEW: rule_venue_booking_view,
+    actions.VENUE_BOOKING_LIST: rule_venue_booking_list,
+    actions.VENUE_BOOKING_APPROVE: rule_venue_booking_approve,
+    actions.VENUE_BOOKING_REJECT: rule_venue_booking_reject,
     actions.COORDINATOR_LIST: rule_coordinator_list,
 }
 

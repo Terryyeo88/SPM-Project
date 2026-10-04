@@ -34,3 +34,14 @@ class FakeEvent:
     organizer_id: str = "organizer-1"
     coordinator_id: str | None = None
     status: str = "draft"
+
+
+@dataclass(frozen=True)
+class FakeVenueBooking:
+    """Implements app.authz.protocol.VenueBookingLike -- only the three
+    attributes rule_venue_booking_view/approve/reject actually read, not
+    the full venue_bookings table."""
+
+    id: str = "booking-1"
+    requested_by: str = "coord-1"
+    status: str = "pending"

@@ -170,8 +170,8 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('venue-details')
   })
 
-  it('venue_staff sees only Venues', () => {
-    expect(visibleLinks([ROLES.VENUE_STAFF])).toEqual(['venues'])
+  it('venue_staff sees Venues and their Venue Bookings queue', () => {
+    expect(visibleLinks([ROLES.VENUE_STAFF]).sort()).toEqual(['venue-booking-queue', 'venues'].sort())
   })
 
   it('attendee sees nothing (Attendee Registration is explicitly deferred, not a bug)', () => {
@@ -184,13 +184,13 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('a multi-role user (coordinator + venue_staff) sees the UNION, not just one role\'s links', () => {
     expect(visibleLinks([ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF]).sort()).toEqual(
-      ['events', 'reassign-coordinator', 'venues'].sort(),
+      ['events', 'reassign-coordinator', 'venue-booking-queue', 'venues'].sort(),
     )
   })
 
   it('a multi-role user with no overlapping single link still gets the full union (organizer + venue_staff)', () => {
     expect(visibleLinks([ROLES.EVENT_ORGANIZER, ROLES.VENUE_STAFF]).sort()).toEqual(
-      ['events', 'venues'].sort(),
+      ['events', 'venue-booking-queue', 'venues'].sort(),
     )
   })
 
@@ -202,8 +202,37 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('holding every role at once yields the union of everything, each link exactly once', () => {
     const all = visibleLinks(Object.values(ROLES))
-    expect(all.sort()).toEqual(['events', 'reassign-coordinator', 'venues'].sort())
+    expect(all.sort()).toEqual(['events', 'reassign-coordinator', 'venue-booking-queue', 'venues'].sort())
     expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('request-venue-booking is reachable by event_coordinator only -- every other role is denied', () => {
+    const others = Object.values(ROLES).filter((r) => r !== ROLES.EVENT_COORDINATOR)
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('request-venue-booking')
+    for (const role of others) {
+      expect(reachableRoutes([role])).not.toContain('request-venue-booking')
+    }
+  })
+
+  it('request-venue-booking is hidden from the nav (reached from the event details page)', () => {
+    expect(visibleLinks([ROLES.EVENT_COORDINATOR])).not.toContain('request-venue-booking')
+  })
+
+  it('venue-booking-queue is reachable by venue_staff only, and IS a nav link (it is their working queue)', () => {
+    expect(reachableRoutes([ROLES.VENUE_STAFF])).toContain('venue-booking-queue')
+    for (const role of [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR, ROLES.TECHNICAL_SUPPORT_STAFF, ROLES.ATTENDEE]) {
+      expect(reachableRoutes([role])).not.toContain('venue-booking-queue')
+    }
+    expect(visibleLinks([ROLES.VENUE_STAFF])).toContain('venue-booking-queue')
+  })
+
+  it('venue-booking-review is reachable by both event_coordinator (read-only requester) and venue_staff (decider), hidden from the nav', () => {
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('venue-booking-review')
+    expect(reachableRoutes([ROLES.VENUE_STAFF])).toContain('venue-booking-review')
+    for (const role of [ROLES.EVENT_ORGANIZER, ROLES.TECHNICAL_SUPPORT_STAFF, ROLES.ATTENDEE]) {
+      expect(reachableRoutes([role])).not.toContain('venue-booking-review')
+    }
+    expect(visibleLinks([ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF])).not.toContain('venue-booking-review')
   })
 
   it('an empty roles array sees nothing', () => {

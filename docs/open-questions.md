@@ -79,6 +79,34 @@ decisions worth double-checking.
   in `20260927000000_reconcile_events_with_live.sql` are out of date. They
   were left as is because that migration has already been applied.
 
+- **Venue Staff granted blanket access to every venue's bookings (no
+  per-venue-staff-assignment table).** The Venue Booking Approval story
+  says "As a Venue Staff member, I want to review pending venue booking
+  requests and approve or reject them" — it doesn't say whether a Venue
+  Staff member is tied to specific venues or sees every venue's queue.
+  No table links a Venue Staff member to the venue(s) they cover, so
+  `rule_venue_booking_list`/`rule_venue_booking_approve`/`rule_venue_
+  booking_reject` (`app/authz/rules.py`) and
+  `app.venues.booking_service.list_bookings` are role-only: any
+  `venue_staff` sees and can decide every venue's pending bookings, same
+  inference already made for `venue.view`/`venue.list` above. Please
+  confirm this is acceptable, or whether Venue Staff should be scoped to
+  specific venues (which would need a new assignment table, out of scope
+  for this sprint).
+
+- **The `approved → planning` transition is a side effect of requesting a
+  venue, not its own feature.** The Event Status Management "Planning
+  Status" story implies a Coordinator explicitly moves an event to
+  `planning` before searching for a venue/equipment, but nothing in this
+  codebase transitions an event TO `planning` (that sub-story is
+  unassigned). `app.venues.booking_service.create_booking_request`
+  performs that transition itself, narrowly, as a side effect of the
+  FIRST venue booking request against an `approved` event — see
+  `docs/design-decisions.md` §approved→planning for the full reasoning.
+  Please confirm this reading (starting a venue search IS what moves an
+  event to planning) rather than expecting a separate, explicit
+  "Start Planning" action.
+
 - **Test-suite network gap: JWKS is still fetched over the wire.** The
   unit-test guard (`tests/conftest.py`) blocks the *database* but not the
   *network*. A unit test that sends a real bearer token without the
