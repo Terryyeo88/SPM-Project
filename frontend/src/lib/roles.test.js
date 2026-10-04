@@ -144,9 +144,10 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     }
   })
 
-  it('event-details is reachable by organiser and coordinator, and denied to venue_staff, technical_support_staff and attendee', () => {
+  it('event-details is reachable by organiser, coordinator and lead, and denied to venue_staff, technical_support_staff and attendee', () => {
     expect(reachableRoutes([ROLES.EVENT_ORGANIZER])).toContain('event-details')
     expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('event-details')
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR_LEAD])).toContain('event-details')
     for (const role of [ROLES.VENUE_STAFF, ROLES.TECHNICAL_SUPPORT_STAFF, ROLES.ATTENDEE]) {
       expect(reachableRoutes([role])).not.toContain('event-details')
     }
@@ -176,6 +177,12 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('attendee sees nothing (Attendee Registration is explicitly deferred, not a bug)', () => {
     expect(visibleLinks([ROLES.ATTENDEE])).toEqual([])
+  })
+
+  it('event_coordinator_lead has no nav links -- they work from their dashboard (Week 7 change #5)', () => {
+    expect(navRoles([ROLES.EVENT_COORDINATOR_LEAD])).toEqual([])
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR_LEAD])).not.toContain('create-event')
+    expect(roleLabel(ROLES.EVENT_COORDINATOR_LEAD)).toBe('Event Coordinator Lead')
   })
 
   it('technical_support_staff sees nothing (Equipment features explicitly deferred)', () => {

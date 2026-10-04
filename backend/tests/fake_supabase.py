@@ -11,7 +11,7 @@ which rows were inserted, updated or deleted, and how each query was scoped
 
 It models only what event_service and coordinator_service use:
 table().select / insert / update / delete, filtered by .eq() / .neq() /
-.is_(col, "null") / .in_() / .or_() (only "column.eq.value" conditions), optionally .order(),
+.is_(col, "null") / .in_() / .or_() (only "column.eq.value" / "column.neq.value" conditions), optionally .order(),
 then .execute(). Any table name works; rows for "events" are also
 reachable as `fake.rows`, other tables through `fake.tables[name]`.
 
@@ -103,8 +103,13 @@ class _FakeQuery:
         return self
 
     def or_(self, conditions):
-        # PostgREST syntax "a.eq.1,b.eq.2": a row matches if ANY condition does.
-        parsed = tuple(tuple(condition.split(".eq.", 1)) for condition in conditions.split(","))
+        # PostgREST syntax "a.eq.1,b.neq.2": a row matches if ANY condition does.
+        parsed = []
+        for condition in conditions.split(","):
+            column, op, value = condition.split(".", 2)
+            assert op in ("eq", "neq"), f"fake or_ doesn't model .{op}."
+            parsed.append((column, op, value))
+        parsed = tuple(parsed)
         self.filters.append(("or", None, parsed))
         return self
 
@@ -122,7 +127,9 @@ class _FakeQuery:
                 return False
             if kind == "in" and row.get(column) not in value:
                 return False
-            if kind == "or" and not any(str(row.get(col)) == val for col, val in value):
+            if kind == "or" and not any(
+                (str(row.get(col)) == val) == (op == "eq") for col, op, val in value
+            ):
                 return False
         return True
 

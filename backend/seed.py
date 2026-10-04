@@ -29,6 +29,12 @@ ORGANIZERS = [
     {"email": "organizer1@example.com", "name": "Derek Ong"},
 ]
 
+# Event Coordinator Lead (Week 7 change #5): assigns submitted requests
+# from the unassigned queue to coordinators.
+LEADS = [
+    {"email": "lead1@example.com", "name": "Grace Lim"},
+]
+
 # Venues (View Venue Catalogue, Nawaz, Sprint 1) -- no auth.users involved,
 # a venue isn't owned by anyone, so these are plain rows.
 VENUES = [
@@ -142,6 +148,11 @@ def main():
         add_role(uid, "event_organizer")
         organizer_ids.append(uid)
         print(f"Organizer ready:   {o['name']} <{o['email']}> -> {uid}")
+
+    for lead in LEADS:
+        uid = get_or_create_user(lead["email"], lead["name"])
+        add_role(uid, "event_coordinator_lead")
+        print(f"Lead ready:        {lead['name']} <{lead['email']}> -> {uid}")
 
     organizer_id = organizer_ids[0]
 

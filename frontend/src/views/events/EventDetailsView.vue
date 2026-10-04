@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiDelete, apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
+import { groupRequests, leadTabForRequest } from '../../lib/leadDashboard'
+import { ROLES, hasAnyRole } from '../../lib/roles'
 import {
   DRAFT_NAME,
   emptySession,
@@ -57,6 +59,14 @@ const backLink = computed(() => {
   const tab = tabForStatus(event.value?.status)
   if (tab && event.value.coordinator_id === auth.profile?.id) {
     return { to: { name: 'dashboard', query: { tab } }, label: 'Back to My Assigned Events' }
+  }
+  // The Event Coordinator Lead (Week 7 change #5) came from their own
+  // dashboard -- back to the tab this request sits in there.
+  if (event.value && event.value.organizer_id !== auth.profile?.id
+    && hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR_LEAD])) {
+    const [request] = groupRequests(visibleSessions.value)
+    const leadTab = request ? leadTabForRequest(request) : 'unassigned'
+    return { to: { name: 'dashboard', query: { tab: leadTab } }, label: 'Back to Coordinator Assignments' }
   }
   return { to: '/events', label: 'Back to My Event Requests' }
 })

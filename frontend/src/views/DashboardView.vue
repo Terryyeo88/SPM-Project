@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { NAV_LINKS, ROLES, hasAnyRole, navRoles } from '../lib/roles'
 import AppNavBar from '../components/AppNavBar.vue'
 import CoordinatorDashboard from './dashboard/CoordinatorDashboard.vue'
+import LeadDashboard from './dashboard/LeadDashboard.vue'
 
 const auth = useAuthStore()
 
@@ -20,6 +21,9 @@ const auth = useAuthStore()
 // coordinator gets the "My Assigned Events" dashboard instead of links.
 const visibleLinks = computed(() => NAV_LINKS.filter((link) => hasAnyRole(navRoles(auth.roles), link.roles)))
 const isCoordinator = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR]))
+// Week 7 change #5: the Event Coordinator Lead's own dashboard (unassigned
+// queue / assignments per coordinator / past), also instead of nav links.
+const isLead = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR_LEAD]))
 </script>
 
 <template>
@@ -53,11 +57,12 @@ const isCoordinator = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDIN
         "nothing built for your role" once we actually KNOW the roles (a
         genuinely empty match), never while profile is still null/failed --
         that case is the message above instead. -->
-        <p v-else-if="auth.profile && !isCoordinator" class="no-sections">
+        <p v-else-if="auth.profile && !isCoordinator && !isLead" class="no-sections">
           Nothing's been built yet for your role(s) this sprint -- see docs/traceability.md's
           "Explicitly deferred" section.
         </p>
 
+        <LeadDashboard v-if="isLead" />
         <CoordinatorDashboard v-if="isCoordinator" />
       </div>
     </main>

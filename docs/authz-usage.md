@@ -26,8 +26,8 @@ by default — every route is protected unless explicitly decorated `@public`.
 
 | Action | Who | What it checks |
 |---|---|---|
-| `EVENT_VIEW` | organiser (own event) or coordinator (assigned) | relationship only, any status |
-| `EVENT_LIST` | organiser or coordinator | role only — **see warning below** |
+| `EVENT_VIEW` | organiser (own event), coordinator (assigned), or Event Coordinator Lead | relationship only, any status; the Lead sees every event except drafts |
+| `EVENT_LIST` | organiser, coordinator or Event Coordinator Lead | role only — **see warning below** |
 | `EVENT_CREATE` | organiser | role only |
 | `EVENT_SUBMIT` | organiser (own event) | status must be `draft` (first submission) or `rejected` (resubmission) |
 | `EVENT_EDIT` | organiser (own, `draft` or `rejected`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
@@ -35,11 +35,12 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |
-| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) | any status **except `completed`** (IS-38) |
+| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) or Event Coordinator Lead | event has a coordinator, any status **except `completed`** (IS-38) |
+| `EVENT_ASSIGN_COORDINATOR` | Event Coordinator Lead | status `submitted` and no coordinator yet (the unassigned queue) — Week 7 change #5 |
 | `EVENT_START_PLANNING` | coordinator (assigned) | status must be `approved` (IS-36) |
 | `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |
 | `EVENT_COMPLETE` | coordinator (assigned) | status must be `confirmed` (IS-38) |
-| `COORDINATOR_LIST` | coordinator | role only |
+| `COORDINATOR_LIST` | coordinator or Event Coordinator Lead | role only |
 | `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`

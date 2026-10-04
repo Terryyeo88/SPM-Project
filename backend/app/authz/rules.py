@@ -108,6 +108,20 @@ def _event_status_in(event: Any, *statuses: str) -> bool:
     return event.status in statuses
 
 
+# Week 7 change #5: the Event Coordinator Lead "oversees incoming event
+# requests" and "should be able to view all coordinator assignments and
+# active events under their supervision". Read as: every event that has
+# been SUBMITTED (any status but draft). A draft hasn't been sent to
+# anyone yet, so it stays private to its organiser. Every coordinator
+# reports to the one Lead (no teams in the brief), so "under their
+# supervision" is all of them -- see docs/open-questions.md.
+LEAD_ROLE = "event_coordinator_lead"
+
+
+def _is_lead_over(user: Any, event: Any) -> bool:
+    return _has_role(user, LEAD_ROLE) and not _event_status_in(event, "draft")
+
+
 # -- event.view --------------------------------------------------------------
 # Source: "an organiser sees full details of their own events; other
 # organisers' events are hidden" (ruled: hidden, not restricted -- a 404,
@@ -119,6 +133,8 @@ def rule_event_view(user: Any, event: Any) -> Decision:
     if _has_role(user, "event_organizer") and _owns_event(user, event):
         return Decision.ALLOW
     if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
+        return Decision.ALLOW
+    if _is_lead_over(user, event):
         return Decision.ALLOW
     return Decision.DENY_NOT_FOUND
 
@@ -136,7 +152,9 @@ def rule_event_view(user: Any, event: Any) -> Decision:
 
 
 def rule_event_list(user: Any, event: Any = None) -> Decision:
-    if _has_role(user, "event_organizer") or _has_role(user, "event_coordinator"):
+    # The Lead's per-row scope (every non-draft event) is applied by
+    # event_service.list_event_requests, same as the other two roles.
+    if _has_role(user, "event_organizer") or _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
 
@@ -324,10 +342,38 @@ def rule_event_cancel(user: Any, event: Any) -> Decision:
 # guessed.
 
 
+#
+# Week 7 change #5: the Event Coordinator Lead may also reassign ("assign
+# a suitable Event Coordinator, and reassign events where necessary"),
+# any event that already HAS a coordinator -- an unassigned one goes
+# through event.assign_coordinator instead. Same `completed` exclusion.
+
+
 def rule_event_reassign_coordinator(user: Any, event: Any) -> Decision:
-    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+    is_current = _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)
+    if not (is_current or _is_lead_over(user, event)):
         return Decision.DENY_NOT_FOUND
-    if _event_status_in(event, "completed"):
+    if _event_status_in(event, "completed") or not event.coordinator_id:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- event.assign_coordinator ---------------------------------------------
+# Source: Week 7 change #5 -- "Newly submitted event requests should no
+# longer be assigned directly to an Event Coordinator. Instead, they first
+# enter an unassigned queue that can be viewed by the Event Coordinator
+# Lead. The Lead can ... assign a suitable Event Coordinator". Lead only,
+# and only for a request still in that queue: submitted, nobody assigned.
+# Anyone else who can see the event (its organiser, its coordinator) gets
+# a 403, not a 404 -- they already know it exists.
+
+
+def rule_event_assign_coordinator(user: Any, event: Any) -> Decision:
+    if not _is_lead_over(user, event):
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "submitted") or event.coordinator_id:
         return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
 
@@ -405,11 +451,12 @@ def rule_venue_view(user: Any, venue: Any = None) -> Decision:
 
 
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
-# Only an Event Coordinator can reassign (rule_event_reassign_coordinator),
-# so only they need to see who they could reassign to.
+# Only an Event Coordinator or the Event Coordinator Lead can (re)assign
+# (rule_event_reassign_coordinator / rule_event_assign_coordinator), so
+# only they need to see who they could pick.
 
 
 def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
-    if _has_role(user, "event_coordinator"):
+    if _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN

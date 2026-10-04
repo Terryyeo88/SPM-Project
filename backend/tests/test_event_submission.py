@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 import app.auth.context as context_module
+import app.events.coordinator_service as coordinator_service
 import app.events.event_service as service
 import app.events.routes as routes_module
 import app.events.transitions as transitions
-from app.events.coordinator_service import NoCoordinatorAvailableError
 from app.events.event_service import (
     SINGAPORE_TZ,
     create_event_request,
@@ -384,59 +384,36 @@ def fake_db(monkeypatch):
 
 @pytest.fixture
 def assigned(monkeypatch, fake_db):
-    """Stands in for coordinator auto-assignment. Like the real
-    assign_initial_coordinator, one call assigns "coord-1" to every
-    submitted session of the request (one coordinator per request).
-    Records which event id it was called with."""
+    """Spy on coordinator assignment. Since the Week 7 change (#5, Event
+    Coordinator Lead) submitting must NEVER assign a coordinator -- the
+    Lead does that from the unassigned queue -- so tests assert this stays
+    empty. Records which event ids it was called with, if it ever is."""
     calls = []
 
-    def fake_assign(event_id, actor=None):
+    def fake_assign(event_id, actor=None, coordinator_id=None):
         calls.append(event_id)
-        shared_event_id = fake_db.get(event_id)["shared_event_id"]
-        for row in fake_db.rows:
-            if row["id"] == event_id or (row["shared_event_id"] == shared_event_id and row["status"] == "submitted"):
-                row.update(coordinator_id="coord-1", status="under_review")
         return {"id": "coord-1"}
 
-    monkeypatch.setattr(service, "assign_initial_coordinator", fake_assign)
+    monkeypatch.setattr(coordinator_service, "assign_initial_coordinator", fake_assign)
     return calls
 
 
 def test_submit_from_one_session_submits_every_draft_session(fake_db, assigned):
     """Submitting from one session submits every draft session of the request.
-    Coordinator assignment runs once, for the whole request, so every
-    session ends up with the same coordinator. The response is the session
-    the organiser submitted from."""
+    Week 7 change #5: nobody is auto-assigned -- every session waits,
+    "submitted" and unassigned, in the Event Coordinator Lead's queue. The
+    response is the session the organiser submitted from."""
 
     fake_db.rows = [_session_row("a"), _session_row("b")]
-
-    submitted = submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
-
-    assert {row["status"] for row in fake_db.rows} == {"under_review"}
-    # One assignment for the request, after every session is submitted --
-    # not one per session.
-    assert len(assigned) == 1
-    assert {row["coordinator_id"] for row in fake_db.rows} == {"coord-1"}
-    # The response is the session the caller submitted from.
-    assert submitted["id"] == "a"
-    assert submitted["status"] == "under_review"
-
-
-def test_submit_leaves_sessions_submitted_when_no_coordinator_is_free(fake_db, monkeypatch):
-    """If no coordinator is available, every session still submits and stays
-    "submitted" with no coordinator -- it isn't an error."""
-
-    fake_db.rows = [_session_row("a"), _session_row("b")]
-
-    def no_coordinator(event_id, actor=None):
-        raise NoCoordinatorAvailableError("everyone is busy")
-
-    monkeypatch.setattr(service, "assign_initial_coordinator", no_coordinator)
 
     submitted = submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
 
     assert {row["status"] for row in fake_db.rows} == {"submitted"}
-    assert submitted["coordinator_id"] is None
+    assert {row["coordinator_id"] for row in fake_db.rows} == {None}
+    assert assigned == []
+    # The response is the session the caller submitted from.
+    assert submitted["id"] == "a"
+    assert submitted["status"] == "submitted"
 
 
 def test_submit_validates_every_session_before_submitting_any(fake_db, assigned):
@@ -476,7 +453,8 @@ def test_submit_ignores_sessions_already_past_draft(fake_db, assigned):
 
     submit_event_request("a", SimpleNamespace(**fake_db.get("a")))
 
-    assert assigned == ["a"]
+    assert fake_db.get("a")["status"] == "submitted"
+    assert assigned == []
     assert fake_db.get("reviewed")["status"] == "approved"
     assert fake_db.get("reviewed")["coordinator_id"] == "coord-9"
     assert fake_db.get("other-request")["status"] == "draft"
@@ -506,8 +484,8 @@ def _group_body(*sessions):
 def test_create_event_request_inserts_and_submits_every_session(fake_db, assigned):
     """Submitting without saving a draft first inserts every session under one
     shared_event_id, owned by the organiser, and submits all of them under
-    one coordinator. A session without registration is stored with no
-    registration window."""
+    nobody assigned yet (Week 7 change #5: the Lead assigns). A session
+    without registration is stored with no registration window."""
 
     group = create_event_request(
         "user-1",
@@ -518,9 +496,9 @@ def test_create_event_request_inserts_and_submits_every_session(fake_db, assigne
     assert len({row["shared_event_id"] for row in fake_db.rows}) == 1
     uuid.UUID(fake_db.rows[0]["shared_event_id"])  # a real uuid, generated on the server
     assert all(row["organizer_id"] == "user-1" for row in fake_db.rows)
-    assert len(assigned) == 1
-    assert {row["coordinator_id"] for row in fake_db.rows} == {"coord-1"}
-    assert {row["status"] for row in group["sessions"]} == {"under_review"}
+    assert assigned == []
+    assert {row["coordinator_id"] for row in fake_db.rows} == {None}
+    assert {row["status"] for row in group["sessions"]} == {"submitted"}
     assert group["shared_event_id"] == fake_db.rows[0]["shared_event_id"]
     # A session without registration is stored with no window at all.
     banquet = next(row for row in fake_db.rows if row["room_layout"] == "banquet")
