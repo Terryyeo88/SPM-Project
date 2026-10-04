@@ -21,7 +21,6 @@ from types import SimpleNamespace
 
 from app.authz.actions import EVENT_VIEW
 from app.authz.policy import can
-from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
 from app.events.transitions import TransitionConflictError, record_creation, transition
 from app.extensions import supabase
 from app.shared.errors import ValidationError
@@ -536,20 +535,11 @@ def _submit_sessions(
         if session.get("coordinator_id"):
             transition(session["id"], "under_review", submitted_by, expected_from="submitted")
 
-    # Per Customer Briefing Step 3 / Event Status Management: submission
-    # should trigger coordinator auto-assignment, moving the event to
-    # "under_review". If nobody's available, it stays "submitted" and
-    # unassigned -- an intentionally open case per coordinator_service's
-    # own docstring, not an error here. Called ONCE, after every session
-    # is submitted: the request gets one coordinator for all its sessions
-    # (assign_initial_coordinator covers the request's other submitted
-    # sessions too, and reuses the request's coordinator if it has one).
-    unassigned = [session for session in submitted if not session.get("coordinator_id")]
-    if unassigned:
-        try:
-            assign_initial_coordinator(unassigned[0]["id"], actor=submitted_by)
-        except NoCoordinatorAvailableError:
-            pass
+    # Sessions with nobody assigned stay `submitted`: since the Week 7
+    # change (#5, Event Coordinator Lead) a new request is NOT auto-assigned
+    # on submit. It waits in the Lead's unassigned queue until the Lead
+    # assigns a coordinator (POST /events/<id>/assign-coordinator), which is
+    # what moves it on to under_review.
 
     result = supabase.table("events").select("*").in_("id", submitted_ids).execute()
     return result.data or []
@@ -835,6 +825,22 @@ def list_event_requests(user, status: str | None = None) -> list[dict]:
     would be guessing at a shape someone else's story still needs to
     define.
     """
+    if status is not None and status not in EVENT_STATUSES:
+        raise ValidationError(f"status must be one of: {', '.join(sorted(EVENT_STATUSES))}.")
+
+    if "event_coordinator_lead" in user.roles:
+        # Week 7 change #5: the Lead oversees every submitted request --
+        # the unassigned queue AND every coordinator's assignments. Drafts
+        # are the one exception: they haven't been submitted to anyone yet,
+        # so they stay private to their organiser (rule_event_view agrees).
+        # A Lead's own drafts, if they are also an organiser, still show.
+        query = supabase.table("events").select("*").or_(
+            f"status.neq.draft,organizer_id.eq.{user.id}"
+        )
+        if status is not None:
+            query = query.eq("status", status)
+        return query.order("created_at", desc=True).execute().data or []
+
     conditions = []
     if "event_organizer" in user.roles:
         conditions.append(f"organizer_id.eq.{user.id}")
@@ -846,9 +852,6 @@ def list_event_requests(user, status: str | None = None) -> list[dict]:
         # not the real gate, so that a future bug in that rule fails
         # closed (empty list) rather than open (every event).
         return []
-
-    if status is not None and status not in EVENT_STATUSES:
-        raise ValidationError(f"status must be one of: {', '.join(sorted(EVENT_STATUSES))}.")
 
     query = supabase.table("events").select("*").or_(",".join(conditions))
     if status is not None:

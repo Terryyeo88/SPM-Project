@@ -3,16 +3,10 @@ HTTP routes for the events resource -- currently just coordinator
 reassignment (Justin's Sprint 1 ticket). Aaralyn's event CRUD/submit
 routes belong in this same module/blueprint.
 
-NOT here: an endpoint for assign_initial_coordinator. Per the story ("the
-system automatically assigns"), initial assignment isn't a discrete
-user-invoked action with its own authorisation action -- there is no
-event.assign_coordinator in app/authz/actions.py, and there shouldn't
-be, since it fires as a side effect of an event moving to `submitted`,
-not as something a caller directly requests. Whoever wires up
-EVENT_SUBMIT should call
-app.events.coordinator_service.assign_initial_coordinator(event_id)
-after a successful submit; nothing does that yet -- that's an open
-integration gap to flag to the team, not something guessed at here.
+Initial assignment: since the Week 7 change (#5, Event Coordinator Lead)
+it is no longer a side effect of submitting. A submitted request waits
+unassigned until the Lead assigns it through
+POST /events/<id>/assign-coordinator (event.assign_coordinator).
 """
 
 from __future__ import annotations
@@ -25,6 +19,7 @@ from app.auth.context import current_user
 from app.authz.actions import (
     COORDINATOR_LIST,
     EVENT_APPROVE,
+    EVENT_ASSIGN_COORDINATOR,
     EVENT_CANCEL,
     EVENT_COMPLETE,
     EVENT_CONFIRM,
@@ -41,6 +36,7 @@ from app.authz.actions import (
 from app.authz.decorators import require
 from app.events.coordinator_service import (
     NoCoordinatorAvailableError,
+    assign_initial_coordinator,
     list_coordinators,
     reassign_coordinator,
 )
@@ -246,17 +242,21 @@ def reassign_coordinator_route(event, event_id):
     if not new_coordinator_id:
         raise ValidationError("new_coordinator_id is required.")
 
-    # @require has already confirmed the caller IS event.coordinator_id
-    # (see rule_event_reassign_coordinator) before this line ever runs --
-    # that's the real enforcement now. Passing requested_by here keeps
-    # coordinator_service.reassign_coordinator's own existing check
-    # satisfied too (defense in depth), without needing to touch that
-    # file at all.
+    # @require has already confirmed the caller IS event.coordinator_id,
+    # or is the Event Coordinator Lead (see rule_event_reassign_coordinator)
+    # before this line ever runs -- that's the real enforcement now. For the
+    # current coordinator, passing requested_by keeps
+    # coordinator_service.reassign_coordinator's own "only the current
+    # coordinator" check satisfied too (defense in depth). The Lead isn't
+    # the current coordinator, so for them that check is skipped (None), as
+    # that function's docstring allows for an override.
+    user = current_user()
+    is_current_coordinator = event.coordinator_id == user.id
     try:
         new_coordinator = reassign_coordinator(
             event_id=event.id,
             new_coordinator_id=new_coordinator_id,
-            requested_by=current_user().id,
+            requested_by=user.id if is_current_coordinator else None,
             reason=body.get("reason"),
         )
     except NoCoordinatorAvailableError as exc:
@@ -265,3 +265,28 @@ def reassign_coordinator_route(event, event_id):
         raise ValidationError(str(exc)) from exc
 
     return jsonify({"coordinator": new_coordinator}), 200
+
+
+@events_bp.route("/<event_id>/assign-coordinator", methods=["POST"])
+@require(EVENT_ASSIGN_COORDINATOR, loader=lambda event_id: load_event(event_id))
+def assign_coordinator_route(event, event_id):
+    """Week 7 change #5: the Event Coordinator Lead assigns a coordinator
+    to a request in the unassigned queue. Every submitted session of the
+    request gets them, and moves submitted -> under_review through
+    transition(), attributed to the Lead. Body: {"coordinator_id": ...}.
+
+    400 if the coordinator isn't one, or is busy on any session's dates;
+    409 (TransitionConflictError) if the request left `submitted` meanwhile.
+    Notifying the coordinator is NOT built yet -- see
+    docs/open-questions.md."""
+    body = request.get_json(silent=True) or {}
+    coordinator_id = body.get("coordinator_id")
+    if not coordinator_id:
+        raise ValidationError("coordinator_id is required.")
+    try:
+        coordinator = assign_initial_coordinator(
+            event.id, actor=current_user().id, coordinator_id=coordinator_id
+        )
+    except (NoCoordinatorAvailableError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+    return jsonify({"coordinator": coordinator}), 200

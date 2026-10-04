@@ -34,6 +34,8 @@
 export const ROLES = Object.freeze({
   EVENT_ORGANIZER: 'event_organizer',
   EVENT_COORDINATOR: 'event_coordinator',
+  // Week 7 customer change #5: assigns submitted requests to coordinators.
+  EVENT_COORDINATOR_LEAD: 'event_coordinator_lead',
   VENUE_STAFF: 'venue_staff',
   TECHNICAL_SUPPORT_STAFF: 'technical_support_staff',
   ATTENDEE: 'attendee',
@@ -43,6 +45,7 @@ export const ROLES = Object.freeze({
 export const ROLE_LABELS = Object.freeze({
   [ROLES.EVENT_ORGANIZER]: 'Event Organiser',
   [ROLES.EVENT_COORDINATOR]: 'Event Coordinator',
+  [ROLES.EVENT_COORDINATOR_LEAD]: 'Event Coordinator Lead',
   [ROLES.VENUE_STAFF]: 'Venue Staff',
   [ROLES.TECHNICAL_SUPPORT_STAFF]: 'Technical Support Staff',
   [ROLES.ATTENDEE]: 'Attendee',
@@ -57,12 +60,16 @@ export function roleLabel(role) {
  * The roles whose links appear in the nav bar and as dashboard cards.
  * The Event Coordinator wireframe has no nav links -- a coordinator works
  * entirely from their "My Assigned Events" dashboard -- so that role
- * contributes none. A user who ALSO holds another role still gets that
- * role's links. (The routes themselves stay reachable: this only affects
- * which links are shown, not ROUTE_ACCESS gating.)
+ * contributes none. The Event Coordinator Lead is the same: they work from
+ * their own dashboard (unassigned queue / assignments / past). A user who
+ * ALSO holds another role still gets that role's links. (The routes
+ * themselves stay reachable: this only affects which links are shown, not
+ * ROUTE_ACCESS gating.)
  */
+const _DASHBOARD_ONLY_ROLES = [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD]
+
 export function navRoles(userRoles) {
-  return (userRoles ?? []).filter((role) => role !== ROLES.EVENT_COORDINATOR)
+  return (userRoles ?? []).filter((role) => !_DASHBOARD_ONLY_ROLES.includes(role))
 }
 
 /**
@@ -125,8 +132,9 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           "New Event Request" button on the events
  *                           list instead.
  *   event-details       -- app/authz/rules.py::rule_event_view allows the
- *                           owning organiser and the ASSIGNED
- *                           coordinator. Only the role half of that is
+ *                           owning organiser, the ASSIGNED
+ *                           coordinator, and the Event Coordinator Lead
+ *                           (any submitted event, Week 7 change #5). Only the role half of that is
  *                           checked here (the frontend can't know
  *                           ownership or assignment ahead of the fetch);
  *                           the per-event relationship stays the
@@ -175,7 +183,7 @@ export const ROUTE_ACCESS = Object.freeze(
     {
       routeName: 'event-details',
       label: 'Event details',
-      roles: [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR],
+      roles: [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD],
       inNav: false,
     },
     {

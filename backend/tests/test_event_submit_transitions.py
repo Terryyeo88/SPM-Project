@@ -4,7 +4,9 @@ database. Covers the dead end this ticket closes: an organiser could edit a
 rejected request (rule_event_edit) but nothing let them submit it again.
 
 event_service.submit_event_request is driven with transitions' _db_*
-functions faked, and assign_initial_coordinator replaced by a spy.
+functions faked, and assign_initial_coordinator replaced by a spy -- which
+submit must never call since the Week 7 change (#5): a new request waits
+in the Event Coordinator Lead's unassigned queue instead.
 """
 
 from __future__ import annotations
@@ -13,11 +15,11 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.events.coordinator_service as coordinator_service
 import app.events.event_service as service_module
 import app.events.transitions as transitions
 from app.authz import actions
 from app.authz.policy import can
-from app.events.coordinator_service import NoCoordinatorAvailableError
 from app.events.transitions import TransitionConflictError
 from tests.factories import FakeEvent, make_user
 
@@ -37,7 +39,7 @@ def _complete_event(status, coordinator_id=None):
 
 @pytest.fixture
 def world(monkeypatch):
-    def setup(status, assign_raises=None, coordinator_id=None):
+    def setup(status, coordinator_id=None):
         db = {"status": status, "coordinator_id": coordinator_id}
         history, assign_calls = [], []
 
@@ -47,16 +49,13 @@ def world(monkeypatch):
             db["status"] = to_status
             return {"id": event_id, "status": to_status}
 
-        def fake_assign(event_id, actor=None):
+        def fake_assign(event_id, actor=None, coordinator_id=None):
             assign_calls.append((event_id, actor))
-            if assign_raises:
-                raise assign_raises
-            transitions.transition(event_id, "under_review", actor, expected_from="submitted")
             return {"id": "coord-new"}
 
         monkeypatch.setattr(transitions, "_db_conditional_update", conditional_update)
         monkeypatch.setattr(transitions, "_db_insert_history", lambda *args: history.append(args[1:]))
-        monkeypatch.setattr(service_module, "assign_initial_coordinator", fake_assign)
+        monkeypatch.setattr(coordinator_service, "assign_initial_coordinator", fake_assign)
         class _ReRead:
             """submit_event_request re-reads the submitted sessions (by id)
             after moving them -- return whatever the fake DB now holds."""
@@ -87,13 +86,15 @@ def world(monkeypatch):
     return setup
 
 
-def test_first_submission_goes_draft_submitted_then_auto_assigns_attributed_to_organiser(world):
+def test_first_submission_goes_draft_submitted_and_waits_for_the_lead(world):
+    """Week 7 change #5: no auto-assignment -- the request stops at
+    `submitted`, unassigned, for the Event Coordinator Lead to assign."""
     db, history, assign_calls = world("draft")
-    service_module.submit_event_request("event-1", _complete_event("draft"))
+    result = service_module.submit_event_request("event-1", _complete_event("draft"))
 
-    assert db["status"] == "under_review"
-    assert assign_calls == [("event-1", ORG)]
-    assert history == [("draft", "submitted", ORG, None), ("submitted", "under_review", ORG, None)]
+    assert result["status"] == db["status"] == "submitted"
+    assert assign_calls == []
+    assert history == [("draft", "submitted", ORG, None)]
 
 
 def test_resubmission_keeps_same_coordinator_and_returns_to_review(world):
@@ -105,15 +106,6 @@ def test_resubmission_keeps_same_coordinator_and_returns_to_review(world):
     assert db["status"] == "under_review"
     assert assign_calls == []
     assert history == [("rejected", "submitted", ORG, None), ("submitted", "under_review", ORG, None)]
-
-
-def test_no_coordinator_available_leaves_event_submitted(world):
-    db, history, _ = world("draft", assign_raises=NoCoordinatorAvailableError("everyone busy"))
-    result = service_module.submit_event_request("event-1", _complete_event("draft"))
-
-    assert result["status"] == "submitted"
-    assert db["status"] == "submitted"
-    assert history == [("draft", "submitted", ORG, None)]
 
 
 def test_submit_against_stale_status_is_a_conflict(world):

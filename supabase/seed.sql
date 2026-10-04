@@ -1,4 +1,5 @@
--- ConnectSphere seed data: 3 Event Coordinators, 1 Event Organizer, 3 events.
+-- ConnectSphere seed data: 3 Event Coordinators, 1 Event Coordinator Lead,
+-- 1 Event Organizer, 3 events.
 -- Paste this whole file into the Supabase SQL Editor and run it.
 --
 -- NOTE: this inserts rows directly into auth.users to satisfy the
@@ -98,6 +99,26 @@ begin
   end if;
   insert into public.user_roles (user_id, role) values (v_id, 'event_organizer') on conflict do nothing;
   org1_id := v_id;
+
+  -- Event Coordinator Lead: Grace Lim (Week 7 change #5). Assigns the
+  -- submitted, unassigned requests below (Events B and C) to coordinators.
+  select id into v_id from public.profiles where email = 'lead1@example.com';
+  if v_id is null then
+    v_id := gen_random_uuid();
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at, confirmation_token, email_change,
+      email_change_token_new, recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'lead1@example.com', crypt('Password123!', gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
+      now(), now(), '', '', '', ''
+    );
+    insert into public.profiles (id, name, email) values (v_id, 'Grace Lim', 'lead1@example.com');
+  end if;
+  insert into public.user_roles (user_id, role) values (v_id, 'event_coordinator_lead') on conflict do nothing;
 
   -- Event A: already assigned to coordinator1, on 2026-11-10.
   -- Tests that assignment logic correctly skips an occupied coordinator.

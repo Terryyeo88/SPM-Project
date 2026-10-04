@@ -212,3 +212,53 @@ def test_reassignment_refused_when_new_coordinator_is_busy_on_any_session(db):
     assert db.get("s1")["coordinator_id"] == "coord-a"
     assert db.get("s2")["coordinator_id"] == "coord-a"
     assert _log(db) == []
+
+
+# -- Lead-chosen assignment (Week 7 change #5) ----------------------------------
+
+
+def test_lead_chosen_coordinator_gets_every_session_attributed_to_the_lead(db):
+    """With coordinator_id, the Lead's pick is used -- even over the
+    lighter-workload coordinator the automatic pick would choose -- every
+    session moves to under_review, and the history rows name the Lead."""
+    db.rows = [_event("s1", 10), _event("s2", 11)]
+
+    chosen = assign_initial_coordinator("s1", actor="lead-1", coordinator_id="coord-b")
+
+    assert chosen["id"] == "coord-b"
+    for session_id in ("s1", "s2"):
+        assert db.get(session_id)["coordinator_id"] == "coord-b"
+        assert db.get(session_id)["status"] == "under_review"
+    history = db.tables["event_status_log"]
+    assert {(e["event_id"], e["to_status"], e["changed_by"]) for e in history} == {
+        ("s1", "under_review", "lead-1"),
+        ("s2", "under_review", "lead-1"),
+    }
+    assert {row["reason"] for row in _log(db)} == {"assigned by lead"}
+
+
+def test_lead_chosen_coordinator_busy_on_any_session_is_refused(db):
+    """The Lead's pick must still be free for every session. Nothing is
+    written if they aren't -- the request stays in the unassigned queue."""
+    db.rows = [
+        _event("s1", 10),
+        _event("s2", 11),
+        _event("brandon-busy", 11, shared_event_id="group-9", coordinator_id="coord-b", status="planning"),
+    ]
+
+    with pytest.raises(NoCoordinatorAvailableError, match="Brandon is already occupied"):
+        assign_initial_coordinator("s1", actor="lead-1", coordinator_id="coord-b")
+
+    assert db.get("s1")["coordinator_id"] is None and db.get("s1")["status"] == "submitted"
+    assert db.get("s2")["coordinator_id"] is None
+    assert _log(db) == []
+
+
+def test_lead_cannot_pick_a_different_coordinator_than_the_request_already_has(db):
+    """If one session already has a coordinator, the request keeps them --
+    the Lead must reassign instead of splitting the request."""
+    db.rows = [_event("s1", 10), _event("s2", 11, coordinator_id="coord-a", status="under_review")]
+
+    with pytest.raises(ValueError, match="reassignment"):
+        assign_initial_coordinator("s1", actor="lead-1", coordinator_id="coord-b")
+    assert db.get("s1")["coordinator_id"] is None

@@ -34,6 +34,10 @@ EVENT_REJECT = "event.reject"
 EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
+# Week 7 change #5 (Event Coordinator Lead): "Newly submitted event
+# requests ... first enter an unassigned queue ... The Lead can review
+# basic event information, assign a suitable Event Coordinator".
+EVENT_ASSIGN_COORDINATOR = "event.assign_coordinator"
 
 # Lifecycle after approval (IS-36 / IS-38, plus confirm for end-to-end
 # testability -- see rules.py). Each is one edge in

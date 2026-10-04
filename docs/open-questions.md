@@ -135,3 +135,36 @@ decisions worth double-checking.
   policy` statements also have no `drop policy if exists` guard, so
   `20260929000000_event_status_log.sql` fails if re-run, unlike the other
   migrations. Both belong to the RLS pass.
+
+## Week 7 change #5 — Event Coordinator Lead
+
+- **Notifications are not built.** The change asks that "relevant users
+  should be notified when assignments or reassignments occur". There is
+  still no notification system. Assignment and reassignment both call
+  `coordinator_service._notify_coordinator_assigned`, which only logs a
+  line, so plugging the real notification in there covers the Lead's
+  assign and reassign too. Until then, don't count change #5 as complete.
+
+- **"Active events under their supervision" read as every event.** The
+  brief has no coordinator teams, so we read it as: the Lead sees every
+  submitted event (any status except `draft`). Drafts stay private to
+  their organiser because they haven't been submitted to anyone. If Leads
+  are meant to supervise only some coordinators, a coordinator-to-Lead
+  link is needed.
+
+- **A resubmitted request keeps its coordinator.** Change #5 is about
+  *newly* submitted requests. A rejected request that the organiser
+  resubmits still goes straight back to the coordinator who rejected it
+  (`under_review`), not into the Lead's queue. The Lead can reassign it if
+  needed.
+
+- **The Lead can't approve, reject or edit.** Nothing in change #5 gives
+  the Lead the coordinator's review actions, so their event pages are
+  read-only apart from assign and reassign.
+
+- **Automatic assignment code is kept but no longer used on submit.**
+  `assign_initial_coordinator` still picks a coordinator by workload when
+  called without `coordinator_id`. Nothing in the app does that now. It
+  could become a "suggest a coordinator" option for the Lead, or be
+  removed.
+
