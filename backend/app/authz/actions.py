@@ -56,6 +56,18 @@ EVENT_COMPLETE = "event.complete"
 
 COORDINATOR_LIST = "coordinator.list"
 
+# -- registrations (Justin: Attendee Registration) ----------------------
+# Source: "As an Attendee, I want to register for an event, so that I can
+# secure a place to attend the event." EVENT_REGISTER is per session (the
+# session must be confirmed and enabled for registration);
+# REGISTRATION_LIST is role-only -- browsing the sessions open to
+# attendees and seeing your own registrations.
+
+EVENT_REGISTER = "event.register"
+EVENT_VIEW_PUBLIC = "event.view_public"  # the attendee's event page: public fields only
+REGISTRATION_WITHDRAW = "registration.withdraw"
+REGISTRATION_LIST = "registration.list"
+
 # -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
 # Source: "As an Event Coordinator, I want to see venue details so that
 # I can find the appropriate venue for the event request." The catalogue

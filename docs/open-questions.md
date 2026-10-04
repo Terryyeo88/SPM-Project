@@ -168,3 +168,36 @@ decisions worth double-checking.
   could become a "suggest a coordinator" option for the Lead, or be
   removed.
 
+## Attendee Registration
+
+- **"Required registration information" read as a fixed set.** No source
+  says what it is, or that organisers design their own forms. We ask for
+  email, phone and preferred contact method (email or phone), all required,
+  plus optional notes. Email prefills from the profile. Profiles don't have
+  phone or a contact preference yet (the briefing's "User Profile
+  Management" mentions both, but no story covers it); if one is added, the
+  form prefills them too. Confirm whether organisers need custom questions.
+
+- **Capacity is `expected_attendance`.** It is the organiser's planning
+  estimate. If it is lowered after people register, existing confirmed
+  registrations stay confirmed; only new registrations are affected.
+
+- **A freed place goes straight to the next person on the waiting list.**
+  Week 2 says "eligible attendees are notified when a slot opens up to
+  apply", which could mean they're offered the place rather than given it.
+  With no notifications yet, we move them up automatically. Confirm.
+
+- **Not built yet:** notifications (Notification story), editing a
+  registration after submitting it, and organiser/coordinator views of who
+  registered.
+
+- **Organiser "discretion" and manual closing.** Week 4 says organisers have
+  discretion over registration and close it manually. Here the window the
+  organiser sets per session is what opens and closes registration; closing
+  early would be moving the close time. Organisers can't yet edit a
+  confirmed event (field-locking for confirmed events isn't built either).
+
+- **No confirmed events exist the normal way yet.** Confirming needs venue
+  and equipment work that isn't built, so the seed creates a confirmed
+  "Registration Demo" request directly, without status history.
+

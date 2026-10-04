@@ -430,3 +430,61 @@ request caused it. `assign_initial_coordinator(event_id, actor=None)` keeps
 passes it, so a NULL row means a caller outside that path. So in practice there
 are no NULL rows. If one ever appears, it is either a deliberate
 system transition or a bug. The schema is left exactly as Justin wrote it.
+
+## Attendee Registration: one database call decides confirmed or waitlisted
+
+Registering is "count the session's confirmed registrations, then insert as
+confirmed or waitlisted". Done as two requests from Python, two attendees
+racing for the last place can both see it free and both be confirmed. So
+the decision and the insert are one Postgres function,
+`public.register_attendee`, which locks the session's events row
+(`SELECT ... FOR UPDATE`) first: registrations for the same session queue
+behind each other and each sees the count the previous one left. Checked
+against Postgres 16 with 20 simultaneous registrations for a session with
+capacity 5: exactly 5 confirmed, 15 waitlisted.
+
+The function also re-checks "confirmed and enabled" and the registration
+window, using the database clock, so neither can be bypassed. It returns an
+outcome (`registered`, `not_open`, `not_started`, `closed`,
+`already_registered`, `not_found`) instead of raising, and the service maps
+each to a message an attendee can act on.
+
+Other decisions, from the story and the Week 2/4 clarifications:
+
+- **Per session.** `registration_needs` and the registration window are
+  already per session, so an attendee registers for a session.
+- **Capacity = the session's `expected_attendance`.** No new field. `NULL`
+  means no limit.
+- **Every session has a waiting list,** first come, first served ("waiting
+  list supported"). Position = order of `registered_at`.
+- **Registration information follows the Edit Profile wireframe:** full
+  name and organisation (shown read-only, from the profile), email and phone
+  (required, editable), "Email notifications" / "SMS notifications" (either
+  or both, at least one), and optional notes. The attendee can't change their
+  name or organisation here, only choose whether their organisation is
+  included. The form prefills from the profile: name and email today, and
+  phone, organisation and notification choices automatically once a profile
+  story adds `phone`, `organisation`, `notify_email` / `notify_sms` to
+  `GET /me` (`prefillFromProfile` in `frontend/src/lib/registrations.js`; the
+  backend reads the organisation from the profile row). What's stored is
+  what the attendee submitted for that registration, so editing a profile
+  later doesn't rewrite past registrations.
+- **Withdrawing moves the next person up.** `public.withdraw_registration`
+  deletes the registration and, if it held a confirmed place, confirms the
+  first waitlisted attendee (by `registered_at`) in the same call, under the
+  same session lock as registering. Checked against Postgres 16: 30
+  attendees registering and 5 withdrawing at once on a 5-place session left
+  exactly 5 confirmed and 20 waitlisted. Not allowed once the session has
+  started.
+- **Screens follow the attendee wireframes:** the attendee dashboard
+  (search, Registered Events, Waiting List, result cards tagged Open /
+  Almost Full / Waitlist Only) and an event page with spots filled and
+  Register / Withdraw Registration / Leave Waiting List. The wireframe's
+  event image, venue, category and location search are left out: events
+  have none of those yet.
+- **Attendees only see public fields** of a session (name, description,
+  dates and times, registration window, places left) -- the briefing: "an
+  Attendee should not be able to view internal planning information".
+- **`registrations` has RLS on and no policies.** Nothing can read or write
+  it through the anon/authenticated keys; only the backend's service role.
+
