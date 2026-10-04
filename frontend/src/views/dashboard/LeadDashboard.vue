@@ -72,9 +72,13 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [eventRows, coordinatorRows] = await Promise.all([apiGet('/events'), apiGet('/events/coordinators')])
-    events.value = eventRows
-    coordinators.value = coordinatorRows
+    // One after the other, NOT Promise.all: the backend shares one Supabase
+    // HTTP/2 connection across Flask's request threads, and two requests
+    // hitting it at the same moment can fail on Windows with
+    // "[WinError 10035] A non-blocking socket operation could not be
+    // completed immediately" (a 500). Sequential costs a few ms.
+    events.value = await apiGet('/events')
+    coordinators.value = await apiGet('/events/coordinators')
   } catch (requestError) {
     error.value = requestError.message
   } finally {
