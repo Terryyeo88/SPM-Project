@@ -35,6 +35,14 @@ EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
 
+# Lifecycle after approval (IS-36 / IS-38, plus confirm for end-to-end
+# testability -- see rules.py). Each is one edge in
+# app.events.transitions.ALLOWED; the rule checks who may take it, the
+# transition checks that it is legal.
+EVENT_START_PLANNING = "event.start_planning"
+EVENT_CONFIRM = "event.confirm"
+EVENT_COMPLETE = "event.complete"
+
 # -- coordinators --------------------------------------------------------
 # Source: "Coordinator needs reassignment" -- the current coordinator
 # picks who to hand the event to, so they need the list of other Event

@@ -11,6 +11,7 @@ import pytest
 import app.auth.context as context_module
 import app.events.event_service as service
 import app.events.routes as routes_module
+import app.events.transitions as transitions
 from app.events.coordinator_service import NoCoordinatorAvailableError
 from app.events.event_service import (
     SINGAPORE_TZ,
@@ -377,6 +378,7 @@ def _session_row(event_id, **overrides):
 def fake_db(monkeypatch):
     fake = FakeSupabase()
     monkeypatch.setattr(service, "supabase", fake)
+    monkeypatch.setattr(transitions, "supabase", fake)
     return fake
 
 
@@ -388,7 +390,7 @@ def assigned(monkeypatch, fake_db):
     Records which event id it was called with."""
     calls = []
 
-    def fake_assign(event_id):
+    def fake_assign(event_id, actor=None):
         calls.append(event_id)
         shared_event_id = fake_db.get(event_id)["shared_event_id"]
         for row in fake_db.rows:
@@ -426,7 +428,7 @@ def test_submit_leaves_sessions_submitted_when_no_coordinator_is_free(fake_db, m
 
     fake_db.rows = [_session_row("a"), _session_row("b")]
 
-    def no_coordinator(event_id):
+    def no_coordinator(event_id, actor=None):
         raise NoCoordinatorAvailableError("everyone is busy")
 
     monkeypatch.setattr(service, "assign_initial_coordinator", no_coordinator)
@@ -696,6 +698,7 @@ def test_is31_coordinator_sees_only_the_sessions_assigned_to_them(monkeypatch):
         ]
     )
     monkeypatch.setattr(service, "supabase", fake)
+    monkeypatch.setattr(transitions, "supabase", fake)
     event = SimpleNamespace(**fake.get("a"))
 
     coordinator_view = list_event_sessions(event, make_user(["event_coordinator"], user_id="coord-1"))
@@ -833,10 +836,13 @@ def test_resubmit_returns_every_rejected_session_to_its_coordinator(fake_db, ass
     assert fake_db.get("ok")["status"] == "approved"
     assert assigned == []
     assert resubmitted["id"] == "r1"
+    # Every status change goes through transition(), so each session logs
+    # both steps, attributed to the organiser whose resubmit caused them.
     log = fake_db.tables["event_status_log"]
-    assert sorted(entry["event_id"] for entry in log) == ["r1", "r2"]
+    assert sorted(entry["event_id"] for entry in log) == ["r1", "r1", "r2", "r2"]
     assert {(entry["from_status"], entry["to_status"], entry["changed_by"]) for entry in log} == {
-        ("rejected", "under_review", "user-1")
+        ("rejected", "submitted", "user-1"),
+        ("submitted", "under_review", "user-1"),
     }
 
 

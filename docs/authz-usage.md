@@ -30,14 +30,42 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_LIST` | organiser or coordinator | role only — **see warning below** |
 | `EVENT_CREATE` | organiser | role only |
 | `EVENT_SUBMIT` | organiser (own event) | status must be `draft` (first submission) or `rejected` (resubmission) |
-| `EVENT_EDIT` | organiser (own, `draft`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
+| `EVENT_EDIT` | organiser (own, `draft` or `rejected`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
+| `EVENT_DELETE` | organiser (own event) | status must be `draft` |
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |
-| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) | no status check |
+| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) | any status **except `completed`** (IS-38) |
+| `EVENT_START_PLANNING` | coordinator (assigned) | status must be `approved` (IS-36) |
+| `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |
+| `EVENT_COMPLETE` | coordinator (assigned) | status must be `confirmed` (IS-38) |
+| `COORDINATOR_LIST` | coordinator | role only |
+| `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`
 (the logic, with the source story quoted for every precondition).
+
+## Changing an event's status: authorise, then `transition()`
+
+Never write `events.status` yourself. A route that changes status does two
+things, in this order:
+
+```python
+@events_bp.route("/<event_id>/start-planning", methods=["POST"])
+@require(EVENT_START_PLANNING, loader=lambda event_id: load_event(event_id))
+def start_planning(event, event_id):
+    return jsonify(transition(event_id, "planning", current_user().id,
+                              expected_from=event.status)), 200
+```
+
+`@require` answers "may this user do this to this event". `transition()` (in
+`app/events/transitions.py`) answers "is this edge legal", makes the write
+conditional on `expected_from`, writes the `event_status_log` row, and
+enforces the reason for `rejected`/`cancelled`. A lost race is a `409
+status_conflict`, which your frontend should treat as "refresh and show the
+new status". The legal edges are the `ALLOWED` set in that file. Adding a
+lifecycle step means adding one entry there (with its story text) plus an
+action and a rule here.
 
 ## `EVENT_LIST` and `EVENT_CREATE` do NOT scope your query for you
 

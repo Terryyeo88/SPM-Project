@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 import app.events.coordinator_service as cs
+import app.events.transitions as transitions
 from app.events.coordinator_service import (
     NoCoordinatorAvailableError,
     assign_initial_coordinator,
@@ -54,6 +55,7 @@ def db(monkeypatch):
     fake = FakeSupabase()
     notified = []
     monkeypatch.setattr(cs, "supabase", fake)
+    monkeypatch.setattr(transitions, "supabase", fake)
     monkeypatch.setattr(cs, "_get_all_coordinators", lambda: list(COORDINATORS.values()))
     monkeypatch.setattr(cs, "_get_coordinator_profile", lambda coordinator_id: COORDINATORS[coordinator_id])
     monkeypatch.setattr(cs, "_workload", lambda coordinator_id: {"coord-a": 0, "coord-b": 5}[coordinator_id])

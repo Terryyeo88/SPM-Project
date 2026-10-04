@@ -90,3 +90,48 @@ decisions worth double-checking.
   fix would be the same shape as the database guard: an autouse fixture
   that makes `app.auth.jwt._http_get_json` raise a named error unless a
   test installs a key. Not done yet.
+
+- **IS-39: "Organizer is notified of cancellation and reason" — blocked on
+  notifications.** The cancel route stores the reason and returns it, and
+  the organiser can read it via `GET /events/<id>/status-history`, but
+  nothing *notifies* them. No notification system exists (the only hook is
+  `coordinator_service._notify_coordinator_assigned`, a `print()`
+  placeholder). This half of IS-39 depends on the Notification System
+  story. It was deliberately not built here.
+
+- **Confirmed Status story: field-locking is NOT built.** `POST
+  /events/<id>/confirm` exists only so IS-38 (confirmed → completed) is
+  reachable end to end. The story also says "once confirmed, information
+  fields should not be changed unless there is a change that was
+  permitted". That is not implemented, and "a change that was permitted" is
+  undefined. It needs its own ticket and a definition of which changes are
+  permitted.
+
+- **IS-36: "status gates venue/equipment search" could not be gated.** No
+  route requests a venue *for an event*. The venue catalogue is read-only
+  and per-venue, so there's nothing event-scoped to put a status check on,
+  and equipment doesn't exist at all. Once the Venue Booking Request story
+  adds a request-a-venue-for-this-event route, its rule should require
+  status `planning`.
+
+- **Should reassignment also be refused for `cancelled` / `rejected`
+  events?** IS-38 made reassignment refuse `completed` events ("completed
+  events are read-only going forward"). No story says the same for
+  `cancelled` or `rejected`, so those still allow reassignment. Reassigning
+  the coordinator of a cancelled event seems pointless. For a rejected
+  event it may be legitimate before resubmission. Please confirm.
+
+- **Resubmission doesn't check that the organiser changed anything.** The
+  story says a rejected request "can be re-submitted for review *after the
+  Organizer makes changes*". We don't enforce the "after changes" part.
+  Doing so would mean diffing against the last submitted version, which no
+  acceptance criterion asks for. An organiser can resubmit a rejected
+  request unchanged.
+
+- **`event_status_log` RLS (for the RLS-tightening work, not IS-36/38/39).**
+  Its policy `"authenticated write status log"` lets *any* authenticated
+  user insert audit rows directly through PostgREST with the anon key,
+  bypassing Flask. That means anyone can forge history. Its two `create
+  policy` statements also have no `drop policy if exists` guard, so
+  `20260929000000_event_status_log.sql` fails if re-run, unlike the other
+  migrations. Both belong to the RLS pass.

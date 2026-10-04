@@ -20,8 +20,10 @@ import pytest
 import app.auth.context as context_module
 import app.events.event_service as service_module
 import app.events.routes as routes_module
+import app.events.transitions as transitions_module
 from app.authz import actions
 from app.authz.policy import can
+from app.events.transitions import TransitionConflictError
 from app.shared.errors import ValidationError
 from tests.factories import FakeEvent, make_user
 from tests.fake_supabase import FakeSupabase
@@ -204,7 +206,9 @@ class _FakeSupabase:
 @pytest.fixture
 def fake_db(monkeypatch):
     db = _FakeSupabase([{"id": "event-1", "status": "under_review", "coordinator_id": "coord-1"}])
-    monkeypatch.setattr(service_module, "supabase", db)
+    # approve/reject now write through app.events.transitions, so the fake
+    # stands in for transition()'s data layer, not event_service's client.
+    monkeypatch.setattr(transitions_module, "supabase", db)
     return db
 
 
@@ -249,7 +253,7 @@ def test_reject_requires_a_reason(fake_db, reason):
 def test_second_decision_is_refused_once_no_longer_under_review(fake_db):
     service_module.approve_event_request("event-1", _loaded(), "coord-1")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(TransitionConflictError):
         service_module.reject_event_request("event-1", _loaded(), "coord-1", "changed my mind")
     assert fake_db.events[0]["status"] == "approved"
     assert len(fake_db.inserts) == 1

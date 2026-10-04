@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.events.event_service as service
+import app.events.transitions as transitions
 from app.events.event_service import (
     DRAFT_NAME,
     _draft_payload,
@@ -127,6 +128,7 @@ def test_draft_payload_rejects_registration_datetime_without_offset():
 def fake_db(monkeypatch):
     fake = FakeSupabase()
     monkeypatch.setattr(service, "supabase", fake)
+    monkeypatch.setattr(transitions, "supabase", fake)
     return fake
 
 
@@ -156,7 +158,12 @@ def test_create_draft_request_links_every_session_with_one_new_shared_id(fake_db
     assert all(row["organizer_id"] == "organizer-1" for row in fake_db.rows)
     assert all(row["name"] == "Workshop" for row in fake_db.rows)
     # One insert statement, so the sessions are created all-or-nothing.
-    assert [call["op"] for call in fake_db.calls] == ["insert"]
+    assert [call["op"] for call in fake_db.calls if call["table"] == "events"] == ["insert"]
+    # Plus one creation history row per session (NULL -> draft), by the organiser.
+    assert {(e["event_id"], e["from_status"], e["to_status"], e["changed_by"])
+            for e in fake_db.tables["event_status_log"]} == {
+        (row["id"], None, "draft", "organizer-1") for row in fake_db.rows
+    }
     # The response lists sessions chronologically, whatever order they were sent in.
     assert [s["preferred_start_date"] for s in group["sessions"]] == ["2026-11-10", "2026-11-12"]
     assert group["shared_event_id"] == fake_db.rows[0]["shared_event_id"]
