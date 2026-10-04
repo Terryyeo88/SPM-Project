@@ -259,7 +259,7 @@ def test_second_decision_is_refused_once_no_longer_under_review(fake_db):
     assert len(fake_db.inserts) == 1
 
 
-# -- service: rejecting a multi-session request rejects every session --------
+# -- service: a decision on a multi-session request covers every session --------
 
 
 def _request_rows():
@@ -299,6 +299,25 @@ def test_reject_rejects_every_under_review_session_of_the_request(request_db):
     logs = request_db.tables["event_status_log"]
     assert sorted(entry["event_id"] for entry in logs) == ["s1", "s2"]
     assert all(entry["reason"] == "Venue clash" and entry["changed_by"] == "coord-1" for entry in logs)
+
+
+def test_approve_approves_every_under_review_session_of_the_request(request_db):
+    result = service_module.approve_event_request("s1", _loaded_session(), "coord-1")
+
+    assert result["id"] == "s1"
+    statuses = {row["id"]: row["status"] for row in request_db.rows}
+    assert statuses == {
+        "s1": "approved", "s2": "approved", "s3": "approved", "s4": "under_review", "other": "under_review",
+    }
+    logs = request_db.tables["event_status_log"]
+    assert sorted(entry["event_id"] for entry in logs) == ["s1", "s2"]
+    assert all(entry["to_status"] == "approved" and entry["changed_by"] == "coord-1" for entry in logs)
+
+
+def test_reject_is_refused_without_a_reason_before_any_session_moves(request_db):
+    with pytest.raises(ValidationError):
+        service_module.reject_event_request("s1", _loaded_session(), "coord-1", "   ")
+    assert request_db.get("s1")["status"] == request_db.get("s2")["status"] == "under_review"
 
 
 def test_reject_lost_race_on_the_opened_session_touches_no_sibling(request_db):

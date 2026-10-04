@@ -752,24 +752,45 @@ def list_event_sessions(event: SimpleNamespace, user) -> dict:
 
 
 def _decide(event_id: str, event: SimpleNamespace, to_status: str, decided_by: str, reason: str | None):
-    """Moves an under_review event to `to_status`.
+    """Moves an under_review request to `to_status` -- the session the
+    coordinator opened AND every other session of the same request.
+
+    A decision applies to the whole request, not one session (Aaralyn,
+    IS-46 follow-up): the request has one coordinator, and the organiser
+    fixes and resubmits its sessions together (submit_event_request
+    resubmits every rejected session at once).
 
     The authz rule (rule_event_approve / rule_event_reject) has already
-    checked the caller is the assigned coordinator and the event is
-    under_review. The write goes through app.events.transitions.transition(),
+    checked the caller is the assigned coordinator and `event` is
+    under_review. Every write goes through app.events.transitions.transition(),
     conditional on status still being under_review, so two decisions racing
-    each other (e.g. a double click, or approve and reject from two tabs)
-    can't both land -- the second matches no row and gets a 409
-    TransitionConflictError instead of silently winning. transition() also
-    writes the event_status_log row (same columns as before) and enforces
-    the rejection reason.
+    each other (a double click, or approve and reject from two tabs) can't
+    both land, and each session gets its own event_status_log row.
+
+    `event` itself is decided first: a lost race on it raises a 409
+    TransitionConflictError before any sibling is touched. Siblings are then
+    moved only if still under_review AND assigned to this coordinator --
+    authz never saw those rows, so the coordinator check is re-done here
+    (one coordinator per request makes it a no-op in practice). A sibling
+    that already left under_review is skipped, not overwritten.
+
+    Returns the row for `event_id`.
     """
-    return transition(event_id, to_status, decided_by, reason=reason, expected_from="under_review")
+    decided = transition(event_id, to_status, decided_by, reason=reason, expected_from="under_review")
+    for session in _load_sessions_with_status(event, "under_review"):
+        if session["id"] == event_id or session.get("coordinator_id") != decided_by:
+            continue
+        try:
+            transition(session["id"], to_status, decided_by, reason=reason, expected_from="under_review")
+        except TransitionConflictError:
+            continue
+    return decided
 
 
 def approve_event_request(event_id: str, event: SimpleNamespace, approved_by: str):
     """Event Review and Approval: coordinator approves -> "approved"
-    (Week 4: "Approval = sufficient info for planning")."""
+    (Week 4: "Approval = sufficient info for planning"). Applies to every
+    under_review session of the request -- see _decide."""
     return _decide(event_id, event, "approved", approved_by, None)
 
 
@@ -779,31 +800,9 @@ def reject_event_request(event_id: str, event: SimpleNamespace, rejected_by: str
     rejected requests keep a record of the decision) so the organiser
     knows what to fix before resubmitting. Enforced (and trimmed) by
     transition() from transitions.REASON_REQUIRED, with the same message
-    as before.
-
-    Rejection applies to the whole request, not just the session the
-    coordinator happened to open (Aaralyn, IS-46 follow-up): every
-    under_review sibling sharing its shared_event_id goes with it, so the
-    organiser fixes and resubmits them together (submit_event_request
-    already resubmits every rejected session of a request at once).
-
-    The session authz checked is decided first, so a lost race on it
-    (409 TransitionConflictError) refuses the whole rejection before any
-    sibling is touched. Siblings are then moved only if they are still
-    under_review AND assigned to this coordinator -- authz never saw those
-    rows, so the coordinator check is re-done here (one coordinator per
-    request makes it a no-op in practice). Each sibling goes through
-    transition() too, so each is guarded and logged with the same reason;
-    one that already left under_review is skipped, not overwritten."""
-    rejected = _decide(event_id, event, "rejected", rejected_by, reason)
-    for session in _load_sessions_with_status(event, "under_review"):
-        if session["id"] == event_id or session.get("coordinator_id") != rejected_by:
-            continue
-        try:
-            transition(session["id"], "rejected", rejected_by, reason=reason, expected_from="under_review")
-        except TransitionConflictError:
-            continue
-    return rejected
+    as before. Applies to every under_review session of the request, each
+    logged with the same reason -- see _decide."""
+    return _decide(event_id, event, "rejected", rejected_by, reason)
 
 
 def list_event_requests(user, status: str | None = None) -> list[dict]:

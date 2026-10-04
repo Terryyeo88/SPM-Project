@@ -6,9 +6,9 @@
  *
  * Decisions:
  *   Approve  -> POST /events/<id>/approve   (under_review -> approved)
- *   Reject   -> POST /events/<id>/reject    (under_review -> rejected, reason required).
- *               Rejects the whole request: every session still under review
- *               goes to rejected together, so the organiser resubmits them as one.
+ *   Reject   -> POST /events/<id>/reject    (under_review -> rejected, reason required)
+ *   Both decide the whole request: every session still under review moves
+ *   together, so the organiser resubmits a rejected request as one.
  *   Reassign -> POST /events/<id>/reassign-coordinator, choosing from
  *               GET /events/coordinators. Afterwards this coordinator no
  *               longer has the event, so they're sent back to their dashboard.
@@ -230,7 +230,7 @@ function approve() {
   return run(async () => {
     const updated = await apiPost(`/events/${props.event.id}/approve`, {})
     openPanel.value = null
-    success.value = 'Request approved -- it is now in your In Planning tab.'
+    success.value = 'Request approved (every session under review) -- it is now in your In Planning tab.'
     emit('updated', updated)
   })
 }
