@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from app.authz.actions import EVENT_VIEW
 from app.authz.policy import can
 from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
+from app.events.transitions import TransitionConflictError, record_creation, transition
 from app.extensions import supabase
 from app.shared.errors import ValidationError
 
@@ -494,33 +495,46 @@ def _insert_sessions(organizer_id: str, rows: list[dict], shared_event_id: str) 
     # One insert statement for all rows -- PostgREST runs it as a single
     # statement, so either every session is created or none is.
     result = supabase.table("events").insert(rows).select("*").execute()
-    return result.data or []
+    created = result.data or []
+    for row in created:
+        record_creation(row["id"], organizer_id)  # history row: NULL -> draft
+    return created
 
 
 def _submit_sessions(
     event_ids: list[str], from_status: str = "draft", submitted_by: str | None = None
 ) -> list[dict]:
     """Moves these sessions from `from_status` ("draft", or "rejected" for
-    a resubmission) to "submitted", then on to review."""
-    for event_id in event_ids:
-        # Conditioned on still being in from_status so a double submit
-        # can't re-run any of this on an already-submitted session.
-        supabase.table("events").update({"status": "submitted"}).eq("id", event_id).eq(
-            "status", from_status
-        ).execute()
+    a resubmission) to "submitted", then on to review -- every status
+    change through transition(), so each one is guarded and logged.
 
-    sessions = supabase.table("events").select("*").in_("id", event_ids).execute().data or []
+    The FIRST id is the session the caller acted on: if it lost a race
+    (already moved by a double submit or another tab), the
+    TransitionConflictError propagates before any sibling is touched.
+    A sibling that already left `from_status` is skipped rather than
+    failing the whole submit -- the same tolerance the old conditional
+    update had. `submitted_by` is recorded as changed_by (the organiser)."""
+    submitted_ids = []
+    for index, event_id in enumerate(event_ids):
+        try:
+            transition(event_id, "submitted", submitted_by, expected_from=from_status)
+        except TransitionConflictError:
+            if index == 0:
+                raise
+            continue
+        submitted_ids.append(event_id)
+
+    sessions = supabase.table("events").select("*").in_("id", submitted_ids).execute().data or []
     submitted = [session for session in sessions if session["status"] == "submitted"]
 
     # A resubmitted session still has the coordinator who rejected it: it
     # goes straight back to their review queue, keeping the request's one
     # coordinator. Only sessions with nobody assigned go through
-    # assignment below.
+    # assignment below. Attributed to the organiser, whose submit caused it
+    # (docs/design-decisions.md, changed_by).
     for session in submitted:
         if session.get("coordinator_id"):
-            supabase.table("events").update({"status": "under_review"}).eq("id", session["id"]).eq(
-                "status", "submitted"
-            ).execute()
+            transition(session["id"], "under_review", submitted_by, expected_from="submitted")
 
     # Per Customer Briefing Step 3 / Event Status Management: submission
     # should trigger coordinator auto-assignment, moving the event to
@@ -533,19 +547,12 @@ def _submit_sessions(
     unassigned = [session for session in submitted if not session.get("coordinator_id")]
     if unassigned:
         try:
-            assign_initial_coordinator(unassigned[0]["id"])
+            assign_initial_coordinator(unassigned[0]["id"], actor=submitted_by)
         except NoCoordinatorAvailableError:
             pass
 
-    result = supabase.table("events").select("*").in_("id", event_ids).execute()
-    rows = result.data or []
-
-    # A resubmission undoes a coordinator's decision, so it goes in the
-    # same audit trail as approve/reject (event_status_log).
-    if from_status == "rejected":
-        for row in rows:
-            _record_status_change(row["id"], "rejected", row["status"], submitted_by, "resubmitted by organiser")
-    return rows
+    result = supabase.table("events").select("*").in_("id", submitted_ids).execute()
+    return result.data or []
 
 
 def create_event_request(organizer_id: str, payload: dict) -> dict:
@@ -558,7 +565,7 @@ def create_event_request(organizer_id: str, payload: dict) -> dict:
     inserted = _insert_sessions(organizer_id, rows, shared_event_id)
     if not inserted:
         raise ValidationError("The event database operation did not return an event.")
-    return _group_response(_submit_sessions([row["id"] for row in inserted]))
+    return _group_response(_submit_sessions([row["id"] for row in inserted], submitted_by=organizer_id))
 
 
 def create_draft_request(organizer_id: str, payload: dict) -> dict:
@@ -692,9 +699,10 @@ def submit_event_request(event_id: str, event: SimpleNamespace):
             _from_database_event(SimpleNamespace(**session)),
             for_submission=True,
         )
-    submitted = _submit_sessions(
-        [session["id"] for session in sessions], from_status=event.status, submitted_by=event.organizer_id
-    )
+    # The session the caller submitted from goes first, so a lost race on
+    # it refuses the submit before any sibling moves (see _submit_sessions).
+    ordered_ids = [event_id] + [session["id"] for session in sessions if session["id"] != event_id]
+    submitted = _submit_sessions(ordered_ids, from_status=event.status, submitted_by=event.organizer_id)
     return next(row for row in submitted if row["id"] == event_id)
 
 
@@ -743,49 +751,46 @@ def list_event_sessions(event: SimpleNamespace, user) -> dict:
     return _group_response(_attach_rejections(visible))
 
 
-def _record_status_change(
-    event_id: str, from_status: str, to_status: str, changed_by: str, reason: str | None = None
-) -> None:
-    """Audit trail for a status change -- see
-    supabase/migrations/20260929000000_event_status_log.sql for why."""
-    supabase.table("event_status_log").insert(
-        {
-            "event_id": event_id,
-            "from_status": from_status,
-            "to_status": to_status,
-            "changed_by": changed_by,
-            "reason": reason,
-        }
-    ).execute()
-
-
 def _decide(event_id: str, event: SimpleNamespace, to_status: str, decided_by: str, reason: str | None):
-    """Moves an under_review event to `to_status`.
+    """Moves an under_review request to `to_status` -- the session the
+    coordinator opened AND every other session of the same request.
+
+    A decision applies to the whole request, not one session (Aaralyn,
+    IS-46 follow-up): the request has one coordinator, and the organiser
+    fixes and resubmits its sessions together (submit_event_request
+    resubmits every rejected session at once).
 
     The authz rule (rule_event_approve / rule_event_reject) has already
-    checked the caller is the assigned coordinator and the event is
-    under_review. The update is ALSO conditioned on status still being
-    under_review, so two decisions racing each other (e.g. a double click,
-    or approve and reject from two tabs) can't both land -- the second
-    matches no row and gets a clear error instead of silently winning.
+    checked the caller is the assigned coordinator and `event` is
+    under_review. Every write goes through app.events.transitions.transition(),
+    conditional on status still being under_review, so two decisions racing
+    each other (a double click, or approve and reject from two tabs) can't
+    both land, and each session gets its own event_status_log row.
+
+    `event` itself is decided first: a lost race on it raises a 409
+    TransitionConflictError before any sibling is touched. Siblings are then
+    moved only if still under_review AND assigned to this coordinator --
+    authz never saw those rows, so the coordinator check is re-done here
+    (one coordinator per request makes it a no-op in practice). A sibling
+    that already left under_review is skipped, not overwritten.
+
+    Returns the row for `event_id`.
     """
-    result = (
-        supabase.table("events")
-        .update({"status": to_status})
-        .eq("id", event_id)
-        .eq("status", "under_review")
-        .select("*")
-        .execute()
-    )
-    if not result.data:
-        raise ValidationError("This event request is no longer under review -- refresh to see its current status.")
-    _record_status_change(event_id, event.status, to_status, decided_by, reason)
-    return _first_row(result)
+    decided = transition(event_id, to_status, decided_by, reason=reason, expected_from="under_review")
+    for session in _load_sessions_with_status(event, "under_review"):
+        if session["id"] == event_id or session.get("coordinator_id") != decided_by:
+            continue
+        try:
+            transition(session["id"], to_status, decided_by, reason=reason, expected_from="under_review")
+        except TransitionConflictError:
+            continue
+    return decided
 
 
 def approve_event_request(event_id: str, event: SimpleNamespace, approved_by: str):
     """Event Review and Approval: coordinator approves -> "approved"
-    (Week 4: "Approval = sufficient info for planning")."""
+    (Week 4: "Approval = sufficient info for planning"). Applies to every
+    under_review session of the request -- see _decide."""
     return _decide(event_id, event, "approved", approved_by, None)
 
 
@@ -793,10 +798,11 @@ def reject_event_request(event_id: str, event: SimpleNamespace, rejected_by: str
     """Event Review and Approval: coordinator rejects -> "rejected".
     A reason is required (Week 4: "Free text reason is reasonable";
     rejected requests keep a record of the decision) so the organiser
-    knows what to fix before resubmitting."""
-    if not isinstance(reason, str) or not reason.strip():
-        raise ValidationError("A reason is required to reject an event request.")
-    return _decide(event_id, event, "rejected", rejected_by, reason.strip())
+    knows what to fix before resubmitting. Enforced (and trimmed) by
+    transition() from transitions.REASON_REQUIRED, with the same message
+    as before. Applies to every under_review session of the request, each
+    logged with the same reason -- see _decide."""
+    return _decide(event_id, event, "rejected", rejected_by, reason)
 
 
 def list_event_requests(user, status: str | None = None) -> list[dict]:

@@ -126,6 +126,17 @@ function editableSessions() {
   return drafts.length ? drafts : [event.value]
 }
 
+// A reject moves every under-review session of the request, so refresh the
+// sessions list too, not just this session's row.
+async function onCoordinatorDecision(updated) {
+  event.value = updated
+  try {
+    group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
+  } catch {
+    // The decision itself succeeded; a stale list just corrects on reload.
+  }
+}
+
 async function loadEvent() {
   loading.value = true
   error.value = ''
@@ -323,7 +334,7 @@ watch(() => route.params.eventId, (eventId) => {
           v-else-if="event && isAssignedCoordinator"
           :event="event"
           :sessions="visibleSessions"
-          @updated="event = $event"
+          @updated="onCoordinatorDecision"
         />
         <template v-else-if="event">
           <div class="card-header">

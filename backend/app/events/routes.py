@@ -25,12 +25,16 @@ from app.auth.context import current_user
 from app.authz.actions import (
     COORDINATOR_LIST,
     EVENT_APPROVE,
+    EVENT_CANCEL,
+    EVENT_COMPLETE,
+    EVENT_CONFIRM,
     EVENT_CREATE,
     EVENT_DELETE,
     EVENT_EDIT,
     EVENT_LIST,
     EVENT_REASSIGN_COORDINATOR,
     EVENT_REJECT,
+    EVENT_START_PLANNING,
     EVENT_SUBMIT,
     EVENT_VIEW,
 )
@@ -52,6 +56,7 @@ from app.events.event_service import (
     save_draft_request,
     submit_event_request,
 )
+from app.events.transitions import status_history, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
@@ -143,6 +148,65 @@ def reject_event(event, event_id):
     body = request.get_json(silent=True) or {}
     rejected = reject_event_request(event_id, event, current_user().id, body.get("reason"))
     return jsonify(rejected), 200
+
+
+# -- lifecycle after approval (IS-36 / IS-38 / IS-39) ----------------------
+# Each route is: @require (may THIS user take this step on THIS event?)
+# then transition() (is the edge legal, and is the event still in the
+# status we just authorised against?). expected_from=event.status makes
+# the write conditional on exactly the state @require checked, so a
+# concurrent change between the two is a 409, never an overwrite.
+
+
+def _move(event, event_id: str, to_status: str) -> dict:
+    body = request.get_json(silent=True) or {}
+    return transition(event_id, to_status, current_user().id, reason=body.get("reason"), expected_from=event.status)
+
+
+@events_bp.route("/<event_id>/start-planning", methods=["POST"])
+@require(EVENT_START_PLANNING, loader=lambda event_id: load_event(event_id))
+def start_planning(event, event_id):
+    """IS-36: approved -> planning."""
+    return jsonify(_move(event, event_id, "planning")), 200
+
+
+@events_bp.route("/<event_id>/confirm", methods=["POST"])
+@require(EVENT_CONFIRM, loader=lambda event_id: load_event(event_id))
+def confirm_event(event, event_id):
+    """planning -> confirmed. Status change only, for end-to-end testability.
+    The Confirmed Status story's "fields should not be changed once
+    confirmed" half is NOT implemented here (see docs/open-questions.md)."""
+    return jsonify(_move(event, event_id, "confirmed")), 200
+
+
+@events_bp.route("/<event_id>/complete", methods=["POST"])
+@require(EVENT_COMPLETE, loader=lambda event_id: load_event(event_id))
+def complete_event(event, event_id):
+    """IS-38: confirmed -> completed. Read-only afterwards: no rule allows
+    edit/submit/delete/cancel/reassign on a completed event, and
+    transitions.ALLOWED has no edge out of completed."""
+    return jsonify(_move(event, event_id, "completed")), 200
+
+
+@events_bp.route("/<event_id>/cancel", methods=["POST"])
+@require(EVENT_CANCEL, loader=lambda event_id: load_event(event_id))
+def cancel_event(event, event_id):
+    """IS-39: approved/planning/confirmed -> cancelled. The reason is
+    required (enforced by transition(), which 400s without one). It's
+    stored in event_status_log, not on the event, and the organiser reads
+    it back via GET /events/<id>/status-history."""
+    updated = _move(event, event_id, "cancelled")
+    return jsonify({**updated, "cancellation_reason": request.get_json(silent=True)["reason"].strip()}), 200
+
+
+@events_bp.route("/<event_id>/status-history", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_status_history(event, event_id):
+    """Every status change for this event, oldest first, with who made it
+    and why -- visible to anyone who may view the event (its organiser and
+    its assigned coordinator). This is where an organiser sees the
+    cancellation or rejection reason."""
+    return jsonify(status_history(event_id)), 200
 
 
 # The `load_event` function is a loader for the `@require` decorator.
