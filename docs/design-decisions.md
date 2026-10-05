@@ -437,3 +437,144 @@ a PostgREST relationship select, same idiom as `_attach_rejections`' own
 called with one already-known event in view (the event details page's own
 Venue Booking section) — the caller already has that event's name, so
 embedding it a second time would be redundant.
+
+## Status transitions: one guarded path, edges as data
+
+Every change to `events.status` goes through
+`app/events/transitions.py::transition()`. Four decisions shape it.
+
+**The edge set is data, not branching.** `ALLOWED` is a frozenset of
+`(from, to)` pairs, each paired in `_EDGE_SOURCES` with the story sentence
+it comes from. An illegal transition is a *missing entry*, not a *missing
+`if`*. "What can a planning event become?" is answered by reading one
+table, a new lifecycle step is a one-line, reviewable diff, and a test can
+assert the whole set in one comparison
+(`test_edge_set_is_exactly_the_sourced_edges`). With branching logic, the
+same question means reading every code path that writes a status. Before
+this change there were four such paths, and only one of them checked
+anything.
+
+**The expected status is in the WHERE clause, not checked by a read and
+then a write.** The update is `UPDATE events SET status = :to WHERE id = :id
+AND status = :from`, and the row count is checked afterwards. Postgres
+evaluates that WHERE against the row's current committed value while
+holding the row lock. Two requests racing from the same status therefore
+cannot both match: exactly one updates a row and the other updates zero,
+which becomes a 409 `status_conflict`. A read-then-write cannot give this
+guarantee. The read and the write are separate moments, so a change
+between them is silently overwritten, and the value the old code wrote
+back could even revert someone else's change (the old `under_review`
+write did exactly that). Proven against real Postgres: 10 simultaneous
+`approved → planning` attempts give 1 winner and 9 conflicts. With the
+status filter removed, the same race gives 10 "winners" and 10 history
+rows for one real change. We never retry a conflict automatically. A retry
+would re-apply a decision the user made about a state that no longer
+exists.
+
+**Authorisation and the state machine are separate.** `@require` answers
+"may *this user* do this to *this event*" (relationship and role, giving a
+403 or 404). `transition()` answers "is this *edge* legal at all, and is the
+event still where we think it is" (giving a 409 or 400). Each is a pure
+function of different inputs: rules of `(user, event)`, edges of `(from,
+to, reason)`. So each is tested without building the other's fixtures.
+Merged, every state-machine test would need users and every authz test
+would need edges. The status precondition therefore appears twice: in the
+rule, which decides the 403, and in `ALLOWED`, which decides legality. This
+is deliberate, and the route passes `expected_from=event.status` so the
+write is conditional on exactly the state authz approved.
+
+**Reasons live in `event_status_log`, not on `events`.** IS-39's
+cancellation reason and the Approved/Rejected story's rejection reason are
+the same thing: metadata about a *transition*, not a property of the
+event. An event can be rejected, fixed and resubmitted, then rejected
+again. A `rejection_reason` or `cancellation_reason` column would keep
+only the last one and lose the record the Week 4 clarification asks us to
+keep. The same table also serves the Activity History and Change History
+core features (who changed what, when, and why). **Do not add
+`cancellation_reason`, `rejection_reason` or similar columns to
+`events`.** Write a transition with a reason, and read it back from
+`event_status_log` (`GET /events/<id>/status-history`). The table is
+Justin's `20260929000000_event_status_log.sql`. We reused it rather than
+creating a second history table.
+
+**Known non-atomic pair.** The status update and the history insert are two
+PostgREST requests, not one transaction. If the insert fails after the
+update succeeds, the event has moved with no audit row, the caller sees a
+500, and a retry gets a 409. We accept this for now. The fix, if it's ever
+needed, is a single Postgres function (RPC) that does both statements in
+one transaction. We are not building an outbox or anything two-phase.
+
+## `event_status_log.changed_by` stays nullable (a trade-off we chose not to take)
+
+We considered making `changed_by` NOT NULL, so that an unattributed audit
+row would be impossible, and decided against it. A genuinely
+system-initiated transition in future (a scheduled job marking past events
+completed, say) would have no honest actor. Forcing a value would mean
+inventing a "system" user or recording a lie. The convention instead is:
+**NULL means "no human actor", and nothing in the current design produces
+one.** Every transition we build records a real person. Auto-assignment's
+`submitted → under_review` (and a resubmission's return to review) is
+attributed to the organiser whose submit request triggered it, because that
+request caused it. `assign_initial_coordinator(event_id, actor=None)` keeps
+`actor` optional only for backward compatibility: the submit path always
+passes it, so a NULL row means a caller outside that path. So in practice there
+are no NULL rows. If one ever appears, it is either a deliberate
+system transition or a bug. The schema is left exactly as Justin wrote it.
+
+## Attendee Registration: one database call decides confirmed or waitlisted
+
+Registering is "count the session's confirmed registrations, then insert as
+confirmed or waitlisted". Done as two requests from Python, two attendees
+racing for the last place can both see it free and both be confirmed. So
+the decision and the insert are one Postgres function,
+`public.register_attendee`, which locks the session's events row
+(`SELECT ... FOR UPDATE`) first: registrations for the same session queue
+behind each other and each sees the count the previous one left. Checked
+against Postgres 16 with 20 simultaneous registrations for a session with
+capacity 5: exactly 5 confirmed, 15 waitlisted.
+
+The function also re-checks "confirmed and enabled" and the registration
+window, using the database clock, so neither can be bypassed. It returns an
+outcome (`registered`, `not_open`, `not_started`, `closed`,
+`already_registered`, `not_found`) instead of raising, and the service maps
+each to a message an attendee can act on.
+
+Other decisions, from the story and the Week 2/4 clarifications:
+
+- **Per session.** `registration_needs` and the registration window are
+  already per session, so an attendee registers for a session.
+- **Capacity = the session's `expected_attendance`.** No new field. `NULL`
+  means no limit.
+- **Every session has a waiting list,** first come, first served ("waiting
+  list supported"). Position = order of `registered_at`.
+- **Registration information follows the Edit Profile wireframe:** full
+  name and organisation (shown read-only, from the profile), email and phone
+  (required, editable), "Email notifications" / "SMS notifications" (either
+  or both, at least one), and optional notes. The attendee can't change their
+  name or organisation here, only choose whether their organisation is
+  included. The form prefills from the profile: name and email today, and
+  phone, organisation and notification choices automatically once a profile
+  story adds `phone`, `organisation`, `notify_email` / `notify_sms` to
+  `GET /me` (`prefillFromProfile` in `frontend/src/lib/registrations.js`; the
+  backend reads the organisation from the profile row). What's stored is
+  what the attendee submitted for that registration, so editing a profile
+  later doesn't rewrite past registrations.
+- **Withdrawing moves the next person up.** `public.withdraw_registration`
+  deletes the registration and, if it held a confirmed place, confirms the
+  first waitlisted attendee (by `registered_at`) in the same call, under the
+  same session lock as registering. Checked against Postgres 16: 30
+  attendees registering and 5 withdrawing at once on a 5-place session left
+  exactly 5 confirmed and 20 waitlisted. Not allowed once the session has
+  started.
+- **Screens follow the attendee wireframes:** the attendee dashboard
+  (search, Registered Events, Waiting List, result cards tagged Open /
+  Almost Full / Waitlist Only) and an event page with spots filled and
+  Register / Withdraw Registration / Leave Waiting List. The wireframe's
+  event image, venue, category and location search are left out: events
+  have none of those yet.
+- **Attendees only see public fields** of a session (name, description,
+  dates and times, registration window, places left) -- the briefing: "an
+  Attendee should not be able to view internal planning information".
+- **`registrations` has RLS on and no policies.** Nothing can read or write
+  it through the anon/authenticated keys; only the backend's service role.
+

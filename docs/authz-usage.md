@@ -26,18 +26,51 @@ by default — every route is protected unless explicitly decorated `@public`.
 
 | Action | Who | What it checks |
 |---|---|---|
-| `EVENT_VIEW` | organiser (own event) or coordinator (assigned) | relationship only, any status |
-| `EVENT_LIST` | organiser or coordinator | role only — **see warning below** |
+| `EVENT_VIEW` | organiser (own event), coordinator (assigned), or Event Coordinator Lead | relationship only, any status; the Lead sees every event except drafts |
+| `EVENT_LIST` | organiser, coordinator or Event Coordinator Lead | role only — **see warning below** |
 | `EVENT_CREATE` | organiser | role only |
 | `EVENT_SUBMIT` | organiser (own event) | status must be `draft` (first submission) or `rejected` (resubmission) |
-| `EVENT_EDIT` | organiser (own, `draft`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
+| `EVENT_EDIT` | organiser (own, `draft` or `rejected`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
+| `EVENT_DELETE` | organiser (own event) | status must be `draft` |
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |
-| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) | no status check |
+| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) or Event Coordinator Lead | event has a coordinator, any status **except `completed`** (IS-38) |
+| `EVENT_ASSIGN_COORDINATOR` | Event Coordinator Lead | status `submitted` and no coordinator yet (the unassigned queue) — Week 7 change #5 |
+| `EVENT_START_PLANNING` | coordinator (assigned) | status must be `approved` (IS-36) |
+| `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |
+| `EVENT_COMPLETE` | coordinator (assigned) | status must be `confirmed` (IS-38) |
+| `COORDINATOR_LIST` | coordinator or Event Coordinator Lead | role only |
+| `EVENT_REGISTER` | attendee | session is `confirmed` with `registration_needs` true (otherwise 404 to attendees); the registration window is checked by the database function |
+| `REGISTRATION_LIST` | attendee | role only (browse open sessions, list own registrations) |
+| `EVENT_VIEW_PUBLIC` | attendee | same as `EVENT_REGISTER`: the attendee's event page shows public fields only |
+| `REGISTRATION_WITHDRAW` | attendee | any session (no registration → 404 from the database function); not once the session has started |
+| `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`
 (the logic, with the source story quoted for every precondition).
+
+## Changing an event's status: authorise, then `transition()`
+
+Never write `events.status` yourself. A route that changes status does two
+things, in this order:
+
+```python
+@events_bp.route("/<event_id>/start-planning", methods=["POST"])
+@require(EVENT_START_PLANNING, loader=lambda event_id: load_event(event_id))
+def start_planning(event, event_id):
+    return jsonify(transition(event_id, "planning", current_user().id,
+                              expected_from=event.status)), 200
+```
+
+`@require` answers "may this user do this to this event". `transition()` (in
+`app/events/transitions.py`) answers "is this edge legal", makes the write
+conditional on `expected_from`, writes the `event_status_log` row, and
+enforces the reason for `rejected`/`cancelled`. A lost race is a `409
+status_conflict`, which your frontend should treat as "refresh and show the
+new status". The legal edges are the `ALLOWED` set in that file. Adding a
+lifecycle step means adding one entry there (with its story text) plus an
+action and a rule here.
 
 ## `EVENT_LIST` and `EVENT_CREATE` do NOT scope your query for you
 
