@@ -118,3 +118,24 @@ decisions worth double-checking.
   fix would be the same shape as the database guard: an autouse fixture
   that makes `app.auth.jwt._http_get_json` raise a named error unless a
   test installs a key. Not done yet.
+
+## Booking conflicts (IS-16)
+
+- **A CI check would have caught a direct status write structurally.**
+  PR #18 wrote `events.status` directly in `booking_service`, bypassing
+  `transition()`. It was only caught because someone read the service
+  layer during review. A CI step that fails when
+  `.update({"status"` appears on `events` outside
+  `app/events/transitions.py` would catch it every time. It needs care:
+  `venue_bookings` and `registrations` legitimately update their own
+  `status`, so it can't be a bare grep. Recorded, not built.
+
+- **Should the requesting coordinator see the names of clashing events?**
+  `GET /venues/bookings/<id>/conflicts` reuses `VENUE_BOOKING_VIEW`, so the
+  coordinator who requested a booking sees the same clash list as Venue
+  Staff, including the other event's name. That helps them pick another
+  slot, but it shows them another organiser's event. If it should be Venue
+  Staff only, it needs its own action and rule.
+
+- **The UI doesn't show the clash list yet.** The route exists. Showing it
+  on `VenueBookingReviewView.vue` is a frontend change in Josiah's view.

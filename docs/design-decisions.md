@@ -437,3 +437,84 @@ a PostgREST relationship select, same idiom as `_attach_rejections`' own
 called with one already-known event in view (the event details page's own
 Venue Booking section) — the caller already has that event's name, so
 embedding it a second time would be redundant.
+
+## Booking conflicts (IS-16, Terry, Sprint 2, 2026-10-05)
+
+Stacked on Venue Booking Request / Approval (PR #18). Josiah's table and
+code are unchanged; IS-16 adds one migration, one reporting module and one
+route.
+
+### Prevention is a database guarantee; reporting is a query. Two mechanisms on purpose
+
+IS-16 asks for two different things, and no single mechanism does both.
+
+- **Prevent** two confirmed bookings of one venue from overlapping. This is
+  the exclusion constraint `venue_bookings_no_confirmed_overlap`
+  (`20261006000000_venue_booking_no_overlap.sql`). An application check
+  can't guarantee it: `confirm_booking` reads ("any confirmed overlap?") and
+  `_decide_booking` writes in a separate statement, so two Venue Staff
+  confirming two overlapping pending bookings at the same moment both read
+  "no" and both write. The constraint is checked inside the write.
+  Postgres evaluates exclusion constraints on UPDATE as well as INSERT, so
+  the pending → confirmed UPDATE is the moment the row enters the
+  constraint's scope and is checked.
+- **Report** which confirmed bookings a request clashes with, so Venue
+  Staff can see why. That's `app.venues.booking_conflicts`, exposed as
+  `GET /venues/bookings/<id>/conflicts`. A constraint can't do this. It
+  only fails a write, it names nothing useful to a person, and it can't be
+  asked "what would this clash with?" before anyone tries to confirm.
+
+They're kept separate so that neither has to do the other's job badly. A
+query alone has the race. Treating the constraint as a report would mean
+attempting a confirm just to find out, and parsing a Postgres error for
+the answer.
+
+Josiah's `_confirmed_overlap_exists` stays as it is. It gives the friendly
+message before a confirm and the read-only `conflict` flag on
+`get_booking`.
+
+### The report reuses Josiah's predicate rather than adding a second one
+
+`_confirmed_overlap_exists` already answers "is there a clash", but it
+stops at the first match. The only missing piece was "which ones", so
+`confirmed_clashes` uses the same `_BLOCKING_STATUSES` and the same
+`_spans_overlap` and collects every match. The list and the `conflict` flag
+therefore can't disagree. The constraint uses the same definition:
+`'[)'` ranges match `_spans_overlap`'s `a_start < b_end and b_start <
+a_end`, so a booking ending at 14:00 doesn't clash with one starting at
+14:00. `test_booking_conflicts_integration.py` checks that the report and
+the constraint agree at those boundaries.
+
+The query lives in a service module like every other read, not in a SQL
+view or function. That keeps the migration to the guarantee alone, and the
+filtering logic is unit-testable without a database. The route has its own
+blueprint, so IS-16 edits none of IS-14's files.
+
+### Turnaround comes for free
+
+The constraint compares `booking_start`/`booking_end`, which Josiah's code
+already pads with the venue's setup and turnaround minutes. A clash in the
+turnaround window is a clash, with no extra rule.
+
+### A released booking frees its period without extra handling
+
+The constraint has `WHERE (status = 'confirmed')`, the same scope as
+`_BLOCKING_STATUSES`. A row takes part only while it's confirmed. Any
+change away from `confirmed` removes it from the constraint's scope, and
+the period is free for the next confirm. That covers `rejected` today, and
+whatever a cancelled event's booking becomes later. #18 has no `cancelled`
+booking status (asked on the PR), but the answer doesn't change this:
+whichever status is chosen, the booking stops blocking as long as it isn't
+`confirmed`. `test_releasing_a_confirmed_booking_frees_its_period` shows
+it against real Postgres. Nothing yet moves a booking out of `confirmed`
+when its event is cancelled; that's the cancellation path, not IS-16.
+
+### Under true concurrency the loser sees 23P01 or 40P01
+
+When two conflicting confirms race, exactly one wins, every time (30 of 30
+measured races). The loser is usually refused with `23P01`
+(exclusion_violation). But if both UPDATEs reach the constraint check
+before either commits, each waits for the other, and Postgres' deadlock
+detector aborts one with `40P01` (deadlock_detected): 5 of the 30. Either
+way the outcome is identical: one confirmed row, one refused. Anything that
+turns the refusal into a user-facing message has to recognise both codes.
