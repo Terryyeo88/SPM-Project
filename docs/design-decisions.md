@@ -348,6 +348,96 @@ Together, the two halves make the rule: **unit tests cannot reach any
 database, and integration tests cannot reach a non-local one without
 someone saying so out loud.**
 
+## Venue Booking Request / Approval (Josiah, Sprint 2, 2026-10-04)
+
+### A booking is keyed to one event SESSION, not the whole multi-session request
+
+`venue_bookings.event_id` references one row of `public.events` directly —
+not `shared_event_id`, the id every session of one request shares. Room
+layout, expected attendance and accessibility needs are already modelled as
+per-session fields (`event_service.py`'s `SESSION_FIELDS`), and a venue has
+to suit one session's actual requirements, not some combination across every
+session of the request. A two-session conference where session one needs a
+200-seat theatre and session two needs a 20-person boardroom has to be able
+to book two different venues — keying to `shared_event_id` would make that
+unrepresentable.
+
+### `approved → planning` is a side effect of requesting a venue, not a separate feature
+
+The written Event Status Management "Planning Status" story requires an
+event to already be in `planning` before a venue/equipment search starts —
+but nothing in this codebase transitions any event TO `planning`; that's a
+separate, unassigned sub-story, and `app.events.event_service` only ever
+writes `draft`/`submitted`/`under_review`/`approved`/`rejected`. Blocking
+this entire story on someone else shipping that transition first would make
+it unimplementable this sprint. Instead, `rule_venue_booking_create` accepts
+`approved` OR `planning`, and `booking_service.create_booking_request`
+performs the narrow `approved → planning` UPDATE itself, as a documented side
+effect of the FIRST venue booking request against an `approved` event —
+directly matching the story's own framing ("the Coordinator has to change
+the status to 'planning' before... searching for a venue"). The UPDATE is
+conditioned on `.eq("status", "approved")`, same race-proofing idiom as
+`event_service._decide`, so two booking requests fired for sibling sessions
+at once can't both attempt it, and a no-op when the event is already
+`planning` is expected, not an error. Flagged in `docs/open-questions.md` for
+whoever eventually owns the Planning Status sub-story to confirm.
+
+### Setup/turnaround buffers: per-venue columns, snapshotted onto the booking at creation
+
+The customer's wireframe shows a per-venue "Standard Turnaround" field on the
+venue's own profile, not a single global constant — so `setup_minutes`/
+`turnaround_minutes` are columns on `venues` (default 30), not an env var.
+Each `venue_bookings` row copies the venue's buffer values at the moment the
+request is created (`booking_service.create_booking_request`), rather than
+re-reading the venue row every time the booking's padded span matters. A
+venue's buffers can change after bookings against it already exist (new
+venue management policy, a correction); without the snapshot, that change
+would retroactively shift the blocked period of a booking that was already
+decided — possibly uncancelling a conflict a Venue Staff member already
+confirmed didn't exist. The booking is a record of what was true when it was
+requested, not a live reference to the venue's current configuration.
+
+### Conflict guard at approval: narrow, confirmed-vs-confirmed only — not the full Conflict Detection story
+
+`booking_service._confirmed_overlap_exists` blocks confirming a booking only
+if the SAME venue already has another `confirmed` booking whose padded
+`[booking_start, booking_end)` span overlaps. This is the literal reading of
+Approval AC1 ("the venue is marked unavailable for that period"), and
+nothing more: no pending-vs-pending conflict flagging, no recalculation when
+a confirmed booking is later cancelled (no cancellation path exists yet).
+That broader behaviour belongs to the separate, unassigned Booking Conflict
+Detection story — building it here would mean guessing at a story nobody
+assigned this sprint, and risking a shape that story's real owner would have
+to unwind. The same check is also surfaced read-only on `get_booking`'s
+`conflict` field, computed before any decision is made, so Venue Staff see
+the same warning a confirm attempt would hit, in time to decide not to
+bother trying.
+
+### Rejection reason lives in the audit log, not on the booking row — both read paths join it in
+
+Mirroring `event_status_log`'s shape (not `coordinator_assignment_log`'s —
+see the migration's own comment), `reject_booking` records its reason on
+`venue_booking_status_log`, never on `venue_bookings` itself: the booking
+row is current state, the log is history, and a reason is inherently a
+history fact ("why was THIS decision made"), not current state. Approval
+AC2 ("the Coordinator can view it") means `get_booking` and
+`list_bookings_for_event` both have to join it back in for a rejected
+booking — `booking_service._attach_rejection_reasons` is a direct port of
+`event_service._attach_rejections`' own query shape (latest rejection only,
+since a booking could in principle be rejected, superseded by a fresh
+request, and rejected again).
+
+### Why `list_bookings` embeds `events(name)`/`venues(name)` but the per-event list doesn't
+
+`list_bookings` is Venue Staff's queue — it spans every venue and every
+event at once, so a bare `event_id`/`venue_id` per row is useless for
+recognising which request is which; it embeds the related row's `name` via
+a PostgREST relationship select, same idiom as `_attach_rejections`' own
+`profiles(name)` embed. `list_bookings_for_event`, by contrast, is always
+called with one already-known event in view (the event details page's own
+Venue Booking section) — the caller already has that event's name, so
+embedding it a second time would be redundant.
+
 ## Status transitions: one guarded path, edges as data
 
 Every change to `events.status` goes through

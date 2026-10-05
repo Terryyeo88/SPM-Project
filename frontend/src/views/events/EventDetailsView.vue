@@ -20,6 +20,7 @@ import CoordinatorEventReview from './CoordinatorEventReview.vue'
 import AppNavBar from '../../components/AppNavBar.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
+import VenueBookingStatus from '../../components/VenueBookingStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -340,12 +341,14 @@ watch(() => route.params.eventId, (eventId) => {
 
         <p v-if="loading" class="message">Loading event...</p>
         <p v-else-if="error && !event" class="message error" role="alert">{{ error }}</p>
-        <CoordinatorEventReview
-          v-else-if="event && isAssignedCoordinator"
-          :event="event"
-          :sessions="visibleSessions"
-          @updated="onCoordinatorDecision"
-        />
+        <template v-else-if="event && isAssignedCoordinator">
+          <CoordinatorEventReview
+            :event="event"
+            :sessions="visibleSessions"
+            @updated="onCoordinatorDecision"
+          />
+          <VenueBookingStatus :event="event" />
+        </template>
         <template v-else-if="event">
           <div class="card-header">
             <div class="page-heading">

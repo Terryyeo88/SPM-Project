@@ -242,6 +242,98 @@ describe('router: authentication and role-based route guarding', () => {
     })
   })
 
+  describe('/events/:eventId/venue-bookings/new (request-venue-booking)', () => {
+    it('a coordinator reaches it and the eventId arrives as a route param', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      await router.push('/events/abc-123/venue-bookings/new')
+      expect(router.currentRoute.value.name).toBe('request-venue-booking')
+      expect(router.currentRoute.value.params.eventId).toBe('abc-123')
+    })
+
+    it.each(['event_organizer', 'venue_staff', 'technical_support_staff', 'attendee'])(
+      '%s is redirected to /dashboard',
+      async (role) => {
+        mockSession(true)
+        mockMe(role)
+        await router.push('/events/abc-123/venue-bookings/new')
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      },
+    )
+
+    it('an unauthenticated visitor is sent to /login', async () => {
+      mockSession(false)
+      await router.push('/events/abc-123/venue-bookings/new')
+      expect(router.currentRoute.value.name).toBe('login')
+    })
+  })
+
+  describe('/venues/bookings (venue-booking-queue)', () => {
+    it('venue_staff reaches it', async () => {
+      mockSession(true)
+      mockMe('venue_staff')
+      await router.push('/venues/bookings')
+      expect(router.currentRoute.value.name).toBe('venue-booking-queue')
+    })
+
+    it.each(['event_organizer', 'event_coordinator', 'technical_support_staff', 'attendee'])(
+      '%s is redirected to /dashboard',
+      async (role) => {
+        mockSession(true)
+        mockMe(role)
+        await router.push('/venues/bookings')
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      },
+    )
+  })
+
+  describe('/venues/bookings/:bookingId (venue-booking-review)', () => {
+    it('venue_staff reaches it and the bookingId arrives as a route param', async () => {
+      mockSession(true)
+      mockMe('venue_staff')
+      await router.push('/venues/bookings/booking-1')
+      expect(router.currentRoute.value.name).toBe('venue-booking-review')
+      expect(router.currentRoute.value.params.bookingId).toBe('booking-1')
+    })
+
+    it('event_coordinator reaches it too (read-only view of their own request)', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      await router.push('/venues/bookings/booking-1')
+      expect(router.currentRoute.value.name).toBe('venue-booking-review')
+    })
+
+    it.each(['event_organizer', 'technical_support_staff', 'attendee'])(
+      '%s is redirected to /dashboard',
+      async (role) => {
+        mockSession(true)
+        mockMe(role)
+        await router.push('/venues/bookings/booking-1')
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      },
+    )
+  })
+
+  // Sharpest regression guard for the new routes: if the dynamic
+  // /venues/:venueId ever swallowed /venues/bookings, an event_coordinator
+  // (allowed on venue-details, denied on venue-booking-queue) would be let
+  // through to venue-details with venueId="bookings" instead of denied.
+  describe('static /venues/bookings is never swallowed by /venues/:venueId', () => {
+    it('venue_staff lands on venue-booking-queue, not venue-details', async () => {
+      mockSession(true)
+      mockMe('venue_staff')
+      await router.push('/venues/bookings')
+      expect(router.currentRoute.value.name).toBe('venue-booking-queue')
+    })
+
+    it('event_coordinator is DENIED (dashboard) -- not let through to venue-details with venueId="bookings"', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      await router.push('/venues/bookings')
+      expect(router.currentRoute.value.name).toBe('dashboard')
+    })
+  })
+
   // The sharpest regression guard here: if the dynamic /events/:eventId
   // ever swallowed the static /events/reassign, an ORGANISER (allowed on
   // event-details, denied on reassign) would suddenly be let through to a

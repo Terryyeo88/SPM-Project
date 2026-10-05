@@ -147,6 +147,27 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           coordinator/venue_staff pair as `venues`
  *                           above. Not a nav link: reached from the
  *                           venue catalogue list.
+ *   request-venue-booking -- Venue Booking Request story (Josiah, Sprint
+ *                           2): "As an Event Coordinator, I want to
+ *                           submit a request to book a venue for an
+ *                           event". app/authz/rules.py::
+ *                           rule_venue_booking_create is coordinator-only
+ *                           (the assigned one, checked per-event by the
+ *                           backend). Not a nav link: reached from the
+ *                           event details page's Venue Booking section.
+ *   venue-booking-queue  -- Venue Booking Approval story: "As a Venue
+ *                           Staff member, I want to review pending venue
+ *                           booking requests". Role-only, same no-per-
+ *                           venue-assignment-table caveat as `venues`
+ *                           above (see rule_venue_booking_list's own
+ *                           comment). A nav link, same as `venues` --
+ *                           this IS venue_staff's working queue.
+ *   venue-booking-review -- app/authz/rules.py::rule_venue_booking_view
+ *                           allows BOTH the requesting coordinator (read-
+ *                           only, so they "can view" a rejection reason --
+ *                           Approval AC2) and any venue_staff (to decide).
+ *                           Not a nav link: reached from the queue or
+ *                           from the event details page.
  *
  *   attendee-event      -- Attendee Registration: "As an Attendee, I want to
  *                           register for an event". Attendee only. Reached
@@ -192,6 +213,24 @@ export const ROUTE_ACCESS = Object.freeze(
     {
       routeName: 'venue-details',
       label: 'Venue details',
+      roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    {
+      routeName: 'request-venue-booking',
+      label: 'Request venue booking',
+      roles: [ROLES.EVENT_COORDINATOR],
+      inNav: false,
+    },
+    {
+      routeName: 'venue-booking-queue',
+      label: 'Venue Bookings',
+      roles: [ROLES.VENUE_STAFF],
+      inNav: true,
+    },
+    {
+      routeName: 'venue-booking-review',
+      label: 'Venue booking review',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },

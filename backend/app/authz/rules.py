@@ -450,6 +450,98 @@ def rule_venue_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue_booking.create -------------------------------------------------
+# Source: Venue Booking Request story -- the assigned Event Coordinator
+# submits a request against an event they're coordinating. The resource
+# checked here is the EVENT (the booking doesn't exist yet), reusing
+# EventLike/_is_assigned_coordinator exactly like event.edit does.
+#
+# Status precondition: "approved" or "planning". The Event Status
+# Management "Planning Status" story says a venue/equipment search
+# requires the event to already be in "planning" -- but nothing in this
+# codebase transitions an event TO "planning" (that's a separate,
+# unassigned sub-story; see app.events.event_service, which only ever
+# writes draft/submitted/under_review/approved/rejected). Rather than
+# make this feature unreachable until someone else ships that
+# transition, app.venues.booking_service.create_booking_request performs
+# the narrow approved -> planning transition itself, as a documented
+# side effect of starting the venue search -- directly matching the
+# story's own framing ("the Coordinator has to change the status to
+# 'planning' before... searching for a venue"). Allowing "planning" here
+# too covers a second booking request on an event already in planning
+# (e.g. a multi-session request's other sessions, or a second attempt
+# after a rejection). See docs/design-decisions.md for the full
+# reasoning and the sign-off this needed.
+
+
+def rule_venue_booking_create(user: Any, event: Any) -> Decision:
+    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "approved", "planning"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- venue_booking.view / venue_booking.list -------------------------------
+# view: the requesting coordinator (so they "can view" a rejection
+# reason -- Approval AC2) or any venue_staff (so they can open a booking
+# from their queue to decide on it).
+#
+# list is role-only, same *** WARNING *** as rule_event_list /
+# rule_venue_list above: passing this does NOT mean "see every booking".
+# app.venues.booking_service.list_bookings is where the actual per-row
+# scoping happens (coordinator -> requested_by == user.id; venue_staff
+# -> unfiltered, since no per-venue-staff-assignment table exists yet --
+# flagged in docs/open-questions.md, same as rule_venue_list's own
+# venue_staff-access assumption above).
+
+
+def _is_booking_requester(user: Any, booking: Any) -> bool:
+    return booking.requested_by == user.id
+
+
+def rule_venue_booking_view(user: Any, booking: Any) -> Decision:
+    if _has_role(user, "event_coordinator") and _is_booking_requester(user, booking):
+        return Decision.ALLOW
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_venue_booking_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "event_coordinator") or _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+# -- venue_booking.approve / venue_booking.reject --------------------------
+# Source: Venue Booking Approval story -- "As a Venue Staff member, I
+# want to review pending venue booking requests and approve or reject
+# them". Role-only relationship check (no per-venue-staff-assignment
+# table -- see rule_venue_booking_list's comment above), status
+# precondition "pending" only, same status-gated shape as
+# rule_event_approve/rule_event_reject.
+
+
+def _booking_status_in(booking: Any, *statuses: str) -> bool:
+    return booking.status in statuses
+
+
+def rule_venue_booking_approve(user: Any, booking: Any) -> Decision:
+    if not _has_role(user, "venue_staff"):
+        return Decision.DENY_NOT_FOUND
+    if not _booking_status_in(booking, "pending"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_venue_booking_reject(user: Any, booking: Any) -> Decision:
+    # Same precondition as approve -- kept as a separate function per this
+    # module's own stated reasoning (see "WHY SEPARATE ACTIONS..." above)
+    # for not collapsing distinct decisions into one action.
+    return rule_venue_booking_approve(user, booking)
+
+
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
 # Only an Event Coordinator or the Event Coordinator Lead can (re)assign
 # (rule_event_reassign_coordinator / rule_event_assign_coordinator), so

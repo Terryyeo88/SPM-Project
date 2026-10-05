@@ -79,6 +79,61 @@ decisions worth double-checking.
   in `20260927000000_reconcile_events_with_live.sql` are out of date. They
   were left as is because that migration has already been applied.
 
+- **Venue Staff granted blanket access to every venue's bookings (no
+  per-venue-staff-assignment table).** The Venue Booking Approval story
+  says "As a Venue Staff member, I want to review pending venue booking
+  requests and approve or reject them" — it doesn't say whether a Venue
+  Staff member is tied to specific venues or sees every venue's queue.
+  No table links a Venue Staff member to the venue(s) they cover, so
+  `rule_venue_booking_list`/`rule_venue_booking_approve`/`rule_venue_
+  booking_reject` (`app/authz/rules.py`) and
+  `app.venues.booking_service.list_bookings` are role-only: any
+  `venue_staff` sees and can decide every venue's pending bookings, same
+  inference already made for `venue.view`/`venue.list` above. Please
+  confirm this is acceptable, or whether Venue Staff should be scoped to
+  specific venues (which would need a new assignment table, out of scope
+  for this sprint).
+
+- **The `approved → planning` transition is a side effect of requesting a
+  venue, not its own feature.** The Event Status Management "Planning
+  Status" story implies a Coordinator explicitly moves an event to
+  `planning` before searching for a venue/equipment, but nothing in this
+  codebase transitions an event TO `planning` (that sub-story is
+  unassigned). `app.venues.booking_service.create_booking_request`
+  performs that transition itself, narrowly, as a side effect of the
+  FIRST venue booking request against an `approved` event — see
+  `docs/design-decisions.md` §approved→planning for the full reasoning.
+  Please confirm this reading (starting a venue search IS what moves an
+  event to planning) rather than expecting a separate, explicit
+  "Start Planning" action.
+
+- **A cancelled event's CONFIRMED venue booking is never released.**
+  `venue_booking_status` has three values — `pending`, `confirmed`,
+  `rejected` — no `cancelled`. The Cancelled Status story (now built on
+  `main`) lets a coordinator cancel an event from `approved`, `planning`
+  OR `confirmed`, which means an event with an already-`confirmed` venue
+  booking can be cancelled while that booking still holds the venue.
+  Nothing today moves the booking off `confirmed` when that happens, so
+  the venue stays blocked for a period nobody is using it for any more.
+  Raised in code review (2026-10-05) and logged here rather than decided
+  unilaterally, since the right fix affects other work reading booking
+  status. Options on the table for Thursday, not yet chosen between:
+    1. Add `cancelled` to `venue_booking_status` and release the booking
+       as a side effect of the event's `* → cancelled` transition — same
+       pattern as `create_booking_request`'s own `approved → planning`
+       side effect above.
+    2. Reuse `rejected` with a system-generated reason — no schema
+       change, but `rejected` then means two different things (Venue
+       Staff declined it / the event it belonged to was cancelled),
+       which muddies `get_booking`'s `rejection` field for anyone
+       reading it later.
+    3. Leave the booking row `confirmed` and treat the event's own
+       `cancelled` status as the authoritative signal instead — cheapest,
+       but `confirmed` then stops reliably meaning "this venue is held"
+       without also checking the event it belongs to.
+  No option is implemented yet — this is a modelling decision to make,
+  not a bug to silently work around.
+
 - **Test-suite network gap: JWKS is still fetched over the wire.** The
   unit-test guard (`tests/conftest.py`) blocks the *database* but not the
   *network*. A unit test that sends a real bearer token without the

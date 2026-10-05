@@ -32,6 +32,7 @@ from app.authz.actions import (
     EVENT_START_PLANNING,
     EVENT_SUBMIT,
     EVENT_VIEW,
+    VENUE_BOOKING_CREATE,
 )
 from app.authz.decorators import require
 from app.events.coordinator_service import (
@@ -55,6 +56,7 @@ from app.events.event_service import (
 from app.events.transitions import status_history, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+from app.venues.booking_service import create_booking_request, list_bookings_for_event
 
 events_bp = Blueprint("events", __name__, url_prefix="/events")
 
@@ -107,6 +109,27 @@ def get_event(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_event_sessions(event, event_id):
     return jsonify(list_event_sessions(event, current_user())), 200
+
+
+# Venue Booking Request (Josiah, Sprint 2). Gated on VENUE_BOOKING_CREATE,
+# not EVENT_EDIT -- see rule_venue_booking_create's own status
+# precondition (approved/planning), distinct from event.edit's.
+@events_bp.route("/<event_id>/venue-bookings", methods=["POST"])
+@require(VENUE_BOOKING_CREATE, loader=lambda event_id: load_event(event_id))
+def create_venue_booking(event, event_id):
+    body = request.get_json(silent=True) or {}
+    booking = create_booking_request(event, body.get("venue_id"), current_user().id)
+    return jsonify(booking), 201
+
+
+# Gated on EVENT_VIEW, not VENUE_BOOKING_LIST -- this is "this event's own
+# booking history", scoped to one event the caller can already see, not
+# the cross-event queue VENUE_BOOKING_LIST/list_bookings guards (see that
+# rule's own *** WARNING *** in rules.py).
+@events_bp.route("/<event_id>/venue-bookings", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_venue_bookings_for_event(event, event_id):
+    return jsonify(list_bookings_for_event(event_id)), 200
 
 
 @events_bp.route("/<event_id>", methods=["DELETE"])

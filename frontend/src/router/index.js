@@ -8,6 +8,9 @@ import EventsListView from '../views/events/EventsListView.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
+import VenueBookingQueueView from '../views/venues/VenueBookingQueueView.vue'
+import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
 import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
 import VenueDetailView from '../views/venues/VenueDetailView.vue'
 import AttendeeEventView from '../views/registrations/AttendeeEventView.vue'
@@ -64,6 +67,12 @@ const routes = [
     meta: { roles: _rolesByRouteName.get('event-details') },
   },
   {
+    path: '/events/:eventId/venue-bookings/new',
+    name: 'request-venue-booking',
+    component: RequestVenueBookingView,
+    meta: { roles: _rolesByRouteName.get('request-venue-booking') },
+  },
+  {
     path: '/attend/:eventId',
     name: 'attendee-event',
     component: AttendeeEventView,
@@ -75,8 +84,24 @@ const routes = [
     component: VenueCatalogueView,
     meta: { roles: _rolesByRouteName.get('venues') },
   },
-  // Same static-before-dynamic reasoning as /events/reassign above --
-  // /venues/:venueId must not come first.
+  // Static paths before the dynamic /venues/:venueId below -- same
+  // static-before-dynamic reasoning as /events/reassign above (vue-router
+  // ranks a static segment above a dynamic one regardless of declaration
+  // order, but /venues/bookings and /venues/bookings/:bookingId are
+  // listed first anyway for readability, and router/index.test.js pins
+  // this down so /venues/:venueId can never swallow "bookings" as a venueId).
+  {
+    path: '/venues/bookings',
+    name: 'venue-booking-queue',
+    component: VenueBookingQueueView,
+    meta: { roles: _rolesByRouteName.get('venue-booking-queue') },
+  },
+  {
+    path: '/venues/bookings/:bookingId',
+    name: 'venue-booking-review',
+    component: VenueBookingReviewView,
+    meta: { roles: _rolesByRouteName.get('venue-booking-review') },
+  },
   {
     path: '/venues/:venueId',
     name: 'venue-details',

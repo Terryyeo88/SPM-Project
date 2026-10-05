@@ -96,6 +96,45 @@ coordinators genuinely free, and deliberately dropped rather than kept as a
 flaky or environment-dependent test. It was never part of Justin's original
 coverage either, so nothing of his was lost.
 
+## Venue Booking Request / Approval (Josiah, Sprint 2)
+
+Not IS-1's own criteria — the Venue Booking Request (3pt) and Venue Booking
+Approval (5pt) stories. Design reasoning for every inference below (role
+scoping, the `approved → planning` side effect, the narrow conflict guard)
+lives in `docs/design-decisions.md` §Venue Booking Request / Approval;
+customer-confirmation items are flagged in `docs/open-questions.md`.
+
+| Criterion / source | Test | Implementation |
+|---|---|---|
+| Coordinator submits a booking (venue + the event session's own date/time/requirements); status set to "Pending" | `test_booking_service.py::test_create_booking_applies_setup_and_turnaround_buffers` | `app/venues/booking_service.py::create_booking_request` |
+| Only the event's ASSIGNED coordinator may request a booking | `test_authz_venue_bookings.py::test_assigned_coordinator_can_create_when_event_approved`, `::test_coordinator_not_assigned_gets_404_not_403`, `::test_organiser_cannot_create_even_on_their_own_event`, `::test_venue_staff_cannot_create` | `app/authz/rules.py::rule_venue_booking_create` |
+| Incomplete requests blocked (no `venue_id`, or one that doesn't reference a real venue) | `test_booking_service.py::test_create_booking_requires_a_venue_id`, `::test_create_booking_raises_for_unknown_venue` | `app/venues/booking_service.py::create_booking_request` |
+| Linked to the event record for traceability | `test_booking_service.py::test_list_bookings_for_event_newest_first` | `venue_bookings.event_id` (FK), `app/venues/booking_service.py::list_bookings_for_event` |
+| System automatically applies a configurable setup time (before) and turnaround time (after) to the booked period | `test_booking_service.py::test_create_booking_applies_setup_and_turnaround_buffers` | `app/venues/booking_service.py::_event_window`, `create_booking_request` |
+| Buffer values are per-venue, and don't retroactively change once a booking already exists | `test_booking_service.py::test_create_booking_snapshots_buffers_not_a_live_reference` | `venue_bookings.setup_minutes`/`turnaround_minutes` (snapshotted columns) |
+| Booking visible to relevant Venue Staff (queue) | `test_booking_service.py::test_list_bookings_is_unfiltered_for_venue_staff`, `::test_list_bookings_for_a_user_with_both_roles_is_unfiltered` | `app/venues/booking_service.py::list_bookings` |
+| Venue Staff see a queue of ALL pending requests (role-only — no per-venue-staff-assignment table; see `docs/open-questions.md`) | `test_authz_venue_bookings.py::test_venue_staff_allowed_venue_booking_list`, `test_booking_service.py::test_list_bookings_status_filter_narrows_within_role_scope` | `app/authz/rules.py::rule_venue_booking_list`, `app/venues/booking_service.py::list_bookings` |
+| Venue Staff approve → "Confirmed", venue marked unavailable for that period | `test_booking_service.py::test_confirm_booking_sets_status_and_logs_the_decision`, `::test_confirm_booking_not_blocked_by_a_non_overlapping_confirmed_booking` | `app/venues/booking_service.py::confirm_booking` |
+| Approval is blocked if another CONFIRMED booking already overlaps the same venue's padded period (narrow guard — not full Conflict Detection, see `docs/design-decisions.md`) | `test_booking_service.py::test_confirm_booking_blocked_by_an_overlapping_confirmed_booking`, `test_venue_bookings_integration.py::test_get_booking_reports_conflict_against_a_real_overlapping_confirmed_booking` | `app/venues/booking_service.py::_confirmed_overlap_exists`, `confirm_booking` |
+| The same conflict is surfaced read-only BEFORE a decision is made (suitability panel) | `test_booking_service.py::test_get_booking_conflict_is_true_when_another_confirmed_booking_overlaps`, `::test_get_booking_conflict_excludes_itself` | `app/venues/booking_service.py::get_booking` (`conflict` field) |
+| Venue Staff reject, must provide a reason | `test_booking_service.py::test_reject_booking_requires_a_reason_and_leaves_status_unchanged`, `::test_reject_booking_rejects_every_blank_or_non_string_reason` | `app/venues/booking_service.py::reject_booking` |
+| Coordinator can view the rejection reason | `test_booking_service.py::test_get_booking_attaches_the_latest_rejection_reason`, `::test_get_booking_rejection_is_the_most_recent_one`, `test_venue_bookings_integration.py::test_reject_booking_records_reason_coordinator_can_then_read` | `app/venues/booking_service.py::_attach_rejection_reasons`, `app/authz/rules.py::rule_venue_booking_view` (requester OR any venue_staff) |
+| Only `venue_staff` may approve/reject, and only while the booking is still `pending` (race-proofed against a double decision) | `test_authz_venue_bookings.py::test_venue_staff_cannot_redecide_an_already_decided_booking`, `::test_requesting_coordinator_cannot_decide_their_own_booking`, `test_booking_service.py::test_second_decision_is_refused_once_no_longer_pending` | `app/authz/rules.py::rule_venue_booking_approve`/`rule_venue_booking_reject`, `app/venues/booking_service.py::_decide_booking` |
+| An approved booking should notify the Coordinator (ties to the unbuilt Notification System — print-stub only, no real plumbing exists anywhere in this codebase yet) | not independently tested — see `app/venues/booking_service.py::_notify_booking_decision`'s own docstring | `app/venues/booking_service.py::_notify_booking_decision` |
+| Routes wire the above up with the correct authz per role (POST/GET on the events blueprint, 4 routes on the venues blueprint, static `/bookings` paths before the dynamic `/<venue_id>`) | `test_venue_bookings_routes.py` (all cases) | `app/events/routes.py::create_venue_booking`, `get_venue_bookings_for_event`; `app/venues/routes.py::list_venue_bookings_route`, `get_venue_booking_route`, `approve_venue_booking_route`, `reject_venue_booking_route` |
+| End-to-end against a real database (migration actually applies, buffers/conflict/rejection round-trip for real) | `test_venue_bookings_integration.py` (all cases) | `supabase/migrations/20261005100000_venue_bookings.sql`, `app/venues/booking_service.py` |
+| Frontend: tab grouping, request-form validation | `frontend/src/lib/venueBookings.test.js` | `frontend/src/lib/venueBookings.js` |
+| Frontend: capacity/layout/accessibility suitability comparison | `frontend/src/lib/venueSuitability.test.js` | `frontend/src/lib/venueSuitability.js` |
+| Frontend: the 3 new routes are correctly role-gated (including static-before-dynamic ordering) | `frontend/src/router/index.test.js` (the 3 new `describe` blocks + the `/venues/bookings` swallow-guard) | `frontend/src/router/index.js`, `frontend/src/lib/roles.js` |
+
+Not independently covered by an automated test (manual/visual only, no
+browser tooling available in this environment — see the PR description):
+`RequestVenueBookingView.vue`, `VenueBookingQueueView.vue`,
+`VenueBookingReviewView.vue`, `VenueBookingStatus.vue` — consistent with
+this project's existing "no component tests, pure logic only" convention
+(see `frontend/src/lib/coordinatorDashboard.test.js` and its sibling
+components, none of which have component tests either).
+
 ## Sprint 2 — status transitions (mechanism, IS-36, IS-38, IS-39)
 
 Unit tests: `test_transitions.py` (state machine, no DB) and `test_event_lifecycle.py` (rules + routes, no DB).
