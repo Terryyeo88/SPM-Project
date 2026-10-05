@@ -201,3 +201,36 @@ decisions worth double-checking.
   and equipment work that isn't built, so the seed creates a confirmed
   "Registration Demo" request directly, without status history.
 
+
+## Venue booking conflicts (IS-16) and equipment calendar (IS-47) — still blocked (5 Oct)
+
+- **IS-16 waits on PR #18 (IS-14, Josiah).** `venue_bookings` is not on
+  main and not on the live database. It exists only in PR #18, which is
+  open and has merge conflicts. IS-16 is not built until #18 merges, so we
+  don't write a second version of Josiah's table.
+
+- **PR #18's migration timestamp is already used on main.** PR #18 adds
+  `20261004000000_venue_bookings.sql`. Main already has
+  `20261004000000_coordinator_lead_role.sql`. Supabase identifies migrations
+  by that number, so two files sharing it will clash on `db reset`. Git
+  won't flag this because the file names differ. The PR's file needs a new,
+  later timestamp before it merges.
+
+- **What IS-16 will build on once #18 merges.** PR #18 already stores the
+  occupied period (`booking_start`/`booking_end`, including setup and
+  turnaround). It also checks in the app for an overlapping confirmed
+  booking before it confirms one. IS-16 adds a btree_gist exclusion
+  constraint on confirmed rows, which removes the race in that
+  check-then-write, plus the overlap query that shows Venue Staff which
+  bookings clash. One open point: #18's `venue_booking_status` has no
+  `cancelled` value, so a cancelled booking can only show up as `rejected`
+  for now. Either way it stops blocking, because only confirmed rows are
+  covered by the constraint.
+
+- **IS-47 has no data to read.** There are no `equipment` or
+  `equipment_reservations` tables in migrations or on the live database.
+  Equipment exists only as a free-form `events.equipment_needed` jsonb list.
+  Question for Justin (PO): which story creates the equipment inventory and
+  reservations, and what should the calendar show (per item or per type,
+  quantity or just booked/free, which roles can see it)? IS-47 needs those
+  answers before it can be built.
