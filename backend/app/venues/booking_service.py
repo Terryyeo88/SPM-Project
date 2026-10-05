@@ -19,6 +19,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
+from postgrest.exceptions import APIError
+
 from app.events.event_service import SINGAPORE_TZ
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
@@ -317,14 +319,25 @@ def _decide_booking(booking_id: str, booking: SimpleNamespace, to_status: str, d
     land -- the second matches no row and gets a clear error instead of
     silently winning.
     """
-    result = (
-        supabase.table("venue_bookings")
-        .update({"status": to_status})
-        .eq("id", booking_id)
-        .eq("status", "pending")
-        .select("*")
-        .execute()
-    )
+    try:
+        result = (
+            supabase.table("venue_bookings")
+            .update({"status": to_status})
+            .eq("id", booking_id)
+            .eq("status", "pending")
+            .select("*")
+            .execute()
+        )
+    except APIError as exc:
+        # IS-16's exclusion constraint refused the confirm: another confirm
+        # of an overlapping booking got there first, past the app check
+        # above. 23P01 normally; 40P01 when both reached the constraint
+        # before either committed (see docs/design-decisions.md).
+        if exc.code in ("23P01", "40P01"):
+            raise ValidationError(
+                "This venue already has a confirmed booking overlapping this period -- it cannot be confirmed."
+            ) from exc
+        raise
     if not result.data:
         raise ValidationError("This booking is no longer pending -- refresh to see its current status.")
     _record_booking_status_change(booking_id, booking.status, to_status, decided_by, reason)
