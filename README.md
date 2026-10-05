@@ -142,6 +142,8 @@ eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | se
 SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY"   pytest -m integration                           # from backend/
 ```
 
+If `supabase start` can't bind its ports on Windows, a reserved port range is in the way. The range changes (reboots, updates), so check it with `netsh interface ipv4 show excludedportrange protocol=tcp`, move the ports in `supabase/config.toml` outside it for that session, and don't commit the change.
+
 Otherwise they skip themselves, with a message saying why:
 - **No credentials** (CI): skipped.
 - **`SUPABASE_URL` is not local**, e.g. your `.env` pointing at the shared
