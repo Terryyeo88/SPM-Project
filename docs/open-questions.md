@@ -107,6 +107,33 @@ decisions worth double-checking.
   event to planning) rather than expecting a separate, explicit
   "Start Planning" action.
 
+- **A cancelled event's CONFIRMED venue booking is never released.**
+  `venue_booking_status` has three values — `pending`, `confirmed`,
+  `rejected` — no `cancelled`. The Cancelled Status story (now built on
+  `main`) lets a coordinator cancel an event from `approved`, `planning`
+  OR `confirmed`, which means an event with an already-`confirmed` venue
+  booking can be cancelled while that booking still holds the venue.
+  Nothing today moves the booking off `confirmed` when that happens, so
+  the venue stays blocked for a period nobody is using it for any more.
+  Raised in code review (2026-10-05) and logged here rather than decided
+  unilaterally, since the right fix affects other work reading booking
+  status. Options on the table for Thursday, not yet chosen between:
+    1. Add `cancelled` to `venue_booking_status` and release the booking
+       as a side effect of the event's `* → cancelled` transition — same
+       pattern as `create_booking_request`'s own `approved → planning`
+       side effect above.
+    2. Reuse `rejected` with a system-generated reason — no schema
+       change, but `rejected` then means two different things (Venue
+       Staff declined it / the event it belonged to was cancelled),
+       which muddies `get_booking`'s `rejection` field for anyone
+       reading it later.
+    3. Leave the booking row `confirmed` and treat the event's own
+       `cancelled` status as the authoritative signal instead — cheapest,
+       but `confirmed` then stops reliably meaning "this venue is held"
+       without also checking the event it belongs to.
+  No option is implemented yet — this is a modelling decision to make,
+  not a bug to silently work around.
+
 - **Test-suite network gap: JWKS is still fetched over the wire.** The
   unit-test guard (`tests/conftest.py`) blocks the *database* but not the
   *network*. A unit test that sends a real bearer token without the
