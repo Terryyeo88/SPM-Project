@@ -1,7 +1,7 @@
 """
 Live Supabase integration tests for Venue Booking Request / Approval
 (Josiah, Sprint 2) -- proves the migration
-(supabase/migrations/20261004000000_venue_bookings.sql) actually applies
+(supabase/migrations/20261005100000_venue_bookings.sql) actually applies
 and app.venues.booking_service's writes/reads round-trip against a real
 database, not just the in-memory fake in test_booking_service.py.
 

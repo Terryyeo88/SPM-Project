@@ -10,7 +10,7 @@ cancel), the Venue Availability Calendar, and Venue Becomes Unavailable
 
 One booking is keyed to one EVENT ROW (session), not to shared_event_id
 (the whole multi-session request) -- see
-supabase/migrations/20261004000000_venue_bookings.sql's own comment for
+supabase/migrations/20261005100000_venue_bookings.sql's own comment for
 why.
 """
 
@@ -20,6 +20,7 @@ from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
 from app.events.event_service import SINGAPORE_TZ
+from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
@@ -127,7 +128,9 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     "planning" -- a narrow, documented side effect of starting the venue
     search (directly matching the Event Status Management "Planning
     Status" story's own framing: "the Coordinator has to change the
-    status to 'planning' before... searching for a venue"). See
+    status to 'planning' before... searching for a venue"), routed
+    through app.events.transitions.transition() so it gets the same
+    event_status_log audit row every other status change does. See
     docs/design-decisions.md for the full reasoning.
     """
     if not isinstance(venue_id, str) or not venue_id.strip():
@@ -163,17 +166,20 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
         raise ValidationError("The venue booking database operation did not return a booking.")
     booking = result.data[0] if isinstance(result.data, list) else result.data
 
-    # Conditioned on still being "approved" so a race (e.g. two booking
-    # requests fired for sibling sessions at once) can't both attempt
-    # this transition -- a no-op update (0 rows matched) when the event
-    # is already "planning" is expected and not an error here, unlike
-    # event_service._decide's own status-gated update, since the event
-    # genuinely is allowed to already be in "planning" (see
-    # rule_venue_booking_create's status precondition).
+    # expected_from="approved" conditions the write on still being
+    # "approved", so a race (e.g. two booking requests fired for sibling
+    # sessions at once) can't both attempt this transition --
+    # TransitionConflictError when the event is already "planning" is
+    # expected and swallowed here, not an error, since the event
+    # genuinely is allowed to already be in "planning" by the time this
+    # runs (see rule_venue_booking_create's status precondition) -- most
+    # transition() callers treat that conflict as a real error, this is
+    # the one call site that doesn't.
     if event.status == "approved":
-        supabase.table("events").update({"status": "planning"}).eq("id", event.id).eq(
-            "status", "approved"
-        ).execute()
+        try:
+            transition(event.id, "planning", requested_by, expected_from="approved")
+        except TransitionConflictError:
+            pass
 
     return booking
 
@@ -285,7 +291,7 @@ def _record_booking_status_change(
     booking_id: str, from_status: str, to_status: str, changed_by: str, reason: str | None = None
 ) -> None:
     """Audit trail -- see
-    supabase/migrations/20261004000000_venue_bookings.sql for why this
+    supabase/migrations/20261005100000_venue_bookings.sql for why this
     mirrors event_status_log's shape rather than
     coordinator_assignment_log's."""
     supabase.table("venue_booking_status_log").insert(
