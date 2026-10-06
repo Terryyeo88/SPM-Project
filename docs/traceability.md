@@ -42,7 +42,7 @@ audit actually found and fixed, rather than just asserting coverage.
 | View Event Requests story: organiser can list their own drafted/created requests | `test_authz_policy.py::test_event_list_denied_for_role_with_no_listing_rights`, `::test_organiser_allowed_event_list` | `app/authz/rules.py::rule_event_list` |
 | View Assigned Event Requests story: coordinator can list events assigned to them | `test_authz_policy.py::test_coordinator_allowed_event_list` | `app/authz/rules.py::rule_event_list` (caller MUST apply the scoping filter — see the loud warning in the module docstring) |
 | Event Status Management story: submitting changes status to Submitted, organiser-only, from draft, or from rejected to resubmit after corrections | `test_authz_policy.py::test_organiser_denied_event_submit_on_event_that_isnt_theirs`, `::test_organiser_denied_event_submit_from_status_other_than_draft_or_rejected`, `::test_organiser_allowed_event_submit_from_draft`, `::test_organiser_allowed_event_resubmit_after_rejection`, `test_event_submission.py::test_resubmit_returns_every_rejected_session_to_its_coordinator` | `app/authz/rules.py::rule_event_submit` |
-| Readied for Justin's `coordinator_service.py::reassign_coordinator` (not wired by this ticket) | `test_authz_policy.py::test_coordinator_allowed_reassign_when_currently_assigned`, `::test_coordinator_denied_reassign_when_not_currently_assigned` | `app/authz/rules.py::rule_event_reassign_coordinator` |
+| Readied for Justin's `coordinator_service.py::reassign_coordinator` (not wired by this ticket). Sprint 2: now refused once `completed` — see the Sprint 2 section | `test_authz_policy.py::test_coordinator_allowed_reassign_when_currently_assigned`, `::test_coordinator_denied_reassign_when_not_currently_assigned` | `app/authz/rules.py::rule_event_reassign_coordinator` |
 | "An attendee cannot [do] internal actions" | `test_authz_policy.py::test_attendee_denied_every_internal_action` | all `rule_event_*` functions (deny via role/relationship check) |
 | Customer requirement: a user with multiple roles gets the union of their permissions | `test_authz_policy.py::test_multi_role_user_gets_union_of_permissions` | `app/authz/rules.py` (structural: `role in user.roles`, never a single-role assumption) |
 | Deny by default: an unknown action string is never allowed | `test_authz_policy.py::test_unknown_action_denied` | `app/authz/policy.py::_decide` |
@@ -122,7 +122,7 @@ customer-confirmation items are flagged in `docs/open-questions.md`.
 | Only `venue_staff` may approve/reject, and only while the booking is still `pending` (race-proofed against a double decision) | `test_authz_venue_bookings.py::test_venue_staff_cannot_redecide_an_already_decided_booking`, `::test_requesting_coordinator_cannot_decide_their_own_booking`, `test_booking_service.py::test_second_decision_is_refused_once_no_longer_pending` | `app/authz/rules.py::rule_venue_booking_approve`/`rule_venue_booking_reject`, `app/venues/booking_service.py::_decide_booking` |
 | An approved booking should notify the Coordinator (ties to the unbuilt Notification System — print-stub only, no real plumbing exists anywhere in this codebase yet) | not independently tested — see `app/venues/booking_service.py::_notify_booking_decision`'s own docstring | `app/venues/booking_service.py::_notify_booking_decision` |
 | Routes wire the above up with the correct authz per role (POST/GET on the events blueprint, 4 routes on the venues blueprint, static `/bookings` paths before the dynamic `/<venue_id>`) | `test_venue_bookings_routes.py` (all cases) | `app/events/routes.py::create_venue_booking`, `get_venue_bookings_for_event`; `app/venues/routes.py::list_venue_bookings_route`, `get_venue_booking_route`, `approve_venue_booking_route`, `reject_venue_booking_route` |
-| End-to-end against a real database (migration actually applies, buffers/conflict/rejection round-trip for real) | `test_venue_bookings_integration.py` (all cases) | `supabase/migrations/20261004000000_venue_bookings.sql`, `app/venues/booking_service.py` |
+| End-to-end against a real database (migration actually applies, buffers/conflict/rejection round-trip for real) | `test_venue_bookings_integration.py` (all cases) | `supabase/migrations/20261005100000_venue_bookings.sql`, `app/venues/booking_service.py` |
 | Frontend: tab grouping, request-form validation | `frontend/src/lib/venueBookings.test.js` | `frontend/src/lib/venueBookings.js` |
 | Frontend: capacity/layout/accessibility suitability comparison | `frontend/src/lib/venueSuitability.test.js` | `frontend/src/lib/venueSuitability.js` |
 | Frontend: the 3 new routes are correctly role-gated (including static-before-dynamic ordering) | `frontend/src/router/index.test.js` (the 3 new `describe` blocks + the `/venues/bookings` swallow-guard) | `frontend/src/router/index.js`, `frontend/src/lib/roles.js` |
@@ -135,11 +135,76 @@ this project's existing "no component tests, pure logic only" convention
 (see `frontend/src/lib/coordinatorDashboard.test.js` and its sibling
 components, none of which have component tests either).
 
+## Sprint 2 — status transitions (mechanism, IS-36, IS-38, IS-39)
+
+Unit tests: `test_transitions.py` (state machine, no DB) and `test_event_lifecycle.py` (rules + routes, no DB).
+Integration tests: `test_transitions_integration.py` (real Postgres; only what a unit test can't prove).
+
+| Criterion / source | Test | Implementation |
+|---|---|---|
+| Every status change follows a sourced edge; nothing else is legal | `test_transitions.py::test_edge_set_is_exactly_the_sourced_edges`, `::test_every_legal_edge_is_allowed`, `::test_representative_illegal_edges_are_refused` | `app/events/transitions.py::ALLOWED` / `_EDGE_SOURCES` |
+| A status change is atomic: two concurrent changes from the same status, exactly one wins | `test_transitions_integration.py::test_concurrent_transitions_from_same_status_exactly_one_wins`, `::test_many_identical_concurrent_transitions_exactly_one_wins` | `transitions.py::_db_conditional_update` (status in the WHERE clause) |
+| A lost race is reported, never silently absorbed | `test_transitions.py::test_zero_rows_matched_is_a_conflict_not_a_silent_success`, `test_event_lifecycle.py::test_lost_race_between_authz_and_write_is_409` | `transitions.py::TransitionConflictError` (409) |
+| Regression: a transition cannot write back a stale status (the old under_review write's bug) | `test_transitions.py::test_transition_cannot_write_back_a_stale_status`, `::test_conditional_update_filters_on_expected_status`, `test_transitions_integration.py::test_stale_expected_status_is_refused_against_real_postgres` | `transitions.py::transition` / `_db_conditional_update` |
+| Every successful transition leaves one history row with from/to/actor/reason | `test_transitions.py::test_every_legal_edge_is_allowed`, `test_transitions_integration.py::test_history_row_records_from_to_actor_and_reason` | `transitions.py::_db_insert_history` → `event_status_log` |
+| IS-36: "Coordinator can set planning only if current status is approved" | `test_event_lifecycle.py::test_is36_coordinator_can_set_planning_only_if_approved`, `::test_is36_start_planning_refused_unless_approved`, `::test_lifecycle_route_moves_event_and_records_actor[start-planning…]` | `rules.py::rule_event_start_planning`, `routes.py::start_planning`, edge `(approved, planning)` |
+| "Coordinator can set confirmed only from planning" (status only; field-locking NOT built) | `test_event_lifecycle.py::test_step_refused_from_any_other_status[event.confirm…]`, `::test_lifecycle_route_moves_event_and_records_actor[confirm…]` | `rules.py::rule_event_confirm`, `routes.py::confirm_event`, edge `(planning, confirmed)` |
+| IS-38: "Coordinator can set completed only from confirmed" | `test_event_lifecycle.py::test_is38_complete_refused_unless_confirmed`, `::test_lifecycle_route_moves_event_and_records_actor[complete…]` | `rules.py::rule_event_complete`, `routes.py::complete_event`, edge `(confirmed, completed)` |
+| IS-38: "completed events are read-only going forward" | `test_event_lifecycle.py::test_completed_event_refuses_edit_submit_cancel_and_reassign`, `::test_is38_reassign_route_refused_on_completed_event`, `test_transitions.py::test_completed_event_cannot_move_anywhere` | every `rule_event_*` status window excludes `completed`; `rule_event_reassign_coordinator` precondition (added); no edge out of `completed` in `ALLOWED` |
+| IS-39: Coordinator can cancel after approval | `test_event_lifecycle.py::test_is39_coordinator_can_cancel_after_approval`, `::test_is39_cancel_refused_before_approval_or_when_finished` | `rules.py::rule_event_cancel`, edges `(approved|planning|confirmed, cancelled)` |
+| IS-39: cancellation requires a reason | `test_transitions.py::test_cancel_without_a_reason_is_refused`, `test_event_lifecycle.py::test_is39_cancel_without_a_reason_is_400_and_changes_nothing` | `transitions.py::REASON_REQUIRED` / `_clean_reason` |
+| Approved/Rejected story: rejection requires a reason | `test_transitions.py::test_reject_without_a_reason_is_refused` | `transitions.py::REASON_REQUIRED` |
+| IS-39: the reason is stored and the organiser can see it | `test_event_lifecycle.py::test_is39_cancel_stores_reason_and_returns_it`, `::test_is39_organiser_sees_cancellation_reason_in_status_history`, `::test_status_history_hidden_from_unrelated_organiser` | `routes.py::cancel_event`, `routes.py::get_status_history` (gated by `event.view`) |
+| No status write bypasses the guarded path (the four former raw writes: creation, submit, auto-assignment, approve/reject) | `test_event_submit_transitions.py` (6 tests + rule params), `test_coordinator_assignment_status.py` (7), `test_event_decisions.py` (Justin's, retargeted), plus the grep recorded in the PR | `event_service.py::create_event_request` / `create_draft_request` (→ `record_creation`), `::submit_event_request`, `::_decide`; `coordinator_service.py::assign_initial_coordinator` |
+| Regression: auto-assignment no longer writes back a status it read earlier | `test_coordinator_assignment_status.py::test_concurrent_status_change_is_not_reverted`, `::test_claim_never_writes_status` | `coordinator_service.py::assign_initial_coordinator` |
+| "A rejected request can be re-submitted for review after the Organizer makes changes" | `test_event_submit_transitions.py::test_resubmission_keeps_same_coordinator_and_returns_to_review`, `::test_organiser_may_resubmit_a_rejected_request` | `rules.py::rule_event_submit` (draft or rejected), `event_service.py::submit_event_request` (existing-coordinator branch), edge `(rejected, submitted)` |
+| Every lifecycle step, including creation and submission, leaves one audit row | `test_event_submit_transitions.py::test_first_submission_goes_draft_submitted_and_waits_for_the_lead`, `test_transitions.py::test_record_creation_writes_a_null_from_status_row` | `transitions.py::record_creation`, `::transition` |
+| Error messages shown to users contain no raw status values | `test_transitions.py::test_no_transition_error_message_contains_a_raw_status_value` | `transitions.py::label` / `_REASON_MESSAGES` |
+
+Not covered, because the feature doesn't exist: IS-39's "Organizer is
+notified of cancellation and reason" (no notification system); IS-36's
+"status gates venue/equipment search" (no venue-request-for-event route, no
+equipment); the Confirmed Status story's field-locking. All are tracked in
+`docs/open-questions.md`.
+
+## Week 7 change #5 — Event Coordinator Lead
+
+Unit tests: `test_coordinator_lead.py` (rules, routes, the Lead's list), `test_coordinator_assignment.py` (Lead-chosen assignment), `frontend/src/lib/leadDashboard.test.js` (dashboard grouping).
+
+| Criterion (Week 7 Customer Changes, #5) | Test | Implementation |
+|---|---|---|
+| "Newly submitted event requests should no longer be assigned directly to an Event Coordinator" — they enter an unassigned queue | `test_event_submission.py::test_submit_from_one_session_submits_every_draft_session`, `::test_create_event_request_inserts_and_submits_every_session`, `test_event_submit_transitions.py::test_first_submission_goes_draft_submitted_and_waits_for_the_lead` | `event_service.py::_submit_sessions` (no assignment call); queue = `submitted` with no coordinator |
+| "...that can be viewed by the Event Coordinator Lead" / "view all coordinator assignments and active events" | `test_coordinator_lead.py::test_lead_can_view_every_submitted_event_whoever_it_is_assigned_to`, `::test_lead_list_is_every_non_draft_event_plus_their_own_drafts`, `::test_lead_cannot_see_someone_elses_draft` | `rules.py::rule_event_view` / `rule_event_list` (`_is_lead_over`), `event_service.py::list_event_requests`, `LeadDashboard.vue` |
+| "The Lead can ... assign a suitable Event Coordinator" | `test_coordinator_lead.py::test_lead_may_assign_a_request_in_the_unassigned_queue`, `::test_assign_route_assigns_the_leads_choice`, `::test_nobody_but_the_lead_may_assign`, `test_coordinator_assignment.py::test_lead_chosen_coordinator_gets_every_session_attributed_to_the_lead`, `::test_lead_chosen_coordinator_busy_on_any_session_is_refused` | `rules.py::rule_event_assign_coordinator`, `routes.py::assign_coordinator_route`, `coordinator_service.py::assign_initial_coordinator(coordinator_id=...)` |
+| "...and reassign events where necessary" | `test_coordinator_lead.py::test_lead_may_reassign_any_assigned_event_but_not_once_completed`, `::test_reassign_route_lets_the_lead_override_the_current_coordinator_check` | `rules.py::rule_event_reassign_coordinator`, `routes.py::reassign_coordinator_route` |
+| "Event Coordinators should only be able to manage events assigned to them" | `test_coordinator_lead.py::test_coordinator_still_only_sees_their_own_events` | unchanged coordinator rules |
+
+Not covered, because not built: "Relevant users should be notified when
+assignments or reassignments occur" (no notification system — see
+`docs/open-questions.md`).
+
+## Attendee Registration (Justin)
+
+Unit tests: `test_registrations.py` (rules, validation, service, routes), `frontend/src/lib/registrations.test.js`. Integration: `test_registrations_integration.py` (local stack). The database function was also exercised directly against Postgres 16, including 20 concurrent registrations.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Register only for an event that is confirmed and enabled for registration | `test_registrations.py::test_attendee_cannot_register_unless_confirmed_and_enabled`, `::test_register_route_hides_an_unconfirmed_session_from_attendees`, `test_registrations_integration.py::test_the_database_refuses_a_session_that_is_not_confirmed` | `rules.py::rule_event_register`; `register_attendee` (`not_open`) |
+| Register only during the permitted registration period | `test_registrations.py::test_register_explains_each_refusal`, `test_registrations_integration.py::test_registration_only_during_the_window` | `register_attendee` (`not_started` / `closed`, database clock) |
+| The Attendee can provide the required registration information | `test_registrations.py::test_email_is_required_valid_and_normalised`, `::test_phone_is_required`, `::test_phone_must_look_like_a_phone_number`, `::test_at_least_one_notification_channel_is_required`, `::test_name_and_organisation_cannot_be_submitted`, `::test_included_organisation_is_the_profiles`, `::test_notes_are_optional_trimmed_and_capped`, `registrations.test.js` (prefill) | `registration_service.validate_registration_details`; `RegistrationForm.vue` |
+| Capacity available → registration recorded as confirmed | `test_registrations.py::test_register_returns_the_recorded_registration[confirmed]`, `test_registrations_integration.py::test_capacity_fills_then_waitlists_first_come_first_served` | `register_attendee` (capacity = `expected_attendance`) |
+| Capacity reached and waiting list available → recorded as waitlisted | `test_registrations.py::test_register_returns_the_recorded_registration[waitlisted]`, `::test_my_registrations_show_waiting_list_position_first_come_first_served`, `test_registrations_integration.py::test_capacity_fills_then_waitlists_first_come_first_served` | `register_attendee`; `registration_service.list_my_registrations` (position) |
+| Only attendees register and see registrations | `test_registrations.py::test_only_attendees_register`, `::test_only_attendees_browse_and_list_their_registrations`, `::test_list_routes_are_attendee_only` | `rules.py::rule_event_register` / `rule_registration_list` |
+
+| Withdraw / leave the waiting list (attendee wireframe; Week 4 "register, view status, withdraw") | `test_registrations.py::test_withdraw_reports_whether_the_next_person_moved_up`, `::test_withdraw_without_a_registration_is_404`, `::test_withdraw_after_the_session_started_is_refused`, `::test_only_attendees_withdraw`, `test_registrations_integration.py::test_withdrawing_a_confirmed_place_moves_the_first_waitlisted_attendee_up` | `withdraw_registration` (promotes the first waitlisted); `AttendeeEventView.vue` |
+
+Not covered, because not built: notifications (see `docs/open-questions.md`).
+
 ## Explicitly deferred (not tested because not built)
 
-- Registration-related criteria ("an attendee cannot view another attendee's
-  registration") — no `registrations` table or attendee-event linkage
-  exists in the schema yet. No action, no rule, no test.
+- "An attendee cannot view another attendee's registration" — there is no
+  route that returns anyone else's registration (`/registrations/mine` is
+  scoped to the caller), so there is nothing to deny yet.
 - Field-level visibility ("an attendee sees no internal planning
   information") — a serialisation concern, not a `can()` decision; deferred
   to whoever builds the event routes/serialisers. See

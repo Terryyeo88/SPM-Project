@@ -34,6 +34,18 @@ EVENT_REJECT = "event.reject"
 EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
+# Week 7 change #5 (Event Coordinator Lead): "Newly submitted event
+# requests ... first enter an unassigned queue ... The Lead can review
+# basic event information, assign a suitable Event Coordinator".
+EVENT_ASSIGN_COORDINATOR = "event.assign_coordinator"
+
+# Lifecycle after approval (IS-36 / IS-38, plus confirm for end-to-end
+# testability -- see rules.py). Each is one edge in
+# app.events.transitions.ALLOWED; the rule checks who may take it, the
+# transition checks that it is legal.
+EVENT_START_PLANNING = "event.start_planning"
+EVENT_CONFIRM = "event.confirm"
+EVENT_COMPLETE = "event.complete"
 
 # -- coordinators --------------------------------------------------------
 # Source: "Coordinator needs reassignment" -- the current coordinator
@@ -43,6 +55,18 @@ EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
 # anything tied to a particular event.
 
 COORDINATOR_LIST = "coordinator.list"
+
+# -- registrations (Justin: Attendee Registration) ----------------------
+# Source: "As an Attendee, I want to register for an event, so that I can
+# secure a place to attend the event." EVENT_REGISTER is per session (the
+# session must be confirmed and enabled for registration);
+# REGISTRATION_LIST is role-only -- browsing the sessions open to
+# attendees and seeing your own registrations.
+
+EVENT_REGISTER = "event.register"
+EVENT_VIEW_PUBLIC = "event.view_public"  # the attendee's event page: public fields only
+REGISTRATION_WITHDRAW = "registration.withdraw"
+REGISTRATION_LIST = "registration.list"
 
 # -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
 # Source: "As an Event Coordinator, I want to see venue details so that

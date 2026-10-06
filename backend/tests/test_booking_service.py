@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.events.transitions as transitions_module
 import app.venues.booking_service as service_module
 from app.shared.errors import NotFoundError, ValidationError
 from tests.factories import make_user
@@ -111,6 +112,12 @@ class _FakeSupabase:
 def fake_db(monkeypatch):
     db = _FakeSupabase()
     monkeypatch.setattr(service_module, "supabase", db)
+    # create_booking_request's approved->planning side effect goes
+    # through app.events.transitions.transition(), which holds its own
+    # module-level `supabase` reference (not service_module's) -- same
+    # fake, so the planning write and its event_status_log audit row
+    # land in the same in-memory tables these tests assert against.
+    monkeypatch.setattr(transitions_module, "supabase", db)
     return db
 
 

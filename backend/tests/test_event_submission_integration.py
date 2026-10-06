@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.events.coordinator_service import NoCoordinatorAvailableError, assign_initial_coordinator
 from app.events.event_service import (
     create_draft_request,
     create_event_request,
@@ -135,15 +136,11 @@ def test_submit_without_draft_creates_linked_sessions_against_supabase(organizer
     assert second["registration_start_datetime"] is None
     assert second["registration_end_datetime"] is None
 
-    # Submitted (or under review, if a coordinator was free) -- see the note
-    # in test_create_and_submit_event_request_against_supabase on why the
-    # exact branch can't be assumed against a shared coordinator pool.
+    # Week 7 change #5: submitted and unassigned -- waiting in the Event
+    # Coordinator Lead's queue, not auto-assigned.
     for row in (first, second):
-        assert row["status"] in ("submitted", "under_review")
-        assert (row["coordinator_id"] is not None) == (row["status"] == "under_review")
-    # One coordinator per request: both sessions got the same one (or,
-    # if nobody was free for both, neither got one).
-    assert first["coordinator_id"] == second["coordinator_id"]
+        assert row["status"] == "submitted"
+        assert row["coordinator_id"] is None
 
 
 def test_save_draft_adds_updates_and_removes_sessions_against_supabase(organizer):
@@ -189,10 +186,11 @@ def test_save_draft_adds_updates_and_removes_sessions_against_supabase(organizer
 
 def test_submitted_request_appears_in_assigned_coordinators_queue_against_supabase(organizer):
     """IS-31 AC: "Submitted requests become visible in the assigned
-    Coordinator's queue". End to end against a real database: after the
-    organiser submits, the coordinator the system assigned finds the
-    request in their own event list (the queue their dashboard is built
-    from), as under_review."""
+    Coordinator's queue", with the Week 7 change #5 flow. End to end
+    against a real database: after the organiser submits, the request is
+    in the Event Coordinator Lead's unassigned queue; once the Lead assigns
+    a coordinator, that coordinator finds it in their own event list (the
+    queue their dashboard is built from), as under_review."""
     group = create_event_request(
         organizer,
         {
@@ -203,11 +201,23 @@ def test_submitted_request_appears_in_assigned_coordinators_queue_against_supaba
         },
     )
     (row,) = _rows_for(group["shared_event_id"])
-    if row["coordinator_id"] is None:
+    assert row["status"] == "submitted" and row["coordinator_id"] is None
+    lead = make_user(["event_coordinator_lead"], user_id=str(uuid.uuid4()))
+    unassigned_queue = list_event_requests(lead, "submitted")
+    assert row["id"] in {event["id"] for event in unassigned_queue}
+
+    # The Lead assigns. Picking automatically here (no coordinator_id) is
+    # the same code path with a choice made for them; actor None because
+    # this throwaway Lead has no profile row for changed_by to reference.
+    try:
+        chosen = assign_initial_coordinator(row["id"], actor=None)
+    except NoCoordinatorAvailableError:
         pytest.skip(
-            "No coordinator was free to auto-assign in this database, so there is no "
-            "assigned coordinator's queue to check (seed coordinators with `supabase db reset`)."
+            "No coordinator was free in this database, so there is no assigned "
+            "coordinator's queue to check (seed coordinators with `supabase db reset`)."
         )
+    (row,) = _rows_for(group["shared_event_id"])
+    assert row["coordinator_id"] == chosen["id"]
 
     coordinator = make_user(["event_coordinator"], user_id=row["coordinator_id"])
     queue = {event["id"]: event for event in list_event_requests(coordinator)}
@@ -310,7 +320,7 @@ def test_create_and_submit_event_request_against_supabase():
             .data
         )
         assert len(sibling_statuses) == 2
-        assert all(row["status"] in ("submitted", "under_review") for row in sibling_statuses)
+        assert all(row["status"] == "submitted" for row in sibling_statuses)
 
         # The organiser still sees every session of their own request.
         group = list_event_sessions(
@@ -318,20 +328,10 @@ def test_create_and_submit_event_request_against_supabase():
         )
         assert sorted(s["id"] for s in group["sessions"]) == sorted(s["id"] for s in created["sessions"])
 
-        # Per submit_event_request's own docstring, submission lands on
-        # "under_review" if a coordinator could be auto-assigned, or stays
-        # "submitted" if none was available. Which branch fires here depends
-        # on this shared project's live coordinator pool -- see
-        # test_coordinator_assignment_integration.py's own note on why tests
-        # here can't assume a specific coordinator state (seeded coordinators
-        # like Alice/Brandon/Chloe are real candidates this test doesn't
-        # control). So this asserts the real invariant (status and
-        # coordinator_id must agree) instead of guessing which branch wins.
-        assert submitted_event["status"] in ("submitted", "under_review")
-        if submitted_event["status"] == "under_review":
-            assert submitted_event["coordinator_id"] is not None
-        else:
-            assert submitted_event["coordinator_id"] is None
+        # Week 7 change #5: submission stops at "submitted", unassigned, in
+        # the Event Coordinator Lead's queue -- no auto-assignment.
+        assert submitted_event["status"] == "submitted"
+        assert submitted_event["coordinator_id"] is None
 
         stored_submitted = (
             supabase.table("events")

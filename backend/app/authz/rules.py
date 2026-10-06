@@ -108,6 +108,20 @@ def _event_status_in(event: Any, *statuses: str) -> bool:
     return event.status in statuses
 
 
+# Week 7 change #5: the Event Coordinator Lead "oversees incoming event
+# requests" and "should be able to view all coordinator assignments and
+# active events under their supervision". Read as: every event that has
+# been SUBMITTED (any status but draft). A draft hasn't been sent to
+# anyone yet, so it stays private to its organiser. Every coordinator
+# reports to the one Lead (no teams in the brief), so "under their
+# supervision" is all of them -- see docs/open-questions.md.
+LEAD_ROLE = "event_coordinator_lead"
+
+
+def _is_lead_over(user: Any, event: Any) -> bool:
+    return _has_role(user, LEAD_ROLE) and not _event_status_in(event, "draft")
+
+
 # -- event.view --------------------------------------------------------------
 # Source: "an organiser sees full details of their own events; other
 # organisers' events are hidden" (ruled: hidden, not restricted -- a 404,
@@ -119,6 +133,8 @@ def rule_event_view(user: Any, event: Any) -> Decision:
     if _has_role(user, "event_organizer") and _owns_event(user, event):
         return Decision.ALLOW
     if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
+        return Decision.ALLOW
+    if _is_lead_over(user, event):
         return Decision.ALLOW
     return Decision.DENY_NOT_FOUND
 
@@ -136,7 +152,9 @@ def rule_event_view(user: Any, event: Any) -> Decision:
 
 
 def rule_event_list(user: Any, event: Any = None) -> Decision:
-    if _has_role(user, "event_organizer") or _has_role(user, "event_coordinator"):
+    # The Lead's per-row scope (every non-draft event) is applied by
+    # event_service.list_event_requests, same as the other two roles.
+    if _has_role(user, "event_organizer") or _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
 
@@ -157,9 +175,12 @@ def rule_event_create(user: Any, event: Any = None) -> Decision:
 # Source: Event Status Management story -- "submitting a completed
 # request changes status to Submitted", organiser-only. Allowed from
 # draft (first submission) and from rejected (resubmission after the
-# organiser fixes what the coordinator rejected -- "rejected requests
-# return to the organizer for corrections" only makes sense if the
-# corrected request can go back for review).
+# organiser fixes what the coordinator rejected -- "a rejected request
+# can be re-submitted for review after the Organizer makes changes";
+# ruling: rejected -> submitted, via the same /submit). This closes the
+# dead end where rule_event_edit let an organiser edit a rejected request
+# that nothing then let them submit. "After changes" is NOT verified
+# (see docs/open-questions.md).
 
 
 def rule_event_submit(user: Any, event: Any) -> Decision:
@@ -308,16 +329,96 @@ def rule_event_cancel(user: Any, event: Any) -> Decision:
 # Source: explicit instruction to ready this for coordinator_service.py's
 # reassign_coordinator(requested_by=...) escape hatch. Mirrors that
 # function's own existing check exactly: only the CURRENT coordinator of
-# record may request a reassignment. No status precondition --
-# coordinator_service.py's own docstring says reassignment "doesn't
-# change where the event is in its lifecycle", so none is encoded here
-# either.
+# record may request a reassignment.
+#
+# Status precondition (IS-38, added Sprint 2): not once `completed`.
+# Source: "completed events are read-only going forward". Reassigning
+# the coordinator of record is a write to a completed event, so it is
+# refused like edit/submit/cancel are. Reassignment itself still doesn't
+# change the lifecycle status (coordinator_service.py's docstring). ONLY
+# `completed` is excluded, because that's the only status a story makes
+# read-only. `cancelled` and `rejected` are NOT excluded -- no story
+# says so, and that's flagged in docs/open-questions.md rather than
+# guessed.
+
+
+#
+# Week 7 change #5: the Event Coordinator Lead may also reassign ("assign
+# a suitable Event Coordinator, and reassign events where necessary"),
+# any event that already HAS a coordinator -- an unassigned one goes
+# through event.assign_coordinator instead. Same `completed` exclusion.
 
 
 def rule_event_reassign_coordinator(user: Any, event: Any) -> Decision:
+    is_current = _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)
+    if not (is_current or _is_lead_over(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if _event_status_in(event, "completed") or not event.coordinator_id:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- event.assign_coordinator ---------------------------------------------
+# Source: Week 7 change #5 -- "Newly submitted event requests should no
+# longer be assigned directly to an Event Coordinator. Instead, they first
+# enter an unassigned queue that can be viewed by the Event Coordinator
+# Lead. The Lead can ... assign a suitable Event Coordinator". Lead only,
+# and only for a request still in that queue: submitted, nobody assigned.
+# Anyone else who can see the event (its organiser, its coordinator) gets
+# a 403, not a 404 -- they already know it exists.
+
+
+def rule_event_assign_coordinator(user: Any, event: Any) -> Decision:
+    if not _is_lead_over(user, event):
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "submitted") or event.coordinator_id:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- event.start_planning / event.confirm / event.complete --------------
+# Assigned coordinator only, each from exactly one status -- the same
+# relationship-first shape as approve/reject. The status here is the
+# authz precondition (which decides the 403). The same pair is ALSO an
+# entry in app.events.transitions.ALLOWED, which decides whether the
+# write is legal and makes it conditional. The duplication is
+# deliberate: see docs/design-decisions.md on why authz and the state
+# machine are separate.
+#
+#   start_planning  approved  -> planning   IS-36. Source: "Coordinator can
+#                                           set planning only if current
+#                                           status is approved".
+#   confirm         planning  -> confirmed  Source: "Coordinator can set
+#                                           confirmed only from planning".
+#                                           Built for end-to-end testability
+#                                           of IS-38 only -- the Confirmed
+#                                           Status story's field-locking
+#                                           half is NOT implemented.
+#   complete        confirmed -> completed  IS-38. Source: "Coordinator can
+#                                           set completed only from
+#                                           confirmed".
+
+
+def _assigned_coordinator_from(user: Any, event: Any, status: str) -> Decision:
     if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
         return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, status):
+        return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
+
+
+def rule_event_start_planning(user: Any, event: Any) -> Decision:
+    return _assigned_coordinator_from(user, event, "approved")
+
+
+def rule_event_confirm(user: Any, event: Any) -> Decision:
+    return _assigned_coordinator_from(user, event, "planning")
+
+
+def rule_event_complete(user: Any, event: Any) -> Decision:
+    return _assigned_coordinator_from(user, event, "confirmed")
 
 
 # -- venue.view / venue.list (role-only -- see actions.py's venues section) -
@@ -442,11 +543,63 @@ def rule_venue_booking_reject(user: Any, booking: Any) -> Decision:
 
 
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
-# Only an Event Coordinator can reassign (rule_event_reassign_coordinator),
-# so only they need to see who they could reassign to.
+# Only an Event Coordinator or the Event Coordinator Lead can (re)assign
+# (rule_event_reassign_coordinator / rule_event_assign_coordinator), so
+# only they need to see who they could pick.
 
 
 def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
-    if _has_role(user, "event_coordinator"):
+    if _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+# -- event.register / registration.list (Attendee Registration, Justin) ---
+# Source: "The Attendee can register only for an event that is confirmed
+# and enabled for registration." An attendee has no relationship to any
+# event until they register, so the only sessions that exist as far as
+# they're concerned are the public ones: confirmed with registration
+# enabled. Anything else is a 404 for them, the same as an outsider gets.
+# Someone without the attendee role who can already see the event (its
+# organiser, coordinator, the Lead) gets a 403 instead.
+#
+# The registration PERIOD is not checked here: it's time-based, not a
+# property of (user, event), so the database function that records the
+# registration checks it (supabase/migrations/20261005000000_registrations.sql).
+
+
+def _is_public_for_registration(event: Any) -> bool:
+    return _event_status_in(event, "confirmed") and getattr(event, "registration_needs", None) is True
+
+
+def rule_event_register(user: Any, event: Any) -> Decision:
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW if _is_public_for_registration(event) else Decision.DENY_NOT_FOUND
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_event_view_public(user: Any, event: Any) -> Decision:
+    """The attendee's event page shows only public fields, so it has exactly
+    the same audience as registering: attendees, for public sessions."""
+    return rule_event_register(user, event)
+
+
+def rule_registration_withdraw(user: Any, event: Any) -> Decision:
+    """Any attendee may ask to withdraw from a session; whether they hold a
+    registration there is checked by the database function (no
+    registration -> 404), so this reveals nothing about non-public
+    sessions. Withdrawing stays possible after a session stops being
+    public (e.g. cancelled) -- the attendee already knew about it."""
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_registration_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "attendee"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN

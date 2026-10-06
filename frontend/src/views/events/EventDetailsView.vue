@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiDelete, apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
+import { groupRequests, leadTabForRequest } from '../../lib/leadDashboard'
+import { ROLES, hasAnyRole } from '../../lib/roles'
 import {
   DRAFT_NAME,
   emptySession,
@@ -58,6 +60,14 @@ const backLink = computed(() => {
   const tab = tabForStatus(event.value?.status)
   if (tab && event.value.coordinator_id === auth.profile?.id) {
     return { to: { name: 'dashboard', query: { tab } }, label: 'Back to My Assigned Events' }
+  }
+  // The Event Coordinator Lead (Week 7 change #5) came from their own
+  // dashboard -- back to the tab this request sits in there.
+  if (event.value && event.value.organizer_id !== auth.profile?.id
+    && hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR_LEAD])) {
+    const [request] = groupRequests(visibleSessions.value)
+    const leadTab = request ? leadTabForRequest(request) : 'unassigned'
+    return { to: { name: 'dashboard', query: { tab: leadTab } }, label: 'Back to Coordinator Assignments' }
   }
   return { to: '/events', label: 'Back to My Event Requests' }
 })
@@ -125,6 +135,17 @@ function editableSessions() {
   if (!isDraft.value) return [event.value]
   const drafts = (group.value?.sessions || []).filter((session) => session.status === 'draft')
   return drafts.length ? drafts : [event.value]
+}
+
+// A reject moves every under-review session of the request, so refresh the
+// sessions list too, not just this session's row.
+async function onCoordinatorDecision(updated) {
+  event.value = updated
+  try {
+    group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
+  } catch {
+    // The decision itself succeeded; a stale list just corrects on reload.
+  }
 }
 
 async function loadEvent() {
@@ -324,7 +345,7 @@ watch(() => route.params.eventId, (eventId) => {
           <CoordinatorEventReview
             :event="event"
             :sessions="visibleSessions"
-            @updated="event = $event"
+            @updated="onCoordinatorDecision"
           />
           <VenueBookingStatus :event="event" />
         </template>

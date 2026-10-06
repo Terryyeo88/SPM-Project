@@ -15,6 +15,9 @@ loads. These are throwaway local-dev accounts with a shared dummy
 password; never reuse this pattern for real user signups.
 """
 
+import uuid
+from datetime import UTC, date, datetime, timedelta, timezone
+
 from app.extensions import supabase
 
 SEED_PASSWORD = "Password123!"
@@ -28,6 +31,23 @@ COORDINATORS = [
 ORGANIZERS = [
     {"email": "organizer1@example.com", "name": "Derek Ong"},
 ]
+
+# Event Coordinator Lead (Week 7 change #5): assigns submitted requests
+# from the unassigned queue to coordinators.
+LEADS = [
+    {"email": "lead1@example.com", "name": "Grace Lim"},
+]
+
+# Attendees (Attendee Registration, Justin): register for the demo
+# sessions below. Three, so with a capacity of 2 the third is waitlisted.
+ATTENDEES = [
+    {"email": "attendee1@example.com", "name": "Ethan Koh"},
+    {"email": "attendee2@example.com", "name": "Fiona Ng"},
+    {"email": "attendee3@example.com", "name": "Gavin Tan"},
+]
+
+REGISTRATION_DEMO_NAME = "Registration Demo: Community Workshop"
+OLD_REGISTRATION_DEMO_NAME = "Registration Demo: Tech Talk Series"
 
 # Venues (View Venue Catalogue, Nawaz, Sprint 1) -- no auth.users involved,
 # a venue isn't owned by anyone, so these are plain rows.
@@ -128,6 +148,62 @@ def get_or_create_venue(venue: dict) -> dict:
     return result.data[0]
 
 
+def seed_registration_demo(organizer_id: str, coordinator_id: str) -> None:
+    """A CONFIRMED request with two sessions, so registration can be tested
+    before venue/equipment work exists to confirm an event the normal way.
+    Same data as the matching block in supabase/seed.sql. Both sessions hold
+    2 people (expected_attendance), so the third attendee is waitlisted:
+
+      14:00 session -- registration already open
+      10:00 session -- registration opens 2 hours after this runs
+
+    FRESH EVERY RUN: the demo request (and its registrations, by cascade) is
+    deleted and recreated, dates relative to now. Also removes the older
+    "Registration Demo: Tech Talk Series". Inserted directly as confirmed --
+    a seed shortcut, no status history.
+    """
+    sgt = timezone(timedelta(hours=8))
+    now = datetime.now(UTC)
+    today = date.today()
+
+    def end_of(day: date) -> str:
+        return datetime(day.year, day.month, day.day, 23, 59, tzinfo=sgt).isoformat()
+
+    for old_name in (OLD_REGISTRATION_DEMO_NAME, REGISTRATION_DEMO_NAME):
+        supabase.table("events").delete().eq("name", old_name).execute()
+
+    shared_event_id = str(uuid.uuid4())
+    sessions = [
+        {"start_in": 30, "start": "14:00", "end": "16:00", "opens": now - timedelta(days=1)},
+        {"start_in": 37, "start": "10:00", "end": "12:00", "opens": now + timedelta(hours=2)},
+    ]
+    supabase.table("events").insert([
+        {
+            "organizer_id": organizer_id,
+            "coordinator_id": coordinator_id,
+            "shared_event_id": shared_event_id,
+            "name": REGISTRATION_DEMO_NAME,
+            "description": "A hands-on community workshop in two sessions. Open to the public.",
+            "purpose": "Community outreach",
+            "status": "confirmed",
+            "preferred_start_date": (today + timedelta(days=s["start_in"])).isoformat(),
+            "preferred_end_date": (today + timedelta(days=s["start_in"])).isoformat(),
+            "preferred_start_time": s["start"],
+            "preferred_end_time": s["end"],
+            "expected_attendance": 2,
+            "room_layout": "classroom",
+            "accessibility_needs": [],
+            "equipment_needed": {"equipment": []},
+            "registration_needs": True,
+            "registration_start_datetime": s["opens"].isoformat(),
+            "registration_end_datetime": end_of(today + timedelta(days=s["start_in"] - 1)),
+            "special_requests": "",
+        }
+        for s in sessions
+    ]).execute()
+    print(f"Event ready: {REGISTRATION_DEMO_NAME} (confirmed, 2 fresh sessions for registration testing)")
+
+
 def main():
     coordinator_ids = []
     for c in COORDINATORS:
@@ -142,6 +218,16 @@ def main():
         add_role(uid, "event_organizer")
         organizer_ids.append(uid)
         print(f"Organizer ready:   {o['name']} <{o['email']}> -> {uid}")
+
+    for lead in LEADS:
+        uid = get_or_create_user(lead["email"], lead["name"])
+        add_role(uid, "event_coordinator_lead")
+        print(f"Lead ready:        {lead['name']} <{lead['email']}> -> {uid}")
+
+    for attendee in ATTENDEES:
+        uid = get_or_create_user(attendee["email"], attendee["name"])
+        add_role(uid, "attendee")
+        print(f"Attendee ready:    {attendee['name']} <{attendee['email']}> -> {uid}")
 
     organizer_id = organizer_ids[0]
 
@@ -196,11 +282,13 @@ def main():
     )
     print(f"Event ready: {event_c['name']} (needs assignment, open date)")
 
+    seed_registration_demo(organizer_id, coordinator_ids[1])
+
     for venue in VENUES:
         v = get_or_create_venue(venue)
         print(f"Venue ready: {v['name']} ({v['status']})")
 
-    print("\nDone. 3 coordinators, 1 organizer, 3 events, 4 venues seeded.")
+    print("\nDone. 3 coordinators, 1 lead, 1 organizer, 3 attendees, 4 events, 4 venues seeded.")
 
 
 if __name__ == "__main__":

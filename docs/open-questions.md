@@ -107,6 +107,33 @@ decisions worth double-checking.
   event to planning) rather than expecting a separate, explicit
   "Start Planning" action.
 
+- **A cancelled event's CONFIRMED venue booking is never released.**
+  `venue_booking_status` has three values — `pending`, `confirmed`,
+  `rejected` — no `cancelled`. The Cancelled Status story (now built on
+  `main`) lets a coordinator cancel an event from `approved`, `planning`
+  OR `confirmed`, which means an event with an already-`confirmed` venue
+  booking can be cancelled while that booking still holds the venue.
+  Nothing today moves the booking off `confirmed` when that happens, so
+  the venue stays blocked for a period nobody is using it for any more.
+  Raised in code review (2026-10-05) and logged here rather than decided
+  unilaterally, since the right fix affects other work reading booking
+  status. Options on the table for Thursday, not yet chosen between:
+    1. Add `cancelled` to `venue_booking_status` and release the booking
+       as a side effect of the event's `* → cancelled` transition — same
+       pattern as `create_booking_request`'s own `approved → planning`
+       side effect above.
+    2. Reuse `rejected` with a system-generated reason — no schema
+       change, but `rejected` then means two different things (Venue
+       Staff declined it / the event it belonged to was cancelled),
+       which muddies `get_booking`'s `rejection` field for anyone
+       reading it later.
+    3. Leave the booking row `confirmed` and treat the event's own
+       `cancelled` status as the authoritative signal instead — cheapest,
+       but `confirmed` then stops reliably meaning "this venue is held"
+       without also checking the event it belongs to.
+  No option is implemented yet — this is a modelling decision to make,
+  not a bug to silently work around.
+
 - **Test-suite network gap: JWKS is still fetched over the wire.** The
   unit-test guard (`tests/conftest.py`) blocks the *database* but not the
   *network*. A unit test that sends a real bearer token without the
@@ -118,6 +145,150 @@ decisions worth double-checking.
   fix would be the same shape as the database guard: an autouse fixture
   that makes `app.auth.jwt._http_get_json` raise a named error unless a
   test installs a key. Not done yet.
+
+- **IS-39: "Organizer is notified of cancellation and reason" — blocked on
+  notifications.** The cancel route stores the reason and returns it, and
+  the organiser can read it via `GET /events/<id>/status-history`, but
+  nothing *notifies* them. No notification system exists (the only hook is
+  `coordinator_service._notify_coordinator_assigned`, a `print()`
+  placeholder). This half of IS-39 depends on the Notification System
+  story. It was deliberately not built here.
+
+- **Confirmed Status story: field-locking is NOT built.** `POST
+  /events/<id>/confirm` exists only so IS-38 (confirmed → completed) is
+  reachable end to end. The story also says "once confirmed, information
+  fields should not be changed unless there is a change that was
+  permitted". That is not implemented, and "a change that was permitted" is
+  undefined. It needs its own ticket and a definition of which changes are
+  permitted.
+
+- **IS-36: "status gates venue/equipment search" could not be gated.** No
+  route requests a venue *for an event*. The venue catalogue is read-only
+  and per-venue, so there's nothing event-scoped to put a status check on,
+  and equipment doesn't exist at all. Once the Venue Booking Request story
+  adds a request-a-venue-for-this-event route, its rule should require
+  status `planning`.
+
+- **Should reassignment also be refused for `cancelled` / `rejected`
+  events?** IS-38 made reassignment refuse `completed` events ("completed
+  events are read-only going forward"). No story says the same for
+  `cancelled` or `rejected`, so those still allow reassignment. Reassigning
+  the coordinator of a cancelled event seems pointless. For a rejected
+  event it may be legitimate before resubmission. Please confirm.
+
+- **Resubmission doesn't check that the organiser changed anything.** The
+  story says a rejected request "can be re-submitted for review *after the
+  Organizer makes changes*". We don't enforce the "after changes" part.
+  Doing so would mean diffing against the last submitted version, which no
+  acceptance criterion asks for. An organiser can resubmit a rejected
+  request unchanged.
+
+- **`event_status_log` RLS (for the RLS-tightening work, not IS-36/38/39).**
+  Its policy `"authenticated write status log"` lets *any* authenticated
+  user insert audit rows directly through PostgREST with the anon key,
+  bypassing Flask. That means anyone can forge history. Its two `create
+  policy` statements also have no `drop policy if exists` guard, so
+  `20260929000000_event_status_log.sql` fails if re-run, unlike the other
+  migrations. Both belong to the RLS pass.
+
+## Week 7 change #5 — Event Coordinator Lead
+
+- **Notifications are not built.** The change asks that "relevant users
+  should be notified when assignments or reassignments occur". There is
+  still no notification system. Assignment and reassignment both call
+  `coordinator_service._notify_coordinator_assigned`, which only logs a
+  line, so plugging the real notification in there covers the Lead's
+  assign and reassign too. Until then, don't count change #5 as complete.
+
+- **"Active events under their supervision" read as every event.** The
+  brief has no coordinator teams, so we read it as: the Lead sees every
+  submitted event (any status except `draft`). Drafts stay private to
+  their organiser because they haven't been submitted to anyone. If Leads
+  are meant to supervise only some coordinators, a coordinator-to-Lead
+  link is needed.
+
+- **A resubmitted request keeps its coordinator.** Change #5 is about
+  *newly* submitted requests. A rejected request that the organiser
+  resubmits still goes straight back to the coordinator who rejected it
+  (`under_review`), not into the Lead's queue. The Lead can reassign it if
+  needed.
+
+- **The Lead can't approve, reject or edit.** Nothing in change #5 gives
+  the Lead the coordinator's review actions, so their event pages are
+  read-only apart from assign and reassign.
+
+- **Automatic assignment code is kept but no longer used on submit.**
+  `assign_initial_coordinator` still picks a coordinator by workload when
+  called without `coordinator_id`. Nothing in the app does that now. It
+  could become a "suggest a coordinator" option for the Lead, or be
+  removed.
+
+## Attendee Registration
+
+- **"Required registration information" read as a fixed set.** No source
+  says what it is, or that organisers design their own forms. We ask for
+  email, phone and preferred contact method (email or phone), all required,
+  plus optional notes. Email prefills from the profile. Profiles don't have
+  phone or a contact preference yet (the briefing's "User Profile
+  Management" mentions both, but no story covers it); if one is added, the
+  form prefills them too. Confirm whether organisers need custom questions.
+
+- **Capacity is `expected_attendance`.** It is the organiser's planning
+  estimate. If it is lowered after people register, existing confirmed
+  registrations stay confirmed; only new registrations are affected.
+
+- **A freed place goes straight to the next person on the waiting list.**
+  Week 2 says "eligible attendees are notified when a slot opens up to
+  apply", which could mean they're offered the place rather than given it.
+  With no notifications yet, we move them up automatically. Confirm.
+
+- **Not built yet:** notifications (Notification story), editing a
+  registration after submitting it, and organiser/coordinator views of who
+  registered.
+
+- **Organiser "discretion" and manual closing.** Week 4 says organisers have
+  discretion over registration and close it manually. Here the window the
+  organiser sets per session is what opens and closes registration; closing
+  early would be moving the close time. Organisers can't yet edit a
+  confirmed event (field-locking for confirmed events isn't built either).
+
+- **No confirmed events exist the normal way yet.** Confirming needs venue
+  and equipment work that isn't built, so the seed creates a confirmed
+  "Registration Demo" request directly, without status history.
+
+
+## Venue booking conflicts (IS-16) and equipment calendar (IS-47) — still blocked (5 Oct)
+
+- **IS-16 waits on PR #18 (IS-14, Josiah).** `venue_bookings` is not on
+  main and not on the live database. It exists only in PR #18, which is
+  open and has merge conflicts. IS-16 is not built until #18 merges, so we
+  don't write a second version of Josiah's table.
+
+- **PR #18's migration timestamp is already used on main.** PR #18 adds
+  `20261004000000_venue_bookings.sql`. Main already has
+  `20261004000000_coordinator_lead_role.sql`. Supabase identifies migrations
+  by that number, so two files sharing it will clash on `db reset`. Git
+  won't flag this because the file names differ. The PR's file needs a new,
+  later timestamp before it merges.
+
+- **What IS-16 will build on once #18 merges.** PR #18 already stores the
+  occupied period (`booking_start`/`booking_end`, including setup and
+  turnaround). It also checks in the app for an overlapping confirmed
+  booking before it confirms one. IS-16 adds a btree_gist exclusion
+  constraint on confirmed rows, which removes the race in that
+  check-then-write, plus the overlap query that shows Venue Staff which
+  bookings clash. One open point: #18's `venue_booking_status` has no
+  `cancelled` value, so a cancelled booking can only show up as `rejected`
+  for now. Either way it stops blocking, because only confirmed rows are
+  covered by the constraint.
+
+- **IS-47 has no data to read.** There are no `equipment` or
+  `equipment_reservations` tables in migrations or on the live database.
+  Equipment exists only as a free-form `events.equipment_needed` jsonb list.
+  Question for Justin (PO): which story creates the equipment inventory and
+  reservations, and what should the calendar show (per item or per type,
+  quantity or just booked/free, which roles can see it)? IS-47 needs those
+  answers before it can be built.
 
 ## Booking conflicts (IS-16)
 

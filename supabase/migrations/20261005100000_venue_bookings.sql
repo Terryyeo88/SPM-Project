@@ -6,6 +6,15 @@
 -- are separate, unassigned stories. See docs/design-decisions.md for the
 -- narrow conflict guard this migration's tables DO support (confirmed-vs-
 -- confirmed overlap only, not the full conflict-detection story).
+--
+-- Originally timestamped 20261004000000 -- renamed after that collided
+-- with main's 20261004000000_coordinator_lead_role.sql (same timestamp,
+-- different filename, so git never flagged it as a conflict; caught only
+-- because `db reset`/`db start` both fail on a duplicate
+-- schema_migrations primary key). Terry's IS-16 migration
+-- (20261006000000_venue_booking_no_overlap.sql) adds a constraint on
+-- public.venue_bookings and depends on this file sorting before it --
+-- do not rename this again without checking that ordering still holds.
 
 -- ============================================================
 -- 1. Setup/turnaround time -- per venue, not global

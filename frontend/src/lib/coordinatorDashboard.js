@@ -5,7 +5,7 @@
  *
  * Tab -> status mapping (team decision, following the Event Status
  * Management story's lifecycle):
- *   Needs Review -- under_review: auto-assigned to this coordinator and
+ *   Needs Review -- under_review: assigned to this coordinator (by the Lead) and
  *                   waiting on an approve / reject / clarify decision.
  *                   (Assignment is what moves `submitted` -> `under_review`,
  *                   see backend coordinator_service.assign_initial_coordinator.)

@@ -93,7 +93,10 @@ tables/columns actually exist before assuming a migration ran.
 ### Seed data
 
 Either run the Python seeder or paste the SQL version into the SQL Editor —
-both create the same 3 throwaway coordinators, 1 organiser, and 3 events,
+both create the same throwaway accounts (3 coordinators, 1 coordinator lead,
+1 organiser, 3 attendees), the sample events (including a confirmed
+"Registration Demo" request for testing registration, recreated fresh on
+every run, registrations included), and the venues,
 and are safe to re-run:
 
 ```bash
@@ -138,6 +141,8 @@ npx supabase start && npx supabase db reset       # from the repo root
 eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/LOCAL_/')"
 SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY"   pytest -m integration                           # from backend/
 ```
+
+If `supabase start` can't bind its ports on Windows, a reserved port range is in the way. The range changes (reboots, updates), so check it with `netsh interface ipv4 show excludedportrange protocol=tcp`, move the ports in `supabase/config.toml` outside it for that session, and don't commit the change.
 
 Otherwise they skip themselves, with a message saying why:
 - **No credentials** (CI): skipped.
