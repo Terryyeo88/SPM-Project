@@ -209,3 +209,26 @@ Not covered, because not built: notifications (see `docs/open-questions.md`).
   information") — a serialisation concern, not a `can()` decision; deferred
   to whoever builds the event routes/serialisers. See
   `docs/design-decisions.md`.
+
+## Booking conflicts (IS-16, Terry, Sprint 2)
+
+IS-16's acceptance criteria aren't recorded in this repo. The rows below
+trace the criteria as the team agreed them; check them against the
+ticket. Design reasoning: `docs/design-decisions.md` §Booking conflicts
+(IS-16).
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Two confirmed bookings of one venue cannot hold overlapping periods, even when confirmed concurrently | `test_booking_conflicts_integration.py::test_constraint_refuses_concurrent_confirms_of_overlapping_bookings` (negative control: constraint dropped, both land; restored, exactly one) | `20261006000000_venue_booking_no_overlap.sql` (exclusion constraint) |
+| The blocked period runs from setup start to turnaround end, so turnaround between events is enforced | `test_booking_conflicts_integration.py::test_report_and_constraint_agree_at_the_boundaries` (the constraint compares the padded columns) | Constraint on `booking_start`/`booking_end`, which IS-14 pads with setup/turnaround |
+| Back-to-back bookings (one ends when the next starts) are not a conflict | `test_booking_conflicts.py::test_bookings_that_only_touch_do_not_clash`, `test_booking_conflicts_integration.py::test_report_and_constraint_agree_at_the_boundaries` | `'[)'` range in the constraint; `_spans_overlap` in the report |
+| Venue Staff see WHICH existing booking(s) a request clashes with | `test_booking_conflicts.py::test_returns_every_clashing_booking_not_just_the_first`, `::test_each_clash_says_which_event_holds_the_venue`, `::test_venue_staff_see_which_bookings_clash` | `app/venues/booking_conflicts.py`, `GET /venues/bookings/<id>/conflicts` (`app/venues/conflict_routes.py`) |
+| A booking is never reported as clashing with itself | `test_booking_conflicts.py::test_a_booking_never_clashes_with_itself`, `::test_clashes_for_booking_uses_the_bookings_own_venue_and_period` | `confirmed_clashes(exclude_booking_id=...)` |
+| Only people who may view the booking see its clashes | `test_booking_conflicts.py::test_requesting_coordinator_may_see_the_clashes`, `::test_other_coordinators_get_404`, `::test_missing_booking_is_404` | `@require(VENUE_BOOKING_VIEW)` |
+| Rejected (or later cancelled) bookings stop blocking the period | `test_booking_conflicts_integration.py::test_releasing_a_confirmed_booking_frees_its_period`, `test_booking_conflicts.py::test_query_reads_only_the_statuses_the_constraint_covers` | Constraint `WHERE (status = 'confirmed')`; `_BLOCKING_STATUSES` |
+| Report and constraint agree on what "overlap" means | `test_booking_conflicts_integration.py::test_report_and_constraint_agree_at_the_boundaries` (4 boundary cases) | Same `'[)'` semantics in both |
+
+Not covered, because not built: showing the clash list in the Venue Staff
+UI (the frontend is Josiah's, and `VenueBookingReviewView.vue` doesn't call
+the new route yet); releasing a confirmed booking when its event is
+cancelled (no booking cancellation path exists).
