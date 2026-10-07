@@ -60,6 +60,8 @@ VENUES = [
         "accessibility_features": ["wheelchair_access", "lift_access"],
         "supported_layouts": ["theatre", "banquet", "networking"],
         "status": "available",
+        "operating_hours_start": "07:00",
+        "operating_hours_end": "23:59",
     },
     {
         "name": "Innovation Hub",
@@ -69,6 +71,8 @@ VENUES = [
         "accessibility_features": ["wheelchair_access", "removable_seats"],
         "supported_layouts": ["classroom", "seminar", "boardroom"],
         "status": "available",
+        "operating_hours_start": "08:00",
+        "operating_hours_end": "20:00",
     },
     {
         "name": "Executive Boardroom",
@@ -78,6 +82,8 @@ VENUES = [
         "accessibility_features": ["wheelchair_access"],
         "supported_layouts": ["boardroom"],
         "status": "occupied",
+        "operating_hours_start": "08:00",
+        "operating_hours_end": "18:00",
     },
     {
         "name": "Riverside Pavilion",
@@ -87,6 +93,12 @@ VENUES = [
         "accessibility_features": ["wheelchair_access", "lift_access", "extra_legroom_seats"],
         "supported_layouts": ["banquet", "networking", "seminar"],
         "status": "maintenance",
+        # No operating-hours restriction seeded for this one on purpose --
+        # exercises calendar_service's "both columns NULL -> no
+        # restriction" path (see the migration's own comment), not just
+        # the common case every other venue here covers.
+        "operating_hours_start": None,
+        "operating_hours_end": None,
     },
 ]
 
@@ -204,6 +216,88 @@ def seed_registration_demo(organizer_id: str, coordinator_id: str) -> None:
     print(f"Event ready: {REGISTRATION_DEMO_NAME} (confirmed, 2 fresh sessions for registration testing)")
 
 
+def seed_venue_calendar_demo(grand_ballroom_id: str, tentative_event_id: str, requested_by_id: str) -> None:
+    """Demo data for View Venue Availability Calendar (Nawaz, Sprint 2,
+    IS-11): one block and two bookings against the Grand Ballroom, so the
+    calendar has all three non-"available" states to show without
+    needing a real booking-approval walkthrough first.
+
+      - A "maintenance" venue_block next month (blocked, with reason).
+      - A CONFIRMED venue_bookings row against `tentative_event_id`
+        (event status "planning", per Event A in main() below) -- shows
+        as "tentatively_held" per calendar_service's derivation.
+      - A CONFIRMED venue_bookings row against the registration-demo's
+        first (already-confirmed) session -- shows as "confirmed".
+
+    FRESH EVERY RUN, same stance as seed_registration_demo: deletes any
+    prior rows for this venue before inserting, so re-running the script
+    doesn't pile up duplicate demo bookings/blocks with stale dates.
+    """
+    supabase.table("venue_blocks").delete().eq("venue_id", grand_ballroom_id).execute()
+    supabase.table("venue_bookings").delete().eq("venue_id", grand_ballroom_id).execute()
+
+    today = date.today()
+    sgt = timezone(timedelta(hours=8))
+
+    block_start = datetime(today.year, today.month, today.day, 0, 0, tzinfo=sgt) + timedelta(days=20)
+    block_end = block_start + timedelta(days=2)
+    supabase.table("venue_blocks").insert(
+        {
+            "venue_id": grand_ballroom_id,
+            "reason": "maintenance",
+            "note": "Annual deep-clean and AV system check.",
+            "block_start": block_start.isoformat(),
+            "block_end": block_end.isoformat(),
+        }
+    ).execute()
+
+    tentative_start = datetime(today.year, today.month, today.day, 9, 0, tzinfo=sgt) + timedelta(days=10)
+    supabase.table("venue_bookings").insert(
+        {
+            "event_id": tentative_event_id,
+            "venue_id": grand_ballroom_id,
+            "status": "confirmed",
+            "requested_by": requested_by_id,
+            "setup_minutes": 30,
+            "turnaround_minutes": 30,
+            "booking_start": tentative_start.isoformat(),
+            "booking_end": (tentative_start + timedelta(hours=4)).isoformat(),
+        }
+    ).execute()
+
+    reg_session = (
+        supabase.table("events")
+        .select("id, organizer_id, preferred_start_date, preferred_start_time, preferred_end_time")
+        .eq("name", REGISTRATION_DEMO_NAME)
+        .eq("status", "confirmed")
+        .order("preferred_start_date")
+        .limit(1)
+        .execute()
+    )
+    if reg_session.data:
+        session = reg_session.data[0]
+        start = datetime.fromisoformat(f"{session['preferred_start_date']}T{session['preferred_start_time']}").replace(
+            tzinfo=sgt
+        )
+        end = datetime.fromisoformat(f"{session['preferred_start_date']}T{session['preferred_end_time']}").replace(
+            tzinfo=sgt
+        )
+        supabase.table("venue_bookings").insert(
+            {
+                "event_id": session["id"],
+                "venue_id": grand_ballroom_id,
+                "status": "confirmed",
+                "requested_by": session["organizer_id"],
+                "setup_minutes": 30,
+                "turnaround_minutes": 30,
+                "booking_start": (start - timedelta(minutes=30)).isoformat(),
+                "booking_end": (end + timedelta(minutes=30)).isoformat(),
+            }
+        ).execute()
+
+    print("Venue calendar demo ready: Grand Ballroom has 1 block, 1 tentatively-held booking, 1 confirmed booking.")
+
+
 def main():
     coordinator_ids = []
     for c in COORDINATORS:
@@ -284,9 +378,17 @@ def main():
 
     seed_registration_demo(organizer_id, coordinator_ids[1])
 
+    venues_by_name = {}
     for venue in VENUES:
         v = get_or_create_venue(venue)
+        venues_by_name[v["name"]] = v
         print(f"Venue ready: {v['name']} ({v['status']})")
+
+    seed_venue_calendar_demo(
+        venues_by_name["Grand Ballroom"]["id"],
+        tentative_event_id=event_a["id"],
+        requested_by_id=organizer_id,
+    )
 
     print("\nDone. 3 coordinators, 1 lead, 1 organizer, 3 attendees, 4 events, 4 venues seeded.")
 

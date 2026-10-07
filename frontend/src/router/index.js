@@ -11,6 +11,7 @@ import ProfileView from '../views/ProfileView.vue'
 import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
 import VenueBookingQueueView from '../views/venues/VenueBookingQueueView.vue'
 import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
+import VenueCalendarView from '../views/venues/VenueCalendarView.vue'
 import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
 import VenueDetailView from '../views/venues/VenueDetailView.vue'
 import AttendeeEventView from '../views/registrations/AttendeeEventView.vue'
@@ -107,6 +108,12 @@ const routes = [
     name: 'venue-details',
     component: VenueDetailView,
     meta: { roles: _rolesByRouteName.get('venue-details') },
+  },
+  {
+    path: '/venues/:venueId/calendar',
+    name: 'venue-calendar',
+    component: VenueCalendarView,
+    meta: { roles: _rolesByRouteName.get('venue-calendar') },
   },
 ]
 

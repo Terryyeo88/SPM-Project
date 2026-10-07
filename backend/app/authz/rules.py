@@ -450,6 +450,20 @@ def rule_venue_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue.calendar_view (Nawaz, Sprint 2: IS-11) --------------------------
+# Same event_coordinator/venue_staff pair as rule_venue_view above -- see
+# actions.py's VENUE_CALENDAR_VIEW comment for why this isn't just a
+# reuse of VENUE_VIEW. Role-only, no per-row scoping needed here either:
+# "Can only view calendars for venues the user's role permits" (AC) is
+# fully answered by the role check -- there's no per-venue-staff
+# assignment table (see rule_venue_booking_list's own comment on the same
+# gap) that would make it mean anything narrower than "every venue".
+
+
+def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_list(user, venue)
+
+
 # -- venue_booking.create -------------------------------------------------
 # Source: Venue Booking Request story -- the assigned Event Coordinator
 # submits a request against an event they're coordinating. The resource

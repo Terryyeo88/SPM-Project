@@ -310,3 +310,53 @@ decisions worth double-checking.
 
 - **The UI doesn't show the clash list yet.** The route exists. Showing it
   on `VenueBookingReviewView.vue` is a frontend change in Josiah's view.
+
+## Venue Availability Calendar (IS-11, Nawaz, 7 Oct)
+
+- **"Tentatively held" vs "confirmed" is derived, not a new booking
+  status.** The Sep 9 planning call resolved this: a venue booking is
+  "tentatively held" once Venue Staff approve it, then becomes
+  "confirmed" once the EVENT itself reaches `confirmed` status.
+  `calendar_service.get_venue_calendar` computes this live, by joining
+  `venue_bookings.status = 'confirmed'` against `events.status`, rather
+  than adding a fourth value to `venue_booking_status`. If that reading
+  of the transcript is wrong, the fix is in one place (the `state`
+  derivation in `calendar_service.py`), not a schema change.
+
+- **"Blocked" periods got a new table (`venue_blocks`), not a reuse of
+  the old `venues.status` flag.** That flag has no date range and no
+  reason text, and was already documented in Sprint 1 as a placeholder
+  "until [booking tables] exist." This migration only lets the calendar
+  READ blocks -- creating one is still "Venue Becomes Unavailable
+  (blocking)", an explicitly separate, unassigned story (see
+  `20261005100000_venue_bookings.sql`'s and `booking_service.py`'s own
+  docstrings). Until that story is built, rows in `venue_blocks` only
+  come from `seed.py` -- there is no in-app way for Venue Staff to block
+  a venue yet, even though the wireframe draws that flow.
+
+- **Block reasons are a closed enum, not free text.** The AC's example
+  list ("maintenance, renovation, internal activity") and the
+  wireframe's own dropdown both suggest a fixed set
+  (`venue_block_reason`: maintenance / renovation / safety_issue /
+  internal_activity / other). Worth confirming with Justin before
+  "Venue Becomes Unavailable" is built against it, same as any other
+  assumed closed set in this schema.
+
+- **Event Coordinators can view the calendar, not just Venue Staff.**
+  The AC's user story only names "As a Venue Staff member... so that I
+  can see what is already committed before deciding on a new booking
+  request," but Coordinators already see a cruder version of the same
+  data today (the Sprint 1 `venues.status` flag on the venue detail
+  page) -- denying them the real calendar would be a regression, not a
+  stricter reading. Same role pair as `VENUE_VIEW`/`VENUE_LIST`, flagged
+  the same way those were in Sprint 1.
+
+- **Operating hours are stored but not yet rendered hour-by-hour.**
+  `venues.operating_hours_start/end` exist and are returned by the API,
+  and the calendar page shows them as a text note, but nothing yet
+  visually marks out-of-hours time within a day/week view (AC:
+  "periods outside the venue's operating hours are shown as
+  unavailable"). The wireframe itself doesn't show this either -- its
+  month grid has no hour axis to mark. A real hour-level day/week grid
+  is a reasonable follow-up, not done here.
+  on `VenueBookingReviewView.vue` is a frontend change in Josiah's view.
