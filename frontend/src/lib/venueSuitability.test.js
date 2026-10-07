@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkSuitability } from './venueSuitability'
+import { checkSuitability, checkSuitabilityForEvent, isSuitableOverall } from './venueSuitability'
 
 function byLabel(checks, label) {
   return checks.find((c) => c.label === label)
@@ -78,5 +78,91 @@ describe('checkSuitability', () => {
     )
     expect(checks.map((c) => c.label)).toEqual(['Capacity', 'Room layout', 'Accessibility'])
     expect(checks.every((c) => c.ok)).toBe(true)
+  })
+})
+
+describe('checkSuitabilityForEvent (IS-13, Coordinator-facing)', () => {
+  it('always returns exactly four checks, in a fixed order', () => {
+    const checks = checkSuitabilityForEvent({}, {})
+    expect(checks.map((c) => c.label)).toEqual(['Capacity', 'Room layout', 'Accessibility', 'Facilities'])
+  })
+
+  it('flags capacity as unsuitable, naming the shortfall', () => {
+    const checks = checkSuitabilityForEvent({ expected_attendance: 200 }, { capacity: 150 })
+    const capacity = checks.find((c) => c.label === 'Capacity')
+    expect(capacity.status).toBe('unsuitable')
+    expect(capacity.detail).toContain('150')
+    expect(capacity.detail).toContain('200')
+  })
+
+  it('reports capacity as suitable at or above the expected attendance', () => {
+    const checks = checkSuitabilityForEvent({ expected_attendance: 150 }, { capacity: 150 })
+    expect(checks.find((c) => c.label === 'Capacity').status).toBe('suitable')
+  })
+
+  it('reports capacity as not_assessed when the event records none', () => {
+    const checks = checkSuitabilityForEvent({ expected_attendance: null }, { capacity: 150 })
+    expect(checks.find((c) => c.label === 'Capacity').status).toBe('not_assessed')
+  })
+
+  it('flags room layout as unsuitable when the venue does not support it', () => {
+    const checks = checkSuitabilityForEvent({ room_layout: 'theatre' }, { supported_layouts: ['banquet'] })
+    expect(checks.find((c) => c.label === 'Room layout').status).toBe('unsuitable')
+  })
+
+  it('reports room layout as not_assessed when the event has none requested', () => {
+    const checks = checkSuitabilityForEvent({ room_layout: '' }, { supported_layouts: ['banquet'] })
+    expect(checks.find((c) => c.label === 'Room layout').status).toBe('not_assessed')
+  })
+
+  it('flags accessibility as unsuitable and names exactly what is missing', () => {
+    const checks = checkSuitabilityForEvent(
+      { accessibility_needs: [{ item: 'wheelchair_access' }, { item: 'lift_access' }] },
+      { accessibility_features: ['wheelchair_access'] },
+    )
+    const accessibility = checks.find((c) => c.label === 'Accessibility')
+    expect(accessibility.status).toBe('unsuitable')
+    expect(accessibility.detail).toContain('lift_access')
+    expect(accessibility.detail).not.toContain('wheelchair_access')
+  })
+
+  it('reports accessibility as not_assessed when the event records no needs', () => {
+    const checks = checkSuitabilityForEvent({ accessibility_needs: [] }, { accessibility_features: [] })
+    expect(checks.find((c) => c.label === 'Accessibility').status).toBe('not_assessed')
+  })
+
+  it('always reports facilities as not_assessed -- no story records required facilities yet', () => {
+    const checks = checkSuitabilityForEvent(
+      { expected_attendance: 10, room_layout: 'boardroom', accessibility_needs: [{ item: 'lift_access' }] },
+      { capacity: 20, supported_layouts: ['boardroom'], accessibility_features: ['lift_access'] },
+    )
+    expect(checks.find((c) => c.label === 'Facilities').status).toBe('not_assessed')
+  })
+
+  it('tolerates missing event/venue objects without throwing', () => {
+    expect(() => checkSuitabilityForEvent(undefined, undefined)).not.toThrow()
+  })
+})
+
+describe('isSuitableOverall', () => {
+  it('is true when every assessed check passes', () => {
+    const checks = [
+      { label: 'Capacity', status: 'suitable' },
+      { label: 'Room layout', status: 'not_assessed' },
+    ]
+    expect(isSuitableOverall(checks)).toBe(true)
+  })
+
+  it('is false when any check is unsuitable', () => {
+    const checks = [
+      { label: 'Capacity', status: 'suitable' },
+      { label: 'Accessibility', status: 'unsuitable' },
+    ]
+    expect(isSuitableOverall(checks)).toBe(false)
+  })
+
+  it('is true (vacuously) when nothing has been assessed at all', () => {
+    const checks = [{ label: 'Capacity', status: 'not_assessed' }]
+    expect(isSuitableOverall(checks)).toBe(true)
   })
 })

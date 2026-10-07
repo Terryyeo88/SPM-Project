@@ -359,4 +359,47 @@ decisions worth double-checking.
   unavailable"). The wireframe itself doesn't show this either -- its
   month grid has no hour axis to mark. A real hour-level day/week grid
   is a reasonable follow-up, not done here.
-  on `VenueBookingReviewView.vue` is a frontend change in Josiah's view.
+
+## Venue Search and Suitability Checking (IS-12 / IS-13, Nawaz, 7 Oct)
+
+- **Both stories live inside the booking-request flow
+  (`RequestVenueBookingView.vue`), not as a separate search page.** IS-12's
+  user story talks about shortlisting candidates generically, but the one
+  place a Coordinator is actually choosing a venue for a specific event is
+  this screen, so that's where filtering (IS-12) and the suitability check
+  (IS-13) were built. If the team wants a standalone "browse/search all
+  venues" page independent of any one event, that's a different screen to
+  add later -- this doesn't block it, `lib/venueSearch.js`'s `filterVenues`
+  is already a plain, reusable function.
+
+- **IS-13 got its own `checkSuitabilityForEvent` function, not a reuse of
+  Josiah's `checkSuitability`.** That one (used by Venue Staff's Booking
+  Review screen) silently OMITS a check when the event hasn't recorded
+  that requirement -- its own tests pin that down. IS-13's AC explicitly
+  wants the opposite ("the check reports which requirements were not
+  assessed"), so changing the shared function would have broken Josiah's
+  screen for a requirement it was never asked to meet. Two functions,
+  not one, is deliberate here.
+
+- **Facilities can never actually be assessed for IS-13.** The AC says to
+  check "required facilities recorded for the event," but no story has
+  ever added a required-facilities field to `events` -- only
+  `equipment_needed`, which is a different (Technical Support Staff)
+  concept. Every suitability check currently reports Facilities as
+  "not assessed," which is an honest use of the AC's own "requirements
+  that have not yet been recorded" clause, not a shortcut -- but if a
+  future story adds a real venue-facilities-required field to events,
+  this check should start reading it.
+
+- **Empty accessibility_needs is treated as "not recorded," not "none
+  needed."** The schema can't tell the two apart (both are just an empty
+  array), so `checkSuitabilityForEvent` reports "not assessed" either way.
+  If the team later wants event creation to distinguish "I checked and
+  need nothing extra" from "I haven't filled this in," that's a schema
+  change this check should then read.
+
+- **"Retired or withdrawn" venues don't exist as a concept.** IS-12's AC
+  says they should be excluded from results. `venues.status` only has
+  available/occupied/maintenance -- nothing means retired. Nothing is
+  silently excluded because nothing can be retired yet; flagged rather
+  than assumed irrelevant.
