@@ -86,6 +86,25 @@ REGISTRATION_LIST = "registration.list"
 VENUE_VIEW = "venue.view"
 VENUE_LIST = "venue.list"
 
+# -- venue calendar (Nawaz, Sprint 2: View Venue Availability Calendar,
+# IS-11) ------------------------------------------------------------
+# Source: "As a Venue Staff member, I want to view a calendar of a
+# venue's availability so that I can see what is already committed
+# before deciding on a new booking request." AC: "Can only view
+# calendars for venues the user's role permits" -- the AC doesn't name
+# any role beyond Venue Staff, but the story is purely a read over the
+# same venue record VENUE_VIEW already gates, and Event Coordinators
+# already see this same data in a cruder form today (the venues.status
+# flag on VenueDetailView) -- denying them the real calendar while
+# granting the crude flag would be a regression, not a stricter read of
+# the AC. A separate action (not reusing VENUE_VIEW) because the two
+# could plausibly diverge later (e.g. if a story ever wants the
+# catalogue visible to a role the calendar shouldn't be) -- flagged in
+# docs/open-questions.md, same as rule_venue_list's own venue_staff
+# inference above.
+
+VENUE_CALENDAR_VIEW = "venue.calendar_view"
+
 # -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
 # Source: "As an Event Coordinator, I want to submit a request to book a
 # venue for an event" (create) and "As a Venue Staff member, I want to

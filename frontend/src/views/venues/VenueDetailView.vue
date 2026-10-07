@@ -53,9 +53,12 @@ onMounted(loadVenue)
         <dt>Accessibility provisions</dt><dd>{{ formatList(venue.accessibility_features) }}</dd>
       </dl>
 
+      <router-link :to="`/venues/${venue.id}/calendar`" class="calendar-link">
+        View availability calendar &rarr;
+      </router-link>
       <p class="notice">
-        Availability reflects a manually-set status for Sprint 1, not a live booking calendar --
-        that's built separately (Venue Availability Calendar), once venue bookings exist.
+        The status badge above is a manually-set Sprint 1 flag, kept for a quick at-a-glance read. For a real
+        day/week/month view of bookings and blocked periods, see the availability calendar.
       </p>
     </template>
   </main>
@@ -76,6 +79,8 @@ dl { display: grid; grid-template-columns: 220px 1fr; gap: .75rem 1rem; margin-t
 dt { font-weight: 700; }
 dd { margin: 0; text-transform: capitalize; }
 .error { color: #b42318; }
-.notice { margin-top: 2rem; padding: .75rem; background: #f1f5f9; font-size: .9rem; color: #475569; text-transform: none; }
+.notice { margin-top: .75rem; padding: .75rem; background: #f1f5f9; font-size: .9rem; color: #475569; text-transform: none; }
+.calendar-link { display: inline-block; margin-top: 2rem; font-weight: 700; color: #1f5fae; text-decoration: none; }
+.calendar-link:hover { text-decoration: underline; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } }
 </style>

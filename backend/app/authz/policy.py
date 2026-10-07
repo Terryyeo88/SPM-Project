@@ -68,6 +68,7 @@ from app.authz.rules import (
     rule_venue_booking_list,
     rule_venue_booking_reject,
     rule_venue_booking_view,
+    rule_venue_calendar_view,
     rule_venue_list,
     rule_venue_view,
 )
@@ -93,6 +94,7 @@ _RULES: dict[str, RuleFunc] = {
     actions.EVENT_COMPLETE: rule_event_complete,
     actions.VENUE_VIEW: rule_venue_view,
     actions.VENUE_LIST: rule_venue_list,
+    actions.VENUE_CALENDAR_VIEW: rule_venue_calendar_view,
     actions.VENUE_BOOKING_CREATE: rule_venue_booking_create,
     actions.VENUE_BOOKING_VIEW: rule_venue_booking_view,
     actions.VENUE_BOOKING_LIST: rule_venue_booking_list,

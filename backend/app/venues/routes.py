@@ -21,6 +21,7 @@ from app.authz.actions import (
     VENUE_BOOKING_LIST,
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
+    VENUE_CALENDAR_VIEW,
     VENUE_LIST,
     VENUE_VIEW,
 )
@@ -33,6 +34,7 @@ from app.venues.booking_service import (
     list_bookings,
     reject_booking,
 )
+from app.venues.calendar_service import get_venue_calendar
 from app.venues.venue_service import VENUE_STATUSES, get_venue, list_venues
 
 venues_bp = Blueprint("venues", __name__, url_prefix="/venues")
@@ -96,6 +98,22 @@ def list_venues_route():
 @require(VENUE_VIEW, loader=lambda venue_id: load_venue(venue_id))
 def get_venue_route(venue, venue_id):
     return jsonify(venue), 200
+
+
+# View Venue Availability Calendar (Nawaz, Sprint 2, IS-11). `start`/`end`
+# (YYYY-MM-DD, half-open-ish -- see calendar_service.get_venue_calendar's
+# own docstring) are both required: the AC's "chosen day, week, or month"
+# is a frontend view choice, not something this route guesses a default
+# for -- same "the caller states its own range" stance
+# app.venues.calendar_service takes.
+@venues_bp.route("/<venue_id>/calendar", methods=["GET"])
+@require(VENUE_CALENDAR_VIEW, loader=lambda venue_id: load_venue(venue_id))
+def get_venue_calendar_route(venue, venue_id):
+    start = request.args.get("start")
+    end = request.args.get("end")
+    if not start or not end:
+        raise ValidationError("Both 'start' and 'end' query parameters (YYYY-MM-DD) are required.")
+    return jsonify(get_venue_calendar(venue_id, start, end)), 200
 
 
 def load_venue(venue_id: str) -> dict:

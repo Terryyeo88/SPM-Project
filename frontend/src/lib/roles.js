@@ -147,6 +147,14 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           coordinator/venue_staff pair as `venues`
  *                           above. Not a nav link: reached from the
  *                           venue catalogue list.
+ *   venue-calendar        -- View Venue Availability Calendar (Nawaz,
+ *                           Sprint 2, IS-11). app/authz/rules.py::
+ *                           rule_venue_calendar_view mirrors
+ *                           rule_venue_view -- see that action's own
+ *                           comment in app/authz/actions.py for why
+ *                           Event Coordinators are included even though
+ *                           the story text only names Venue Staff. Not a
+ *                           nav link: reached from the venue detail page.
  *   request-venue-booking -- Venue Booking Request story (Josiah, Sprint
  *                           2): "As an Event Coordinator, I want to
  *                           submit a request to book a venue for an
@@ -213,6 +221,12 @@ export const ROUTE_ACCESS = Object.freeze(
     {
       routeName: 'venue-details',
       label: 'Venue details',
+      roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    {
+      routeName: 'venue-calendar',
+      label: 'Venue availability calendar',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },

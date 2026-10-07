@@ -165,30 +165,45 @@ end $$;
 -- these are plain inserts, each guarded by name so re-running this file
 -- is still safe.
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+-- operating_hours_start/end (View Venue Availability Calendar, Nawaz,
+-- Sprint 2, IS-11) added below the original Sprint 1 columns -- NOT
+-- backfilled onto an existing row (the `where not exists` guard means a
+-- venue already in the DB from before this migration keeps NULL hours
+-- until re-seeded), matching backend/seed.py's own values for the same
+-- four venues. venue_blocks and the demo venue_bookings rows that
+-- exercise "tentatively held"/"confirmed"/"blocked" are intentionally
+-- NOT duplicated here -- they need real event/profile ids to reference,
+-- which this static SQL file has no way to look up the way
+-- seed_venue_calendar_demo() in seed.py does; run that script for the
+-- full calendar demo data.
+
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Grand Ballroom', 'Main Building, Level 3', 300,
   array['microphone', 'projector', 'screen', 'wifi'],
   array['wheelchair_access', 'lift_access'],
   array['theatre', 'banquet', 'networking']::public.room_layout[],
-  'available'
+  'available', '07:00', '23:59'
 where not exists (select 1 from public.venues where name = 'Grand Ballroom');
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Innovation Hub', 'Tech Wing, Level 1', 80,
   array['projector', 'screen', 'wifi'],
   array['wheelchair_access', 'removable_seats'],
   array['classroom', 'seminar', 'boardroom']::public.room_layout[],
-  'available'
+  'available', '08:00', '20:00'
 where not exists (select 1 from public.venues where name = 'Innovation Hub');
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Executive Boardroom', 'Main Building, Level 5', 20,
   array['screen', 'wifi'],
   array['wheelchair_access'],
   array['boardroom']::public.room_layout[],
-  'occupied'
+  'occupied', '08:00', '18:00'
 where not exists (select 1 from public.venues where name = 'Executive Boardroom');
 
+-- Riverside Pavilion deliberately gets no operating hours (NULL/NULL) --
+-- same "no restriction recorded" case backend/seed.py's own comment on
+-- this venue explains.
 insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
 select 'Riverside Pavilion', 'East Campus, Ground Floor', 150,
   array['microphone', 'wifi'],
