@@ -25,6 +25,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+# Tables whose primary key isn't called "id" (the column the database's
+# gen_random_uuid() default fills in on insert).
+PRIMARY_KEYS = {
+    "event_change_requests": "event_change_req_id",
+    "event_logs": "event_log_id",
+}
+
 
 class FakeSupabase:
     """Rows live in `tables` (events also as `rows`); every executed query
@@ -64,10 +71,15 @@ class _FakeQuery:
         self.payload = None
         self.filters = []
         self.single_row = False
+        self.columns = None
         self.ordering = None
 
     def select(self, *args, **kwargs):
-        return self  # after insert/update this just asks for the rows back
+        # After insert/update this just asks for the rows back. The columns
+        # aren't applied (rows come back whole) but are recorded in `calls`.
+        if args and self.op == "select":
+            self.columns = args[0]
+        return self
 
     def insert(self, payload):
         self.op, self.payload = "insert", payload
@@ -84,6 +96,11 @@ class _FakeQuery:
     def single(self):
         self.single_row = True  # .data becomes one row (or None), not a list
         return self
+
+    def maybe_single(self):
+        # routes.load_event's lookup. Same as single() here; real postgrest
+        # returns None itself for no match, and load_event guards both.
+        return self.single()
 
     def eq(self, column, value):
         self.filters.append(("eq", column, value))
@@ -135,14 +152,21 @@ class _FakeQuery:
 
     def execute(self):
         self.db.calls.append(
-            {"table": self.name, "op": self.op, "payload": self.payload, "filters": list(self.filters)}
+            {
+                "table": self.name,
+                "op": self.op,
+                "payload": self.payload,
+                "filters": list(self.filters),
+                "columns": self.columns,
+            }
         )
         rows = self.db.tables[self.name]
         if self.op == "insert":
             new_rows = self.payload if isinstance(self.payload, list) else [self.payload]
             created = []
             for row in new_rows:
-                stored = {"id": self.db.new_id(), "coordinator_id": None, **row}
+                key = PRIMARY_KEYS.get(self.name, "id")
+                stored = {key: self.db.new_id(), "coordinator_id": None, **row}
                 rows.append(stored)
                 created.append(dict(stored))
             return SimpleNamespace(data=created)

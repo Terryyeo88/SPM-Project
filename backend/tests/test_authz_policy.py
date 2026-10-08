@@ -63,22 +63,22 @@ def test_organiser_allowed_edit_after_rejection():
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
-@pytest.mark.parametrize("status", ["under_review", "planning"])
-def test_coordinator_allowed_edit_assigned_event_under_review_or_planning(status):
-    """The assigned coordinator may edit while reviewing the request
-    (IS-31: after submission only the coordinator can edit) and during
-    planning (Event Information Management)."""
+@pytest.mark.parametrize("status", ["submitted", "under_review", "approved", "planning", "confirmed", "rejected"])
+def test_coordinator_allowed_edit_assigned_event_whenever_it_is_still_live(status):
+    """The assigned coordinator may edit the event details whenever they
+    need to (IS-31: after submission only the coordinator can edit; IS-21:
+    "the event coordinator should be able to edit the event details when
+    they want to")."""
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status=status)
     assert can(user, actions.EVENT_EDIT, event) is True
 
 
-@pytest.mark.parametrize("status", ["submitted", "approved", "confirmed", "completed", "cancelled", "rejected"])
-def test_coordinator_denied_edit_assigned_event_outside_review_and_planning(status):
-    """Outside under_review and planning, even the assigned coordinator
-    can't edit -- 403, since the relationship exists. "submitted" is the
-    moment before a coordinator is assigned; "rejected" goes back to the
-    organiser."""
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_coordinator_denied_edit_once_the_event_is_finished(status):
+    """Completed (IS-38: read-only going forward) and cancelled events
+    can't be edited even by the assigned coordinator -- 403, since the
+    relationship exists."""
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status=status)
     assert can(user, actions.EVENT_EDIT, event) is False
@@ -119,7 +119,7 @@ def test_multi_role_union_on_same_event_for_edit():
 
     # Neither window satisfied -- must be DENY_FORBIDDEN (403), since a
     # relationship exists (both, in fact), not DENY_NOT_FOUND (404).
-    event_wrong_status = FakeEvent(organizer_id="user-1", coordinator_id="user-1", status="submitted")
+    event_wrong_status = FakeEvent(organizer_id="user-1", coordinator_id="user-1", status="cancelled")
     assert can(user, actions.EVENT_EDIT, event_wrong_status) is False
     with pytest.raises(AuthorisationError):
         authorise(user, actions.EVENT_EDIT, event_wrong_status)

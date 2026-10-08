@@ -403,3 +403,51 @@ decisions worth double-checking.
   available/occupied/maintenance -- nothing means retired. Nothing is
   silently excluded because nothing can be retired yet; flagged rather
   than assumed irrelevant.
+
+## Request for Event Change (IS-21, 8 Oct)
+
+- **An approved timing change still doesn't MOVE the venue booking -- but
+  the coordinator is now stopped and told first.** `app/events/change_impact.py`
+  checks each pending change against the arrangements already made (venue
+  booking: period, capacity, layout, accessibility; registrations; equipment;
+  technical support), and approval is refused (409
+  `change_impact_unacknowledged`) until the coordinator acknowledges every
+  affected area. What they acknowledged is stored in
+  `event_change_requests.acknowledged_impacts`. `booking_start/end` stay snapshotted (by
+  design, 20261005100000_venue_bookings.sql), so re-booking is the
+  coordinator's follow-up. Still open: should approval also release the
+  booking automatically and send the session back to planning? The
+  coordinator's own availability for the new dates is not checked either.
+
+- **Equipment and technical support can only be flagged "check manually".**
+  No equipment-allocation or technical-support-assignment tables exist, so
+  `change_impact` can't tell whether anything was actually arranged -- it
+  raises a "check" (never a "conflict") whenever a post-approval change
+  touches timing, equipment or layout on a session that needs equipment.
+  When those stories add real records, these two checks should read them.
+
+- **Lowering expected_attendance below the number already registered.**
+  Same question Attendee Registration already raised for edits: existing
+  registrations stay confirmed. A change request doesn't make it worse,
+  but it does make it reachable on a confirmed event.
+
+- **A pending change on an event that is then cancelled or completed stays
+  pending.** rule_event_review_change refuses review outside
+  submitted..confirmed, so nobody can decide it. It does no harm (it can
+  never be applied), but the history shows it as "Awaiting review"
+  forever. Could be auto-rejected by the cancel/complete transitions.
+
+- **"Permitted changes" read as: every field the organiser could fill in
+  when creating the request** (`EVENT_FIELDS`), never status, coordinator
+  or ids. If the customer means a narrower list for confirmed events, it is
+  one set in `change_request_service.py` to narrow.
+
+- **No notifications.** The coordinator isn't told a change was requested,
+  and the organiser isn't told it was decided -- both see it on the event
+  page. Depends on the Notification System story, like IS-39.
+
+- **The Confirmed Status story's "unless there is a change that was
+  permitted"** (the field-locking item above) is now read as: a change
+  request approved by the assigned coordinator. Nobody edits a confirmed
+  event directly -- rule_event_edit allows the organiser draft/rejected and
+  the coordinator under_review/planning only.

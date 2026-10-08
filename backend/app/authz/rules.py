@@ -198,14 +198,18 @@ def rule_event_submit(user: Any, event: Any) -> Decision:
 #
 #   organiser:   draft only. Source: "an organiser cannot edit directly
 #                after submission; changes go via the coordinator".
-#   coordinator: assigned, AND status in ("under_review", "planning").
+#   coordinator: assigned, in ANY status except completed / cancelled.
 #                Sources: the Event Information Management story, which
-#                has the coordinator updating event information during
-#                planning; and IS-31 Submit event request, where once a
-#                request is submitted "only the Event Coordinator is
-#                allowed to edit the event request" -- so the assigned
-#                coordinator can also correct it while reviewing it
-#                (under_review), instead of nobody being able to.
+#                has the coordinator updating event information; IS-31
+#                Submit event request, where once a request is submitted
+#                "only the Event Coordinator is allowed to edit the event
+#                request"; and the team's IS-21 decision that the
+#                coordinator "should be able to edit the event details
+#                when they want to" (widened from under_review/planning
+#                only). Still closed once completed (IS-38: "completed
+#                events are read-only going forward") or cancelled
+#                (nothing left to arrange). The organiser, by contrast,
+#                asks for changes through a change request (IS-21).
 #
 # A second action (e.g. event.update_planning) was the alternative and
 # was rejected: the rule below is two clearly separate branches (check
@@ -217,6 +221,9 @@ def rule_event_submit(user: Any, event: Any) -> Decision:
 # them as separate functions even when they were identical: the moment
 # one criterion applies to only one of them, a shared implementation
 # would have had to split apart anyway.
+
+
+_COORDINATOR_EDIT_CLOSED = ("completed", "cancelled")
 
 
 def rule_event_edit(user: Any, event: Any) -> Decision:
@@ -236,7 +243,7 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
             return Decision.ALLOW
     if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
         has_relationship = True
-        if _event_status_in(event, "under_review", "planning"):
+        if not _event_status_in(event, *_COORDINATOR_EDIT_CLOSED):
             return Decision.ALLOW
     if has_relationship:
         return Decision.DENY_FORBIDDEN
@@ -419,6 +426,54 @@ def rule_event_confirm(user: Any, event: Any) -> Decision:
 
 def rule_event_complete(user: Any, event: Any) -> Decision:
     return _assigned_coordinator_from(user, event, "confirmed")
+
+
+# -- event.request_change / event.review_change (IS-21) ---------------------
+# Source: IS-21 Request for Event Change.
+#
+#   request_change  owning organiser. "The Event Organiser can request
+#                   permitted changes for an event that has been
+#                   submitted" -- every status from submitted up to and
+#                   including confirmed. NOT draft or rejected: the
+#                   organiser edits those directly (rule_event_edit), so a
+#                   change request there would be a detour around their own
+#                   form.
+#   review_change   the assigned coordinator ("The assigned Event
+#                   Coordinator can view and review the requested change"),
+#                   in the same status window -- once an event is completed
+#                   or cancelled, a still-pending change no longer applies.
+#
+# Neither widens rule_event_edit: "Given that an event is confirmed, the
+# Event Organiser cannot directly overwrite the current confirmed event
+# details" stays true because the organiser's edit window is still
+# draft/rejected only. A change request is the only way in, and it only
+# reaches public.events through review_change.
+
+CHANGE_REQUEST_STATUSES = ("submitted", "under_review", "approved", "planning", "confirmed")
+
+
+def rule_event_request_change(user: Any, event: Any) -> Decision:
+    if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
+        # Anyone else who can see the event (its coordinator, the Lead)
+        # already knows it exists: 403, not 404.
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, *CHANGE_REQUEST_STATUSES):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_event_review_change(user: Any, event: Any) -> Decision:
+    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+        # The organiser and the Lead can already see the event (and its
+        # change requests), so they learn nothing new from a 403.
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, *CHANGE_REQUEST_STATUSES):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
 
 
 # -- venue.view / venue.list (role-only -- see actions.py's venues section) -
