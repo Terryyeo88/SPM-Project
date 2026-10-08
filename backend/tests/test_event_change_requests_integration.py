@@ -7,6 +7,10 @@ unit tests (FakeSupabase) structurally cannot prove:
    trail.
 2. The partial unique index allows only one PENDING change per session,
    even when the app's own check is bypassed (the race it exists for).
+3. The two JOINS the code relies on -- which the unit tests' fake database
+   ignores entirely -- work against the real schema: event_logs ->
+   profiles(name) for the Change History, and venue_bookings ->
+   venues(...) for the impact warning.
 """
 
 from __future__ import annotations
@@ -18,19 +22,21 @@ from types import SimpleNamespace
 import pytest
 from postgrest.exceptions import APIError
 
-from app.events.change_request_service import approve_change_request, request_event_change
+from app.events.change_request_service import approve_change_request, list_change_requests, request_event_change
+from app.events.event_log import list_event_logs
 from app.extensions import supabase
+from tests.factories import make_user
 
 pytestmark = pytest.mark.integration
 
 _PASSWORD = "Password123!-throwaway-test-account"
 
 
-def _create_user(roles: list[str]) -> str:
+def _create_user(roles: list[str], name: str = "Change Request Test User") -> str:
     email = f"change-request-test-{uuid.uuid4()}@example.com"
     created = supabase.auth.admin.create_user({"email": email, "password": _PASSWORD, "email_confirm": True})
     user_id = created.user.id
-    supabase.table("profiles").insert({"id": user_id, "name": "Change Request Test User", "email": email}).execute()
+    supabase.table("profiles").insert({"id": user_id, "name": name, "email": email}).execute()
     for role in roles:
         supabase.table("user_roles").insert({"user_id": user_id, "role": role}).execute()
     return user_id
@@ -44,8 +50,8 @@ def _delete_user(user_id: str) -> None:
 
 @pytest.fixture
 def confirmed_event():
-    organizer = _create_user(["event_organizer"])
-    coordinator = _create_user(["event_coordinator"])
+    organizer = _create_user(["event_organizer"], name="Test Organiser")
+    coordinator = _create_user(["event_coordinator"], name="Test Coordinator")
     day = (date.today() + timedelta(days=30)).isoformat()
     event = (
         supabase.table("events")
@@ -147,3 +153,86 @@ def test_database_allows_only_one_pending_change_per_session(confirmed_event):
     # A decided change doesn't count against the index.
     supabase.table("event_change_requests").update({"status": "rejected"}).eq("event_id", event.id).execute()
     supabase.table("event_change_requests").insert(row).execute()
+
+
+def test_change_history_reads_who_made_each_entry_through_the_profiles_join(confirmed_event):
+    """The Change History shows WHO made each entry by joining event_logs ->
+    profiles(name) through changed_by. The unit tests' fake database ignores
+    joins, so only a real database proves this one works.
+
+    The organiser requests a change and the coordinator approves it; the
+    history must come back newest first, with each person's real name and
+    the right label: "changed" for the coordinator, "requested" for the
+    organiser."""
+    event, organizer, coordinator = confirmed_event
+    change = request_event_change(event, organizer, {"changes": {"expected_attendance": 75}})
+    approve_change_request(event, change["event_change_req_id"], coordinator)
+
+    history = list_event_logs(event)
+
+    assert [(entry["profiles"]["name"], entry["kind"]) for entry in history] == [
+        ("Test Coordinator", "changed"),
+        ("Test Organiser", "requested"),
+    ]
+
+
+def test_impact_warning_reads_the_booked_venue_through_the_venues_join(confirmed_event):
+    """The impact warning checks a change against the booked venue by
+    joining venue_bookings -> venues(name, capacity, supported_layouts,
+    accessibility_features). The unit tests hand the venue in already
+    joined, so only a real database proves the join itself works.
+
+    The session has a booking at a 60-seat, theatre-only venue. The organiser
+    asks for 75 attendees in a banquet layout; listing the request must flag
+    both against that real venue, named in the warning."""
+    event, organizer, coordinator = confirmed_event
+    venue = (
+        supabase.table("venues")
+        .insert(
+            {
+                "name": f"Change Request Test Venue {uuid.uuid4()}",
+                "location": "Test Wing",
+                "capacity": 60,
+                "facilities": [],
+                "accessibility_features": [],
+                "supported_layouts": ["theatre"],
+                "status": "available",
+            }
+        )
+        .execute()
+        .data[0]
+    )
+    booking = (
+        supabase.table("venue_bookings")
+        .insert(
+            {
+                "event_id": event.id,
+                "venue_id": venue["id"],
+                "status": "pending",  # pending still counts as an arrangement
+                "requested_by": coordinator,
+                "setup_minutes": 0,
+                "turnaround_minutes": 0,
+                "booking_start": f"{event.preferred_start_date}T00:00:00+08:00",
+                "booking_end": f"{event.preferred_start_date}T23:59:00+08:00",
+            }
+        )
+        .execute()
+        .data[0]
+    )
+    try:
+        request_event_change(event, organizer, {"changes": {"expected_attendance": 75, "room_layout": "banquet"}})
+
+        [listed] = list_change_requests(event, make_user(["event_coordinator"], user_id=coordinator))
+
+        [venue_impact] = [impact for impact in listed["impact"] if impact["area"] == "venue"]
+        assert venue["name"] in venue_impact["title"]
+        assert venue_impact["booking_id"] == booking["id"]
+        assert venue_impact["issues"] == [
+            "75 expected attendees exceeds the venue's capacity of 60.",
+            "The venue doesn't support a banquet layout.",
+        ]
+    finally:
+        # The booking first: it references the venue (the event's own
+        # cleanup in the fixture runs after this, too late for the venue).
+        supabase.table("venue_bookings").delete().eq("id", booking["id"]).execute()
+        supabase.table("venues").delete().eq("id", venue["id"]).execute()

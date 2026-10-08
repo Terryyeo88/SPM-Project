@@ -418,6 +418,10 @@ decisions worth double-checking.
   coordinator's follow-up. Still open: should approval also release the
   booking automatically and send the session back to planning? The
   coordinator's own availability for the new dates is not checked either.
+  Please confirm the stance itself: a significant change WARNS and needs
+  acknowledging, but isn't blocked, since a requirement change is often
+  exactly why arrangements must be redone. Direct coordinator edits don't
+  go through this check at all -- only approving a change request does.
 
 - **Equipment and technical support can only be flagged "check manually".**
   No equipment-allocation or technical-support-assignment tables exist, so
@@ -447,7 +451,48 @@ decisions worth double-checking.
   page. Depends on the Notification System story, like IS-39.
 
 - **The Confirmed Status story's "unless there is a change that was
-  permitted"** (the field-locking item above) is now read as: a change
-  request approved by the assigned coordinator. Nobody edits a confirmed
-  event directly -- rule_event_edit allows the organiser draft/rejected and
-  the coordinator under_review/planning only.
+  permitted"** (the field-locking item above) is now read as: a change the
+  assigned coordinator makes or approves. The ORGANISER never edits a
+  confirmed event directly (rule_event_edit: draft/rejected only) -- they
+  file a change request. The assigned coordinator can edit it directly (see
+  the edit-window item below). Please confirm this is what "permitted"
+  means.
+
+The calls below were made because the IS-21 story didn't say. Each is
+written up in docs/design-decisions.md; please confirm or correct:
+
+- **When a change can be requested: submitted through confirmed.** Not
+  draft or rejected (the organiser edits those directly and resubmits), not
+  completed (IS-38: read-only) or cancelled. Includes `submitted` before a
+  coordinator is assigned -- the request waits until one is.
+
+- **Who reviews: only the assigned coordinator.** The Event Coordinator
+  Lead can see change requests (they oversee every submitted request) but
+  can't approve or reject them. Should the Lead be able to, e.g. when
+  nobody is assigned yet?
+
+- **One pending change request per session at a time.** A second is
+  refused until the first is decided, so two requests are never reviewed
+  against details the other is about to change. Enforced by the app and by
+  a unique index.
+
+- **A change to the name, description or purpose applies to every
+  session** of the request (they're shared fields), even though the request
+  was filed on one session. Every other field changes only that session.
+
+- **The coordinator's edit window was widened** from under review /
+  planning to every status except completed and cancelled ("the event
+  coordinator should be able to edit the event details when they want
+  to"). This changes existing IS-31 / Event Information Management
+  behaviour in rule_event_edit -- needs the rule owner's sign-off.
+
+- **"Requested" vs "changed" in the history is decided by who made the
+  entry.** event_logs has no kind column (the live schema), so an entry by
+  the request's organiser shows as "Change requested by", anything else as
+  "Changed by". Someone who is both the organiser and the assigned
+  coordinator counts as "changed". A kind column would make this explicit.
+
+- **The history doesn't say which session an entry is about.** event_logs
+  links to the whole request (shared_event_id) only, per the live schema,
+  so on a multi-session request two entries about different sessions look
+  alike. Adding a nullable event_id back would let the page label them.

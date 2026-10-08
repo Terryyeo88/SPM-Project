@@ -682,6 +682,23 @@ coordinator approves. That is the whole of AC5: the organiser's edit
 window (`rule_event_edit`) was never widened, so the only path from a
 change request to the event goes through `rule_event_review_change`.
 
+### Who may request a change, when, and who reviews it
+
+`rule_event_request_change`: the owning organiser, from `submitted` through
+`confirmed` -- the AC's "an event that has been submitted". Draft and
+rejected are excluded because the organiser already edits those directly
+(`rule_event_edit`), so a change request there would only be a detour
+around their own form; completed (IS-38: read-only) and cancelled are
+excluded because nothing is left to change. `submitted` is included even
+before a coordinator is assigned: the request is recorded and simply waits.
+
+`rule_event_review_change`: only the assigned coordinator ("the assigned
+Event Coordinator can view and review"), in the same status window. The
+Lead can see change requests through `event.view` but can't decide them;
+anyone else who can see the event gets a 403, an outsider a 404 -- the
+usual relationship-first rule. Flagged in docs/open-questions.md for
+confirmation, including whether the Lead should be able to review.
+
 ### A change is validated like an edit, twice
 
 The requested fields are merged onto the session's current details and
@@ -757,7 +774,7 @@ insert-only (RLS), and the event page shows it as "Change History" with
 each person's name (`profiles` through `changed_by`).
 
 The live tables were adjusted in the dashboard after the first draft of
-the migration; `20261008000000_event_change_requests_and_logs.sql` was
+the migration; `20261009000000_event_change_requests_and_logs.sql` was
 rewritten to match them (live is the source of truth, as in
 §"Live schema was the source of truth when reconciling migrations"),
 plus two agreed fixes it also applies to live: `event_logs.change_request_id`

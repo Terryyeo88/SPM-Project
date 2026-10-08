@@ -1,5 +1,13 @@
 -- ConnectSphere: event change requests and event logs
 -- Migration: event_change_requests_and_logs
+--
+-- Timestamp: 20261009000000, NOT 20261008000000. It was first written as
+-- 20261008000000, which collided with IS-18's
+-- 20261008000000_equipment.sql once that merged to main -- different
+-- filenames, so git never flagged it, but `supabase db reset` fails on a
+-- duplicate schema_migrations version (the same trap as IS-14's rename).
+-- Nothing here depends on the equipment tables, so sorting after them is
+-- safe. Don't rename this again without re-checking main and open PRs.
 -- Scope: IS-21 Request for Event Change -- "As an Event Organiser, I want
 -- to request changes to an event, so that the event details can be
 -- updated when requirements change."
