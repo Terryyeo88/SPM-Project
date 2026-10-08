@@ -404,6 +404,99 @@ decisions worth double-checking.
   silently excluded because nothing can be retired yet; flagged rather
   than assumed irrelevant.
 
+## Request for Event Change (IS-21, 8 Oct)
+
+- **An approved timing change still doesn't MOVE the venue booking -- but
+  the coordinator is now stopped and told first.** `app/events/change_impact.py`
+  checks each pending change against the arrangements already made (venue
+  booking: period, capacity, layout, accessibility; registrations; equipment;
+  technical support), and approval is refused (409
+  `change_impact_unacknowledged`) until the coordinator acknowledges every
+  affected area. What they acknowledged is stored in
+  `event_change_requests.acknowledged_impacts`. `booking_start/end` stay snapshotted (by
+  design, 20261005100000_venue_bookings.sql), so re-booking is the
+  coordinator's follow-up. Still open: should approval also release the
+  booking automatically and send the session back to planning? The
+  coordinator's own availability for the new dates is not checked either.
+  Please confirm the stance itself: a significant change WARNS and needs
+  acknowledging, but isn't blocked, since a requirement change is often
+  exactly why arrangements must be redone. Direct coordinator edits don't
+  go through this check at all -- only approving a change request does.
+
+- **Equipment and technical support can only be flagged "check manually".**
+  No equipment-allocation or technical-support-assignment tables exist, so
+  `change_impact` can't tell whether anything was actually arranged -- it
+  raises a "check" (never a "conflict") whenever a post-approval change
+  touches timing, equipment or layout on a session that needs equipment.
+  When those stories add real records, these two checks should read them.
+
+- **Lowering expected_attendance below the number already registered.**
+  Same question Attendee Registration already raised for edits: existing
+  registrations stay confirmed. A change request doesn't make it worse,
+  but it does make it reachable on a confirmed event.
+
+- **A pending change on an event that is then cancelled or completed stays
+  pending.** rule_event_review_change refuses review outside
+  submitted..confirmed, so nobody can decide it. It does no harm (it can
+  never be applied), but the history shows it as "Awaiting review"
+  forever. Could be auto-rejected by the cancel/complete transitions.
+
+- **"Permitted changes" read as: every field the organiser could fill in
+  when creating the request** (`EVENT_FIELDS`), never status, coordinator
+  or ids. If the customer means a narrower list for confirmed events, it is
+  one set in `change_request_service.py` to narrow.
+
+- **No notifications.** The coordinator isn't told a change was requested,
+  and the organiser isn't told it was decided -- both see it on the event
+  page. Depends on the Notification System story, like IS-39.
+
+- **The Confirmed Status story's "unless there is a change that was
+  permitted"** (the field-locking item above) is now read as: a change the
+  assigned coordinator makes or approves. The ORGANISER never edits a
+  confirmed event directly (rule_event_edit: draft/rejected only) -- they
+  file a change request. The assigned coordinator can edit it directly (see
+  the edit-window item below). Please confirm this is what "permitted"
+  means.
+
+The calls below were made because the IS-21 story didn't say. Each is
+written up in docs/design-decisions.md; please confirm or correct:
+
+- **When a change can be requested: submitted through confirmed.** Not
+  draft or rejected (the organiser edits those directly and resubmits), not
+  completed (IS-38: read-only) or cancelled. Includes `submitted` before a
+  coordinator is assigned -- the request waits until one is.
+
+- **Who reviews: only the assigned coordinator.** The Event Coordinator
+  Lead can see change requests (they oversee every submitted request) but
+  can't approve or reject them. Should the Lead be able to, e.g. when
+  nobody is assigned yet?
+
+- **One pending change request per session at a time.** A second is
+  refused until the first is decided, so two requests are never reviewed
+  against details the other is about to change. Enforced by the app and by
+  a unique index.
+
+- **A change to the name, description or purpose applies to every
+  session** of the request (they're shared fields), even though the request
+  was filed on one session. Every other field changes only that session.
+
+- **The coordinator's edit window was widened** from under review /
+  planning to every status except completed and cancelled ("the event
+  coordinator should be able to edit the event details when they want
+  to"). This changes existing IS-31 / Event Information Management
+  behaviour in rule_event_edit -- needs the rule owner's sign-off.
+
+- **"Requested" vs "changed" in the history is decided by who made the
+  entry.** event_logs has no kind column (the live schema), so an entry by
+  the request's organiser shows as "Change requested by", anything else as
+  "Changed by". Someone who is both the organiser and the assigned
+  coordinator counts as "changed". A kind column would make this explicit.
+
+- **The history doesn't say which session an entry is about.** event_logs
+  links to the whole request (shared_event_id) only, per the live schema,
+  so on a multi-session request two entries about different sessions look
+  alike. Adding a nullable event_id back would let the page label them.
+
 ## Equipment Availability Checking (IS-18, Nawaz, 8 Oct)
 
 - **Unit level, per the AC.** The story's Note says aggregate or unit level

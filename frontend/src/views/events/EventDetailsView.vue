@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
 import { groupRequests, leadTabForRequest } from '../../lib/leadDashboard'
 import { ROLES, hasAnyRole } from '../../lib/roles'
+import { isChangeable } from '../../lib/changeRequests'
 import {
   DRAFT_NAME,
   emptySession,
@@ -14,10 +15,15 @@ import {
   sessionHasInvalidInput,
   sessionIsComplete,
   sessionPayload,
+  validateAttendance,
+  validateDateRange,
+  validateQuantities,
   validateSession,
 } from '../../lib/eventSessions'
 import CoordinatorEventReview from './CoordinatorEventReview.vue'
 import AppNavBar from '../../components/AppNavBar.vue'
+import EventChangeRequests from '../../components/EventChangeRequests.vue'
+import EventLogHistory from '../../components/EventLogHistory.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
 import VenueBookingStatus from '../../components/VenueBookingStatus.vue'
@@ -128,6 +134,18 @@ function populateForm(value, sessions) {
   form.description = value.description || ''
   form.purpose = value.purpose || ''
   form.sessions = sessions.map(sessionFromEvent)
+  // A rejected session was complete when it was submitted, but a value can
+  // have gone stale since -- most often its start date has now passed.
+  // That disables Save and Resubmit (hasInvalidInput / canSubmit), and the
+  // as-you-type messages only appear once a field is edited, so flag
+  // problems straight away or the buttons are greyed out with no reason.
+  if (mode.value === 'rejected') {
+    form.sessions.forEach((session) => {
+      validateDateRange(session, minimumDate)
+      validateAttendance(session)
+      validateQuantities(session)
+    })
+  }
 }
 
 function editableSessions() {
@@ -139,14 +157,37 @@ function editableSessions() {
 
 // A reject moves every under-review session of the request, so refresh the
 // sessions list too, not just this session's row.
+// Bumped whenever this page writes event details, so the Change History
+// (event_logs) reloads with the new entry.
+const logRefresh = ref(0)
+
 async function onCoordinatorDecision(updated) {
   event.value = updated
+  logRefresh.value += 1
   try {
     group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
   } catch {
     // The decision itself succeeded; a stale list just corrects on reload.
   }
 }
+
+// IS-21: an approved change request rewrote a session (and, for a shared
+// detail like the name, every session) -- refresh both.
+async function onChangeApplied(updated) {
+  if (updated?.id === event.value.id) event.value = updated
+  logRefresh.value += 1
+  try {
+    group.value = await apiGet(`/events/${route.params.eventId}/sessions`)
+  } catch {
+    // The approval itself succeeded; a stale list just corrects on reload.
+  }
+}
+
+// IS-21: once submitted the organiser can't edit, but may request a change
+// while any of their sessions is still between submitted and confirmed.
+const canRequestChange = computed(() => (
+  isOwner.value && visibleSessions.value.some((session) => isChangeable(session.status))
+))
 
 async function loadEvent() {
   loading.value = true
@@ -347,6 +388,13 @@ watch(() => route.params.eventId, (eventId) => {
             :sessions="visibleSessions"
             @updated="onCoordinatorDecision"
           />
+          <EventChangeRequests
+            :event="event"
+            :sessions="visibleSessions"
+            role="coordinator"
+            @applied="onChangeApplied"
+          />
+          <EventLogHistory :event="event" :refresh-key="logRefresh" />
           <VenueBookingStatus :event="event" />
         </template>
         <template v-else-if="event">
@@ -465,7 +513,10 @@ watch(() => route.params.eventId, (eventId) => {
             <p v-if="resubmitted" class="message success" role="status">
               Request resubmitted. It's back with the coordinator for review.
             </p>
-            <p class="notice">This event is {{ statusLabel(event.status).toLowerCase() }} and can't be edited here.</p>
+            <p class="notice">
+              This event is {{ statusLabel(event.status).toLowerCase() }} and can't be edited here.
+              <template v-if="canRequestChange">To change its details, request a change below -- the coordinator reviews it first.</template>
+            </p>
 
             <section class="card" aria-labelledby="event-details-heading">
               <h2 id="event-details-heading" class="card-title">Event Details</h2>
@@ -486,6 +537,15 @@ watch(() => route.params.eventId, (eventId) => {
               :index="index"
               :current="visibleSessions.length > 1 && session.id === event.id"
             />
+
+            <EventChangeRequests
+              v-if="isOwner"
+              :event="event"
+              :sessions="visibleSessions"
+              role="organiser"
+              @applied="onChangeApplied"
+            />
+            <EventLogHistory :event="event" :refresh-key="logRefresh" />
           </template>
         </template>
       </div>

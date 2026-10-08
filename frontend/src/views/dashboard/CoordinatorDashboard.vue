@@ -5,6 +5,11 @@
  * Needs Review / In Planning / Confirmed / Past tabs. Which statuses land
  * in which tab lives in lib/coordinatorDashboard.js (and its tests).
  *
+ * Same layout as the organiser's list (EventsListView): one card per event
+ * request (sessions sharing a shared_event_id), with its sessions listed
+ * inside it. Each tab groups its own sessions, so a request whose sessions
+ * are at different stages appears under each of those tabs.
+ *
  * Not in this pass (tracked separately):
  *   - Approve / reject / clarify actions -- Event Review and Approval.
  *     Rows link to the existing event details page for now.
@@ -23,8 +28,12 @@ import {
   formatDateRange,
   groupEventsByTab,
   isDashboardTab,
+  requestDateRange,
+  requestStatusSummary,
+  sessionsAwaitingReview,
   statusLabel,
 } from '../../lib/coordinatorDashboard'
+import { groupIntoRequests, timeValue } from '../../lib/eventSessions'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -45,8 +54,12 @@ function selectTab(key) {
 const search = ref('')
 
 const groups = computed(() => groupEventsByTab(events.value, auth.profile?.id))
-const visibleEvents = computed(() => filterBySearch(groups.value[activeTab.value], search.value))
-const attentionEvents = computed(() => groups.value.needsReview)
+// Each tab's sessions, as one card per request.
+const requestsByTab = computed(() => Object.fromEntries(
+  DASHBOARD_TABS.map((tab) => [tab.key, groupIntoRequests(groups.value[tab.key])]),
+))
+const visibleRequests = computed(() => groupIntoRequests(filterBySearch(groups.value[activeTab.value], search.value)))
+const attentionRequests = computed(() => requestsByTab.value.needsReview)
 
 async function loadEvents() {
   loading.value = true
@@ -64,10 +77,32 @@ function eventLink(event) {
   return { name: 'event-details', params: { eventId: event.id } }
 }
 
-function subtitle(event) {
-  const parts = [formatDateRange(event.preferred_start_date, event.preferred_end_date)]
-  if (event.expected_attendance) parts.push(`${event.expected_attendance} expected`)
+function requestSubtitle(request) {
+  const parts = [requestDateRange(request)]
+  if (request.sessions.length > 1) parts.push(`${request.sessions.length} sessions`)
+  else if (request.sessions[0].expected_attendance) parts.push(`${request.sessions[0].expected_attendance} expected`)
   return parts.join(' · ')
+}
+
+function sessionSubtitle(session) {
+  const parts = [formatDateRange(session.preferred_start_date, session.preferred_end_date)]
+  const times = [timeValue(session.preferred_start_time), timeValue(session.preferred_end_time)].filter(Boolean).join(' – ')
+  if (times) parts.push(times)
+  if (session.expected_attendance) parts.push(`${session.expected_attendance} expected`)
+  return parts.join(' · ')
+}
+
+// The card links to its first session waiting on review (if any), so the
+// coordinator lands on what needs them; otherwise to its first session.
+function requestLink(request) {
+  return eventLink(request.sessions.find((s) => s.status === 'under_review') || request.sessions[0])
+}
+
+function awaitingText(request) {
+  const waiting = sessionsAwaitingReview(request)
+  if (!waiting) return ''
+  if (request.sessions.length === 1) return 'Awaiting your review'
+  return `${waiting} ${waiting === 1 ? 'session' : 'sessions'} awaiting your review`
 }
 
 const EMPTY_MESSAGES = {
@@ -88,7 +123,7 @@ onMounted(loadEvents)
     <p v-else-if="error" class="error" role="alert">Couldn't load your events: {{ error }}</p>
 
     <template v-else>
-      <div v-if="attentionEvents.length" class="attention" role="status">
+      <div v-if="attentionRequests.length" class="attention" role="status">
         <p class="attention-title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -96,11 +131,11 @@ onMounted(loadEvents)
             <path d="M12 9v4" />
             <path d="M12 17h.01" />
           </svg>
-          {{ attentionEvents.length }} {{ attentionEvents.length === 1 ? 'event needs' : 'events need' }} your attention
+          {{ attentionRequests.length }} {{ attentionRequests.length === 1 ? 'event needs' : 'events need' }} your attention
         </p>
-        <router-link v-for="event in attentionEvents" :key="event.id" :to="eventLink(event)" class="attention-row">
-          <span class="attention-name">{{ event.name }}</span>
-          <span>Awaiting your review</span>
+        <router-link v-for="request in attentionRequests" :key="request.key" :to="requestLink(request)" class="attention-row">
+          <span class="attention-name">{{ request.name }}</span>
+          <span>{{ awaitingText(request) }}</span>
         </router-link>
       </div>
 
@@ -124,25 +159,49 @@ onMounted(loadEvents)
           :aria-pressed="activeTab === tab.key"
           @click="selectTab(tab.key)"
         >
-          {{ tab.label }} ({{ groups[tab.key].length }})
+          {{ tab.label }} ({{ requestsByTab[tab.key].length }})
         </button>
       </div>
 
-      <div class="list">
-        <p v-if="visibleEvents.length === 0" class="muted empty">
+      <div v-if="visibleRequests.length === 0" class="list">
+        <p class="muted empty">
           {{ search.trim() ? `No events match "${search.trim()}".` : EMPTY_MESSAGES[activeTab] }}
         </p>
-        <router-link v-for="event in visibleEvents" :key="event.id" :to="eventLink(event)" class="row">
-          <span class="row-main">
-            <span class="row-name">{{ event.name }}</span>
-            <span class="muted small">{{ subtitle(event) }}</span>
-          </span>
-          <span class="row-side">
-            <span v-if="event.status === 'under_review'" class="attention-text">Awaiting your review</span>
-            <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
-          </span>
-        </router-link>
       </div>
+
+      <ul v-else class="requests">
+        <li v-for="request in visibleRequests" :key="request.key" class="request">
+          <router-link :to="requestLink(request)" class="row request-header">
+            <span class="row-main">
+              <span class="row-name">{{ request.name }}</span>
+              <span class="muted small">{{ requestSubtitle(request) }}</span>
+            </span>
+            <span class="row-side">
+              <span v-if="awaitingText(request)" class="attention-text">{{ awaitingText(request) }}</span>
+              <span class="badges">
+                <span v-for="badge in requestStatusSummary(request)" :key="badge.status" class="status" :class="`status-${badge.status}`">
+                  {{ badge.label }}
+                </span>
+              </span>
+            </span>
+          </router-link>
+
+          <ol v-if="request.sessions.length > 1" class="sessions" :aria-label="`Sessions of ${request.name}`">
+            <li v-for="(session, index) in request.sessions" :key="session.id">
+              <router-link :to="eventLink(session)" class="row session-row">
+                <span class="row-main">
+                  <span class="session-name">Session {{ index + 1 }}</span>
+                  <span class="muted small">{{ sessionSubtitle(session) }}</span>
+                </span>
+                <span class="row-side">
+                  <span v-if="session.status === 'under_review'" class="attention-text">Awaiting your review</span>
+                  <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+                </span>
+              </router-link>
+            </li>
+          </ol>
+        </li>
+      </ul>
     </template>
   </section>
 </template>
@@ -188,6 +247,17 @@ h2 { margin: 0; font-size: 20px; color: #1f1f1f; }
   padding: 16px 0; border-bottom: 1px solid #e6e6e6; color: inherit; text-decoration: none;
 }
 .row:last-child { border-bottom: none; }
+
+/* One card per request, its sessions inside -- as on the organiser's list. */
+.requests { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.request { background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; padding: 4px 18px; }
+.request-header:only-child { border-bottom: none; }
+.badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.sessions { list-style: none; margin: 0 0 10px; padding: 0 0 0 14px; border-left: 2px solid #e2e2e2; }
+.session-row { padding: 10px 0; }
+.sessions li:last-child .session-row { border-bottom: none; }
+.session-name { font-size: 13px; font-weight: 600; color: #444; }
+.session-row:hover .session-name { text-decoration: underline; }
 .row:hover .row-name { text-decoration: underline; }
 .row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .row-name { font-size: 14px; font-weight: 600; color: #2a2a2a; }

@@ -29,18 +29,27 @@ from app.authz.actions import (
     EVENT_LIST,
     EVENT_REASSIGN_COORDINATOR,
     EVENT_REJECT,
+    EVENT_REQUEST_CHANGE,
+    EVENT_REVIEW_CHANGE,
     EVENT_START_PLANNING,
     EVENT_SUBMIT,
     EVENT_VIEW,
     VENUE_BOOKING_CREATE,
 )
 from app.authz.decorators import require
+from app.events.change_request_service import (
+    approve_change_request,
+    list_change_requests,
+    reject_change_request,
+    request_event_change,
+)
 from app.events.coordinator_service import (
     NoCoordinatorAvailableError,
     assign_initial_coordinator,
     list_coordinators,
     reassign_coordinator,
 )
+from app.events.event_log import list_event_logs, record_event_change
 from app.events.event_service import (
     approve_event_request,
     create_draft_request,
@@ -94,7 +103,17 @@ def create_draft():
 @require(EVENT_EDIT, loader=lambda event_id: load_event(event_id))
 def edit_event(event, event_id):
     updated_event = edit_event_request(event_id, event, request.get_json(silent=True) or {})
+    _log_direct_edit(event, updated_event)
     return jsonify(updated_event), 200
+
+
+def _log_direct_edit(before, after_row: dict) -> None:
+    """event_logs entry for a direct edit to a SUBMITTED event: the
+    assigned coordinator (under review / planning) or the organiser fixing
+    a rejected session. Drafts aren't logged -- not submitted to anyone yet."""
+    if before.status == "draft":
+        return
+    record_event_change(before, after_row, current_user().id)
 
 
 @events_bp.route("/<event_id>", methods=["GET"])
@@ -143,7 +162,14 @@ def delete_event(event, event_id):
 @require(EVENT_EDIT, loader=lambda event_id: load_event(event_id))
 def save_draft(event, event_id):
     updated_event = save_draft_request(event_id, event, request.get_json(silent=True) or {})
+    # A rejected session is saved on its own (save_draft_request's rejected
+    # branch); a draft group is not logged.
+    if event.status != "draft":
+        for row in updated_event.get("sessions", []):
+            if row.get("id") == event_id:
+                _log_direct_edit(event, row)
     return jsonify(updated_event), 200
+
 
 # event is a SimpleNamespace object representing the loaded event, and event_id is the string
 # SimpleNamespace is a small built-in Python object that lets you access dictionary values using dot notation.
@@ -153,6 +179,7 @@ def save_draft(event, event_id):
 def submit_event(event, event_id):
     submitted_event = submit_event_request(event_id, event)
     return jsonify(submitted_event), 200
+
 
 @events_bp.route("/<event_id>/approve", methods=["POST"])
 @require(EVENT_APPROVE, loader=lambda event_id: load_event(event_id))
@@ -226,6 +253,55 @@ def get_status_history(event, event_id):
     its assigned coordinator). This is where an organiser sees the
     cancellation or rejection reason."""
     return jsonify(status_history(event_id)), 200
+
+
+# -- change requests (IS-21 Request for Event Change) ----------------------
+# The organiser can't edit a submitted request (rule_event_edit), so they
+# ask for a change instead; it's recorded in event_change_requests and only reaches the
+# event once the assigned coordinator approves it. See
+# app.events.change_request_service.
+
+
+@events_bp.route("/<event_id>/change-requests", methods=["POST"])
+@require(EVENT_REQUEST_CHANGE, loader=lambda event_id: load_event(event_id))
+def create_change_request(event, event_id):
+    change = request_event_change(event, current_user().id, request.get_json(silent=True))
+    return jsonify(change), 201
+
+
+# Gated on EVENT_VIEW: the organiser follows their own requests, the
+# assigned coordinator reviews them, and the Lead (who oversees every
+# submitted request) can see them too.
+@events_bp.route("/<event_id>/change-requests", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_change_requests(event, event_id):
+    return jsonify(list_change_requests(event, current_user())), 200
+
+
+# The audit trail for the whole request: what changed, who changed it, when
+# (app.events.event_log). Anyone who may view the event may read it.
+@events_bp.route("/<event_id>/logs", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_event_logs(event, event_id):
+    return jsonify(list_event_logs(event)), 200
+
+
+@events_bp.route("/<event_id>/change-requests/<change_id>/approve", methods=["POST"])
+@require(EVENT_REVIEW_CHANGE, loader=lambda event_id, change_id: load_event(event_id))
+def approve_change_request_route(event, event_id, change_id):
+    body = request.get_json(silent=True) or {}
+    return jsonify(
+        approve_change_request(
+            event, change_id, current_user().id, body.get("comment"), body.get("acknowledge_impacts")
+        )
+    ), 200
+
+
+@events_bp.route("/<event_id>/change-requests/<change_id>/reject", methods=["POST"])
+@require(EVENT_REVIEW_CHANGE, loader=lambda event_id, change_id: load_event(event_id))
+def reject_change_request_route(event, event_id, change_id):
+    body = request.get_json(silent=True) or {}
+    return jsonify(reject_change_request(event, change_id, current_user().id, body.get("reason"))), 200
 
 
 # The `load_event` function is a loader for the `@require` decorator.

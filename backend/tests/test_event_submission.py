@@ -730,11 +730,14 @@ def test_is31_assigned_coordinator_can_edit_the_request(client, signing_key, mon
         return {"id": event_id, "expected_attendance": payload["expected_attendance"]}
 
     monkeypatch.setattr(routes_module, "edit_event_request", fake_edit)
+    logged = []
+    monkeypatch.setattr(routes_module, "record_event_change", lambda before, after, by: logged.append(by))
 
     response = _post(client, signing_key, "/events/event-1", {"expected_attendance": 500})
 
     assert response.status_code == 200
     assert calls == [("event-1", {"expected_attendance": 500})]
+    assert logged == ["user-1"]  # IS-21: the edit is in the event's audit trail, as this coordinator's
 
 
 def test_is31_coordinator_edit_form_payload_is_saved(fake_db):

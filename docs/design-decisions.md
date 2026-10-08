@@ -157,7 +157,11 @@ wording ("during planning"). It was widened to `under_review` and `planning`
 for IS-31 Submit event request, whose acceptance criteria say that once a
 request is submitted "only the Event Coordinator is allowed to edit the
 event request". With `planning` alone, nobody could correct a request
-while it was under review. One real bug came out of building
+while it was under review. For IS-21 (2026-10-08) the team widened it again:
+the coordinator "should be able to edit the event details when they want
+to", so it is now every status except `completed` (IS-38: read-only going
+forward) and `cancelled`. The organiser's side didn't change: after
+submission they ask for changes through a change request. One real bug came out of building
 this: the first version of the rule returned on whichever relationship
 (organiser or coordinator) it found FIRST, regardless of that branch's own
 status outcome — which would wrongly deny a user who happens to be both the
@@ -659,3 +663,122 @@ before either commits, each waits for the other, and Postgres' deadlock
 detector aborts one with `40P01` (deadlock_detected): 5 of the 30. Either
 way the outcome is identical: one confirmed row, one refused. Anything that
 turns the refusal into a user-facing message has to recognise both codes.
+
+## Request for Event Change (IS-21, Sprint 2, 2026-10-08)
+
+### Change requests live in `event_change_requests`, keyed to the request AND the session
+
+Each change request is one `event_change_requests` row with `shared_event_id` (the
+whole multi-session request) and `event_id` (the session it changes).
+`shared_event_id` is what lets the event page list every change for the
+request in one query; `event_id` is the real foreign key (events'
+`shared_event_id` isn't unique, so nothing can reference it) and is what
+authz checks against, since coordinators are assigned per session. A
+legacy event with no `shared_event_id` uses its own id, the "group of
+one" convention event_service already follows.
+
+The requested values are stored here, NOT on `events`, until the assigned
+coordinator approves. That is the whole of AC5: the organiser's edit
+window (`rule_event_edit`) was never widened, so the only path from a
+change request to the event goes through `rule_event_review_change`.
+
+### Who may request a change, when, and who reviews it
+
+`rule_event_request_change`: the owning organiser, from `submitted` through
+`confirmed` -- the AC's "an event that has been submitted". Draft and
+rejected are excluded because the organiser already edits those directly
+(`rule_event_edit`), so a change request there would only be a detour
+around their own form; completed (IS-38: read-only) and cancelled are
+excluded because nothing is left to change. `submitted` is included even
+before a coordinator is assigned: the request is recorded and simply waits.
+
+`rule_event_review_change`: only the assigned coordinator ("the assigned
+Event Coordinator can view and review"), in the same status window. The
+Lead can see change requests through `event.view` but can't decide them;
+anyone else who can see the event gets a 403, an outsider a 404 -- the
+usual relationship-first rule. Flagged in docs/open-questions.md for
+confirmation, including whether the Lead should be able to review.
+
+### A change is validated like an edit, twice
+
+The requested fields are merged onto the session's current details and
+run through `validate_event_payload(for_submission=True)` -- the same rules
+as creating or editing, so a change can't produce an event that couldn't
+have been submitted. Only fields whose value actually differs are
+recorded (plus knock-on changes validation makes, e.g. turning
+registration off clears its window), with a `previous_values` snapshot so
+the coordinator reviews a before/after.
+
+Approval re-validates against the session as it is THEN: the coordinator
+may have edited it, or a requested date may have passed. A change that no
+longer validates is refused and stays pending for the coordinator to
+reject.
+
+### One pending change per session; decisions are conditional writes
+
+A partial unique index allows one `pending` row per session, so two
+changes can't each be reviewed against details the other is about to
+alter. Approve/reject claim the row with `UPDATE ... WHERE status =
+'pending'` (the transitions.py pattern), and the event is written only
+after the claim succeeds, so a double click or a reject racing an approve
+can never apply a change that was rejected. Claim and event write are two
+PostgREST calls, not one transaction -- the same documented trade-off as
+the status history row.
+
+### Shared details apply to every session
+
+Name, description and purpose are shared by every session of a request, so
+an approved change to one of them is written to all the organiser's
+sessions with that `shared_event_id`. Every other field is per session.
+
+### Significant changes are gated on acknowledging their impact, not blocked
+
+Before approval the coordinator sees which arrangements a change disturbs
+(`app/events/change_impact.py`), and the approve call must name every
+affected area in `acknowledge_impacts`, or it is refused with 409. Areas,
+not a plain `true`: the check is re-run at approval, so an impact that
+appeared after the page loaded (a new registration, a booking just
+confirmed) is refused rather than waved through. The accepted impacts are
+saved in `event_change_requests.acknowledged_impacts` for the audit trail.
+
+It warns rather than blocks because a requirement change is often exactly
+why arrangements must be redone -- refusing it would push the organiser to
+cancel and re-create the event. It also deliberately writes nothing to
+bookings or registrations; following up is the coordinator's call.
+"conflict" means checked against real rows; "check" means the area has no
+records yet (equipment, technical support), so the coordinator confirms by
+hand.
+
+### Change requests and event logs are two tables
+
+`event_change_requests` is what the organiser ASKED for, plus the
+coordinator's review: linked to the request (`shared_event_id`) and the
+session that needs to change (`event_id`). `event_logs` is the audit trail
+of what actually CHANGED: `event_log_id`, `shared_event_id`, `changes`
+(`{field: {from, to}}`), `changed_by` and `changed_at` -- linked to the
+request only, not to a session or a change request (the team's live
+schema). One entry per change: approving a shared detail writes every
+session but is logged once. Entries come in two kinds, told apart by who
+made them, since the live table has no kind column:
+
+- **requested**, by the request's organiser, who can only ask: submitting
+  a change request, or fixing a rejected session before resubmitting it.
+- **changed**, by the coordinator, whose edits take effect: a direct edit,
+  or approving a change request (`changed_by` is the coordinator).
+
+The history therefore reads "Change requested by <organiser>", then (if
+approved) "Changed by <coordinator>". Someone who is both the organiser
+and the assigned coordinator of the same event counts as changed. Drafts
+aren't logged, and status changes stay in `event_status_log`. The log is
+insert-only (RLS), and the event page shows it as "Change History" with
+each person's name (`profiles` through `changed_by`).
+
+The live tables were adjusted in the dashboard after the first draft of
+the migration; `20261009000000_event_change_requests_and_logs.sql` was
+rewritten to match them (live is the source of truth, as in
+§"Live schema was the source of truth when reconciling migrations"),
+plus two agreed fixes it also applies to live: `event_logs.change_request_id`
+renamed to `event_log_id` (it is the entry's own id, not a link), and
+`event_change_requests.reviewed_at` restored (so a rejection records when
+it was decided).
+

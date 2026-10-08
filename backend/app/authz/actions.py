@@ -48,6 +48,13 @@ EVENT_START_PLANNING = "event.start_planning"
 EVENT_CONFIRM = "event.confirm"
 EVENT_COMPLETE = "event.complete"
 
+# IS-21 Request for Event Change: "The Event Organiser can request
+# permitted changes for an event that has been submitted" (request) and
+# "The assigned Event Coordinator can view and review the requested
+# change" (review = approve or reject). Viewing reuses EVENT_VIEW.
+EVENT_REQUEST_CHANGE = "event.request_change"
+EVENT_REVIEW_CHANGE = "event.review_change"
+
 # -- coordinators --------------------------------------------------------
 # Source: "Coordinator needs reassignment" -- the current coordinator
 # picks who to hand the event to, so they need the list of other Event

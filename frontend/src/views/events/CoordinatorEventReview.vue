@@ -15,8 +15,9 @@
  *
  * Editing:
  *   Edit Details -> POST /events/<id>. Once a request is submitted only the
- *               assigned coordinator may change it (IS-31), while it's
- *               under review or in planning (rule_event_edit). This edits
+ *               assigned coordinator may change it (IS-31), at any point
+ *               until it's completed or cancelled (rule_event_edit).
+ *               Each edit is recorded in the event's Change History. This edits
  *               THIS session only -- each session is its own event record,
  *               reviewed on its own -- with the same form and as-you-type
  *               validation the organiser uses (EventSessionFields).
@@ -76,8 +77,9 @@ function sessionWhen(session) {
 const canReassign = computed(() => ['under_review', 'approved', 'planning', 'confirmed'].includes(props.event.status))
 const otherCoordinators = computed(() => coordinators.value.filter((c) => c.id !== auth.profile?.id))
 
-// Same status window as rule_event_edit's coordinator branch on the backend.
-const canEdit = computed(() => ['under_review', 'planning'].includes(props.event.status))
+// Same status window as rule_event_edit's coordinator branch on the backend:
+// any time, until the event is completed or cancelled.
+const canEdit = computed(() => !['completed', 'cancelled'].includes(props.event.status))
 const editing = ref(false)
 const editForm = reactive({ name: '', description: '', purpose: '', session: null })
 const editErrors = reactive({})
