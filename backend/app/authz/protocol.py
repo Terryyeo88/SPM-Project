@@ -27,3 +27,9 @@ class VenueBookingLike(Protocol):
     id: str
     requested_by: str
     status: str
+
+
+class EquipmentRequestLike(Protocol):
+    id: str
+    requested_by: str
+    status: str

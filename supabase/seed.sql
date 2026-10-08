@@ -288,3 +288,63 @@ begin
       (37, time '10:00', time '12:00', now() + interval '2 hours')
     ) as s(start_in, start_t, end_t, opens);
 end $$;
+
+
+-- ============================================================
+-- Equipment inventory (Check Equipment Availability, Nawaz, IS-18)
+-- ============================================================
+-- One Technical Support Staff account, the four equipment types the event
+-- form already offers (app.events.event_service.EQUIPMENT), and a pool of
+-- individual units (unit-level tracking, per the story's AC). PRJ-003 is
+-- under maintenance on purpose, so the availability check has an
+-- out-of-service unit to leave out of the count.
+--
+-- Requests and reservations are intentionally NOT duplicated here -- they
+-- need real event/profile ids and dates relative to today, which this
+-- static file can't look up the way seed_equipment_demo() in
+-- backend/seed.py does; run that script for the demo requests. Every
+-- insert here is guarded so re-running this file is safe.
+do $$
+declare
+  v_id uuid;
+begin
+  select id into v_id from public.profiles where email = 'techsupport1@example.com';
+  if v_id is null then
+    v_id := gen_random_uuid();
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at, confirmation_token, email_change,
+      email_change_token_new, recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'techsupport1@example.com', crypt('Password123!', gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
+      now(), now(), '', '', '', ''
+    );
+    insert into public.profiles (id, name, email) values (v_id, 'Ivan Goh', 'techsupport1@example.com');
+  end if;
+  insert into public.user_roles (user_id, role) values (v_id, 'technical_support_staff') on conflict do nothing;
+end $$;
+
+insert into public.equipment_types (name)
+values ('microphone'), ('projector'), ('screen'), ('wifi')
+on conflict (name) do nothing;
+
+insert into public.equipment (equipment_type_id, asset_tag, status, notes)
+select t.id, u.asset_tag, u.status::public.equipment_status, u.notes
+from (values
+  ('projector', 'PRJ-001', 'available', null),
+  ('projector', 'PRJ-002', 'available', null),
+  ('projector', 'PRJ-003', 'maintenance', 'Lamp replacement pending'),
+  ('microphone', 'MIC-001', 'available', null),
+  ('microphone', 'MIC-002', 'available', null),
+  ('microphone', 'MIC-003', 'available', null),
+  ('microphone', 'MIC-004', 'available', null),
+  ('screen', 'SCR-001', 'available', null),
+  ('screen', 'SCR-002', 'available', null),
+  ('wifi', 'WIF-001', 'available', null),
+  ('wifi', 'WIF-002', 'available', null)
+) as u(type_name, asset_tag, status, notes)
+join public.equipment_types t on t.name = u.type_name
+on conflict (asset_tag) do nothing;

@@ -13,8 +13,9 @@ proves it. "The schema could technically support it" is not a source on
 its own -- see rules.py's docstring on EVENT_LIST / EVENT_CREATE for why
 that distinction matters.
 
-Deliberately NOT here: anything about registrations or equipment (no
-such tables exist yet -- whoever builds those stories should add their
+Deliberately NOT here: anything about equipment REQUEST CREATION or
+RESERVATION (the "Record Equipment Request" and "Accept an equipment
+request" stories are not built -- whoever builds them should add their
 own actions the same way, sourced the same way), and no profile.view_*
 (GET /me needs no policy check at all; see app/me/routes.py).
 """
@@ -119,3 +120,23 @@ VENUE_BOOKING_VIEW = "venue_booking.view"
 VENUE_BOOKING_LIST = "venue_booking.list"
 VENUE_BOOKING_APPROVE = "venue_booking.approve"
 VENUE_BOOKING_REJECT = "venue_booking.reject"
+
+# -- equipment (Nawaz, Sprint 2: IS-18 Check Equipment Availability) --------
+# Source: "As a Technical Support Staff, I want to check whether sufficient
+# equipment is available for a requested date and time so that I can
+# confirm or flag equipment requests." Four read-only actions; none of
+# them changes anything (accepting/rejecting a request is a different
+# story).
+#
+#   equipment.list / equipment.view -- AC: "When viewing an equipment
+#       record, the Technical Support Staff can view when the equipment is
+#       occupied along with the event that it is reserved for".
+#   equipment_request.list / equipment_request.view -- AC: "Can select an
+#       equipment request and view the required date and time" and
+#       "Submitted equipment request is viewable later".
+#   equipment_request.check_availability -- the story itself.
+EQUIPMENT_LIST = "equipment.list"
+EQUIPMENT_VIEW = "equipment.view"
+EQUIPMENT_REQUEST_LIST = "equipment_request.list"
+EQUIPMENT_REQUEST_VIEW = "equipment_request.view"
+EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"

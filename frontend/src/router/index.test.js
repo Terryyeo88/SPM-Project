@@ -334,6 +334,54 @@ describe('router: authentication and role-based route guarding', () => {
     })
   })
 
+  describe('equipment routes (Check Equipment Availability, IS-18)', () => {
+    const NON_STAFF = ['event_organizer', 'event_coordinator', 'venue_staff', 'attendee']
+
+    it.each([
+      ['/equipment', 'equipment'],
+      ['/equipment/requests', 'equipment-requests'],
+      ['/equipment/requests/req-1', 'equipment-request-details'],
+      ['/equipment/unit-1', 'equipment-details'],
+    ])('technical_support_staff reaches %s', async (path, name) => {
+      mockSession(true)
+      mockMe('technical_support_staff')
+      await router.push(path)
+      expect(router.currentRoute.value.name).toBe(name)
+    })
+
+    it('the requestId and equipmentId arrive as route params', async () => {
+      mockSession(true)
+      mockMe('technical_support_staff')
+      await router.push('/equipment/requests/req-1')
+      expect(router.currentRoute.value.params.requestId).toBe('req-1')
+      await router.push('/equipment/unit-1')
+      expect(router.currentRoute.value.params.equipmentId).toBe('unit-1')
+    })
+
+    it.each(NON_STAFF)('%s is redirected to /dashboard from every equipment route', async (role) => {
+      for (const path of ['/equipment', '/equipment/requests', '/equipment/requests/req-1', '/equipment/unit-1']) {
+        router = createAppRouter()
+        mockSession(true)
+        mockMe(role)
+        await router.push(path)
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      }
+    })
+
+    it('an unauthenticated visitor is sent to /login', async () => {
+      mockSession(false)
+      await router.push('/equipment/requests')
+      expect(router.currentRoute.value.name).toBe('login')
+    })
+
+    it('static /equipment/requests is never swallowed by /equipment/:equipmentId', async () => {
+      mockSession(true)
+      mockMe('technical_support_staff')
+      await router.push('/equipment/requests')
+      expect(router.currentRoute.value.name).toBe('equipment-requests')
+    })
+  })
+
   // The sharpest regression guard here: if the dynamic /events/:eventId
   // ever swallowed the static /events/reassign, an ORGANISER (allowed on
   // event-details, denied on reassign) would suddenly be let through to a

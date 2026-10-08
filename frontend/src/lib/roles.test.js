@@ -190,8 +190,20 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(roleLabel(ROLES.EVENT_COORDINATOR_LEAD)).toBe('Event Coordinator Lead')
   })
 
-  it('technical_support_staff sees nothing (Equipment features explicitly deferred)', () => {
-    expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).toEqual([])
+  it('technical_support_staff sees exactly the two equipment nav links (Check Equipment Availability, IS-18)', () => {
+    expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF]).sort()).toEqual(['equipment', 'equipment-requests'])
+  })
+
+  it('the equipment routes are reachable by technical_support_staff only; the two detail pages are not nav links', () => {
+    const equipmentRoutes = ['equipment', 'equipment-requests', 'equipment-request-details', 'equipment-details']
+    for (const route of equipmentRoutes) {
+      expect(reachableRoutes([ROLES.TECHNICAL_SUPPORT_STAFF])).toContain(route)
+      for (const role of [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF, ROLES.ATTENDEE]) {
+        expect(reachableRoutes([role])).not.toContain(route)
+      }
+    }
+    expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).not.toContain('equipment-request-details')
+    expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).not.toContain('equipment-details')
   })
 
   it('a multi-role user (coordinator + venue_staff) sees the UNION, not just one role\'s links', () => {
@@ -214,7 +226,9 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('holding every role at once yields the union of everything, each link exactly once', () => {
     const all = visibleLinks(Object.values(ROLES))
-    expect(all.sort()).toEqual(['events', 'reassign-coordinator', 'venue-booking-queue', 'venues'].sort())
+    expect(all.sort()).toEqual(
+      ['equipment', 'equipment-requests', 'events', 'reassign-coordinator', 'venue-booking-queue', 'venues'].sort(),
+    )
     expect(new Set(all).size).toBe(all.length)
   })
 
