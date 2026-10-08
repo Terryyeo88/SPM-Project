@@ -64,7 +64,7 @@ class _FakeSupabase:
     def __init__(self, **tables):
         self._tables = {
             name: tables.get(name, [])
-            for name in ("equipment", "equipment_reservations", "equipment_requests")
+            for name in ("equipment_units", "equipment_reservations", "equipment_requests")
         }
 
     def table(self, name):
@@ -137,7 +137,7 @@ def install(monkeypatch):
 
 def test_all_units_free_is_sufficient(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 2, None)])],
     )
     result = service.check_availability("req-1")
@@ -152,7 +152,7 @@ def test_all_units_free_is_sufficient(install):
 
 def test_overlapping_reservation_by_another_request_is_subtracted(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 2, None)])],
         equipment_reservations=[
             _reservation("u1", "2026-12-01T10:00:00+08:00", "2026-12-01T14:00:00+08:00", event_name="Gala")
@@ -170,7 +170,7 @@ def test_overlapping_reservation_by_another_request_is_subtracted(install):
 
 def test_flags_only_the_short_item_not_the_whole_request(install):
     install(
-        equipment=[
+        equipment_units=[
             _unit("u1", "PRJ-001", PROJECTOR),
             _unit("m1", "MIC-001", MIC),
             _unit("m2", "MIC-002", MIC),
@@ -187,7 +187,7 @@ def test_flags_only_the_short_item_not_the_whole_request(install):
 
 def test_reservation_for_a_different_period_is_not_subtracted(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 1, None)])],
         equipment_reservations=[
             _reservation("u1", "2026-12-02T09:00:00+08:00", "2026-12-02T13:00:00+08:00"),
@@ -201,7 +201,7 @@ def test_reservation_for_a_different_period_is_not_subtracted(install):
 def test_back_to_back_reservation_does_not_conflict(install):
     # Half-open [start, end): a unit returned at 09:00 is free from 09:00.
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 1, None)])],
         equipment_reservations=[
             _reservation("u1", "2026-12-01T05:00:00+08:00", "2026-12-01T09:00:00+08:00"),
@@ -213,7 +213,7 @@ def test_back_to_back_reservation_does_not_conflict(install):
 
 def test_reservation_overlapping_by_one_minute_conflicts(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 1, None)])],
         equipment_reservations=[
             _reservation("u1", "2026-12-01T12:59:00+08:00", "2026-12-01T17:00:00+08:00"),
@@ -226,7 +226,7 @@ def test_timezones_are_compared_as_instants_not_wall_clock(install):
     # 09:00-13:00 SGT is 01:00-05:00 UTC. A reservation written in UTC as
     # 04:00-06:00 overlaps; one at 05:00-07:00 only touches the end.
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 2, None)])],
         equipment_reservations=[
             _reservation("u1", "2026-12-01T04:00:00+00:00", "2026-12-01T06:00:00+00:00"),
@@ -239,7 +239,7 @@ def test_timezones_are_compared_as_instants_not_wall_clock(install):
 
 def test_units_out_of_service_are_not_counted_available(install):
     install(
-        equipment=[
+        equipment_units=[
             _unit("u1", "PRJ-001", PROJECTOR),
             _unit("u2", "PRJ-002", PROJECTOR, status="maintenance"),
             _unit("u3", "PRJ-003", PROJECTOR, status="retired"),
@@ -257,7 +257,7 @@ def test_requests_own_reservations_are_excluded(install):
     # Checking an already-confirmed request must not count its own held
     # units against itself.
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 1, None)], status="confirmed")],
         equipment_reservations=[
             _reservation("u1", "2026-12-01T09:00:00+08:00", "2026-12-01T13:00:00+08:00", request_id="req-1"),
@@ -269,7 +269,7 @@ def test_requests_own_reservations_are_excluded(install):
 
 
 def test_type_with_no_units_is_flagged_not_an_error(install):
-    install(equipment=[], equipment_requests=[_request(items=[(SCREEN, 1, None)])])
+    install(equipment_units=[], equipment_requests=[_request(items=[(SCREEN, 1, None)])])
     item = service.check_availability("req-1")["items"][0]
     assert item["total_units"] == 0
     assert item["available"] == 0
@@ -279,7 +279,7 @@ def test_type_with_no_units_is_flagged_not_an_error(install):
 
 def test_units_of_other_types_do_not_leak_into_the_count(install):
     install(
-        equipment=[_unit("m1", "MIC-001", MIC), _unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("m1", "MIC-001", MIC), _unit("u1", "PRJ-001", PROJECTOR)],
         equipment_requests=[_request(items=[(PROJECTOR, 1, None)])],
     )
     item = service.check_availability("req-1")["items"][0]
@@ -288,7 +288,7 @@ def test_units_of_other_types_do_not_leak_into_the_count(install):
 
 
 def test_response_carries_request_period_and_event(install):
-    install(equipment=[], equipment_requests=[_request(items=[])])
+    install(equipment_units=[], equipment_requests=[_request(items=[])])
     result = service.check_availability("req-1")
     assert result["request"]["needed_start"] == "2026-12-01T09:00:00+08:00"
     assert result["request"]["event_name"] == "Tech Symposium"
@@ -365,13 +365,15 @@ def test_list_requests_fails_closed_for_unrelated_role(install):
 
 
 def test_list_equipment_flattens_type_and_filters(install):
-    install(equipment=[_unit("u1", "PRJ-001", PROJECTOR), _unit("m1", "MIC-001", MIC)])
+    install(equipment_units=[_unit("u1", "PRJ-001", PROJECTOR), _unit("m1", "MIC-001", MIC)])
     assert [u["asset_tag"] for u in service.list_equipment()] == ["MIC-001", "PRJ-001"]
     assert [u["asset_tag"] for u in service.list_equipment(type_name="projector")] == ["PRJ-001"]
 
 
 def test_list_equipment_filters_by_status_and_rejects_unknown(install):
-    install(equipment=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR, status="maintenance")])
+    install(
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR), _unit("u2", "PRJ-002", PROJECTOR, status="maintenance")]
+    )
     assert [u["asset_tag"] for u in service.list_equipment(status="maintenance")] == ["PRJ-002"]
     with pytest.raises(ValidationError):
         service.list_equipment(status="bogus")
@@ -379,7 +381,7 @@ def test_list_equipment_filters_by_status_and_rejects_unknown(install):
 
 def test_get_equipment_returns_occupancy_with_event_and_period(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_reservations=[
             _reservation("u1", "2026-12-05T09:00:00+08:00", "2026-12-05T13:00:00+08:00", event_name="Gala",
                          event_id="event-7", request_id="req-7"),
@@ -398,13 +400,13 @@ def test_get_equipment_returns_occupancy_with_event_and_period(install):
 
 
 def test_get_equipment_with_no_reservations_has_empty_occupancy(install):
-    install(equipment=[_unit("u1", "PRJ-001", PROJECTOR)])
+    install(equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)])
     assert service.get_equipment("u1")["occupancy"] == []
 
 
 def test_get_equipment_only_exposes_event_id_and_name(install):
     install(
-        equipment=[_unit("u1", "PRJ-001", PROJECTOR)],
+        equipment_units=[_unit("u1", "PRJ-001", PROJECTOR)],
         equipment_reservations=[_reservation("u1", "2026-12-01T09:00:00+08:00", "2026-12-01T13:00:00+08:00")],
     )
     occupancy = service.get_equipment("u1")["occupancy"][0]

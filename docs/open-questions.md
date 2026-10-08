@@ -409,11 +409,11 @@ decisions worth double-checking.
 - **Unit level, per the AC.** The story's Note says aggregate or unit level
   is acceptable and the team should propose one; the updated AC then adds
   "Track equipment based on unit level." Built as unit level: one
-  `equipment` row per physical item, identified by an `asset_tag`, with no
+  `equipment_units` row per physical item, identified by an `asset_tag`, with no
   stored quantity anywhere (availability is always a count of units). This
   is also what the later "Specific equipment IDs are listed alongside the
   quantity" Reservation criterion needs. If the customer meant aggregate
-  after all, the `equipment` table would collapse into a quantity on
+  after all, the `equipment_units` table would collapse into a quantity on
   `equipment_types` and the occupancy view would lose its per-unit detail.
 
 - **The schema for requests and reservations had to be created here.**
@@ -480,3 +480,12 @@ decisions worth double-checking.
   building it. Apply it to a dev database (`supabase db reset`) and run
   `python seed.py` before relying on it. The integration-test suite has no
   equipment tests, for the same reason.
+
+- **The units table is called `equipment_units`, not `equipment`.** The live
+  database already contains an enum type named `public.equipment` that no
+  migration in this repo creates (found when the first version of this
+  migration failed with "type equipment already exists"). A table cannot
+  share a name with a type in the same schema, so the table was renamed
+  rather than touching a type whose users are unknown. Worth finding out
+  who made that enum and whether anything uses it.
+

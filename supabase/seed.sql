@@ -331,7 +331,7 @@ insert into public.equipment_types (name)
 values ('microphone'), ('projector'), ('screen'), ('wifi')
 on conflict (name) do nothing;
 
-insert into public.equipment (equipment_type_id, asset_tag, status, notes)
+insert into public.equipment_units (equipment_type_id, asset_tag, status, notes)
 select t.id, u.asset_tag, u.status::public.equipment_status, u.notes
 from (values
   ('projector', 'PRJ-001', 'available', null),

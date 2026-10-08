@@ -335,9 +335,9 @@ def seed_equipment_inventory() -> dict[str, dict]:
             types_by_name[type_name] = supabase.table("equipment_types").insert({"name": type_name}).execute().data[0]
 
     for type_name, asset_tag, status, notes in EQUIPMENT_UNITS:
-        existing = supabase.table("equipment").select("id").eq("asset_tag", asset_tag).execute()
+        existing = supabase.table("equipment_units").select("id").eq("asset_tag", asset_tag).execute()
         if not existing.data:
-            supabase.table("equipment").insert(
+            supabase.table("equipment_units").insert(
                 {
                     "equipment_type_id": types_by_name[type_name]["id"],
                     "asset_tag": asset_tag,
@@ -381,7 +381,9 @@ def seed_equipment_demo(
         supabase.table("equipment_requests").delete().eq("event_id", event["id"]).execute()
 
     def unit_ids(*asset_tags):
-        rows = supabase.table("equipment").select("id, asset_tag").in_("asset_tag", list(asset_tags)).execute().data
+        rows = (
+            supabase.table("equipment_units").select("id, asset_tag").in_("asset_tag", list(asset_tags)).execute().data
+        )
         by_tag = {row["asset_tag"]: row["id"] for row in rows}
         return [by_tag[tag] for tag in asset_tags]
 

@@ -53,7 +53,9 @@ create table if not exists public.equipment_types (
 -- ============================================================
 -- 2. Equipment units
 -- ============================================================
--- One row per physical item. `asset_tag` is the human-readable "equipment
+-- One row per physical item. Named equipment_units, not equipment: the live
+-- database already has an unrelated enum TYPE called public.equipment, and a
+-- table cannot share a name with a type. `asset_tag` is the human-readable "equipment
 -- ID" the Reservation story's AC refers to ("Specific equipment IDs are
 -- listed alongside the quantity"), unique so it can be used to identify a
 -- unit unambiguously.
@@ -69,7 +71,7 @@ create table if not exists public.equipment_types (
 
 create type public.equipment_status as enum ('available', 'maintenance', 'retired');
 
-create table if not exists public.equipment (
+create table if not exists public.equipment_units (
   id uuid primary key default gen_random_uuid(),
   equipment_type_id uuid not null references public.equipment_types (id),
   asset_tag text not null unique,
@@ -79,11 +81,11 @@ create table if not exists public.equipment (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_equipment_type_id on public.equipment (equipment_type_id);
+create index if not exists idx_equipment_units_type_id on public.equipment_units (equipment_type_id);
 
-drop trigger if exists trg_equipment_updated_at on public.equipment;
-create trigger trg_equipment_updated_at
-  before update on public.equipment
+drop trigger if exists trg_equipment_units_updated_at on public.equipment_units;
+create trigger trg_equipment_units_updated_at
+  before update on public.equipment_units
   for each row execute function public.set_updated_at();
 
 -- ============================================================
@@ -174,7 +176,7 @@ create extension if not exists btree_gist with schema extensions;
 
 create table if not exists public.equipment_reservations (
   id uuid primary key default gen_random_uuid(),
-  equipment_id uuid not null references public.equipment (id),
+  equipment_id uuid not null references public.equipment_units (id),
   request_item_id uuid not null references public.equipment_request_items (id) on delete cascade,
   reserved_start timestamptz not null,
   reserved_end timestamptz not null,
@@ -204,14 +206,14 @@ create index if not exists idx_equipment_reservations_request_item_id
 -- way venue_blocks left its write side to the blocking story.
 
 alter table public.equipment_types enable row level security;
-alter table public.equipment enable row level security;
+alter table public.equipment_units enable row level security;
 alter table public.equipment_requests enable row level security;
 alter table public.equipment_request_items enable row level security;
 alter table public.equipment_reservations enable row level security;
 
 create policy "authenticated read equipment_types" on public.equipment_types
   for select using (auth.role() = 'authenticated');
-create policy "authenticated read equipment" on public.equipment
+create policy "authenticated read equipment_units" on public.equipment_units
   for select using (auth.role() = 'authenticated');
 create policy "authenticated read equipment_requests" on public.equipment_requests
   for select using (auth.role() = 'authenticated');
@@ -225,7 +227,7 @@ create policy "authenticated read equipment_reservations" on public.equipment_re
 --   drop table if exists public.equipment_reservations;
 --   drop table if exists public.equipment_request_items;
 --   drop table if exists public.equipment_requests;
---   drop table if exists public.equipment;
+--   drop table if exists public.equipment_units;
 --   drop table if exists public.equipment_types;
 --   drop type if exists public.equipment_request_status;
 --   drop type if exists public.equipment_status;

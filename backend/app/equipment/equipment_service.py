@@ -71,7 +71,9 @@ def list_equipment(type_name: str | None = None, status: str | None = None) -> l
     rule_equipment_list)."""
     if status is not None and status not in EQUIPMENT_STATUSES:
         raise ValidationError(f"status must be one of: {', '.join(sorted(EQUIPMENT_STATUSES))}.")
-    query = supabase.table("equipment").select("id, asset_tag, status, notes, equipment_type_id, equipment_types(name)")
+    query = supabase.table("equipment_units").select(
+        "id, asset_tag, status, notes, equipment_type_id, equipment_types(name)"
+    )
     if status is not None:
         query = query.eq("status", status)
     rows = query.order("asset_tag").execute().data or []
@@ -98,7 +100,7 @@ def get_equipment(equipment_id: str) -> dict:
     "only what the viewer is entitled to" discipline as
     calendar_service's events(name, status) embed."""
     result = (
-        supabase.table("equipment")
+        supabase.table("equipment_units")
         .select("id, asset_tag, status, notes, equipment_type_id, equipment_types(name)")
         .eq("id", equipment_id)
         .maybe_single()
@@ -249,7 +251,7 @@ def check_availability(request_id: str) -> dict:
     units_by_type: dict[str, list[dict]] = {type_id: [] for type_id in type_ids}
     if type_ids:
         units = (
-            supabase.table("equipment")
+            supabase.table("equipment_units")
             .select("id, asset_tag, status, equipment_type_id")
             .in_("equipment_type_id", type_ids)
             .order("asset_tag")
