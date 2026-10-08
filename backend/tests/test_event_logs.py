@@ -83,6 +83,8 @@ def _logs(fake):
 
 
 def test_diff_keeps_only_changed_fields_as_from_and_to():
+    """The diff keeps only fields whose value changed, as {from, to}; blank
+    and empty count as the same."""
     before = {"expected_attendance": 100, "room_layout": "theatre", "special_requests": None}
     after = {"expected_attendance": 150, "room_layout": "theatre", "special_requests": ""}
 
@@ -90,6 +92,7 @@ def test_diff_keeps_only_changed_fields_as_from_and_to():
 
 
 def test_diff_treats_the_same_instant_in_another_timezone_as_unchanged():
+    """The same moment written in another timezone is not a change."""
     before = {"registration_end_datetime": "2026-11-01T01:00:00+00:00"}
     after = {"registration_end_datetime": "2026-11-01T09:00:00+08:00"}
 
@@ -97,6 +100,9 @@ def test_diff_treats_the_same_instant_in_another_timezone_as_unchanged():
 
 
 def test_entry_records_what_who_and_which_request(fake):
+    """A log entry records what changed (in the API's field names), who
+    changed it and which event request -- and sends only the live table's
+    columns, leaving the time to the database."""
     before = fake.get("session-1")
     after = {**before, "expected_attendance": 150, "equipment_needed": {"equipment": [{"item": "wifi", "quantity": 1}]}}
 
@@ -117,12 +123,14 @@ def test_entry_records_what_who_and_which_request(fake):
 
 
 def test_nothing_is_logged_when_nothing_changed(fake):
+    """If nothing actually changed, no log entry is written."""
     row = fake.get("session-1")
     assert event_log.record_event_change(row, dict(row), COORDINATOR) is None
     assert _logs(fake) == []
 
 
 def test_a_legacy_event_is_logged_under_its_own_id(fake):
+    """An old event without a shared_event_id is logged under its own id."""
     legacy = _session(id="legacy-1", shared_event_id=None)
     entry = event_log.record_event_change(legacy, {**legacy, "room_layout": "banquet"}, COORDINATOR)
     assert entry["shared_event_id"] == "legacy-1"
@@ -153,6 +161,8 @@ def test_requesting_a_change_is_logged_as_a_request_not_a_change(fake):
 
 
 def test_a_rejected_change_request_adds_nothing_after_the_request(fake):
+    """A rejected request leaves only the "requested" entry -- nothing was
+    changed, so nothing else is logged."""
     change = request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "banquet"}})
     reject_change_request(_event(fake), change["event_change_req_id"], COORDINATOR, "No banquet rooms.")
 
@@ -160,6 +170,8 @@ def test_a_rejected_change_request_adds_nothing_after_the_request(fake):
 
 
 def test_an_approved_change_request_reads_requested_then_changed(fake):
+    """An approved request reads as two entries: "requested" by the
+    organiser, then "changed" by the coordinator with the applied values."""
     change = request_event_change(_event(fake), ORGANISER, {"changes": {"expected_attendance": 150}})
 
     approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
@@ -171,6 +183,8 @@ def test_an_approved_change_request_reads_requested_then_changed(fake):
 
 
 def test_a_shared_detail_is_written_to_every_session_but_logged_once(fake):
+    """A name change is written to every session but logged once, not once
+    per session."""
     change = request_event_change(_event(fake), ORGANISER, {"changes": {"name": "Community Summit"}})
 
     approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
@@ -183,6 +197,9 @@ def test_a_shared_detail_is_written_to_every_session_but_logged_once(fake):
 
 
 def test_someone_who_is_both_organiser_and_coordinator_makes_changes():
+    """Someone who is both the organiser and the assigned coordinator makes
+    changes that take effect, so their entries count as "changed"; so does
+    an entry with no author."""
     both = SimpleNamespace(organizer_id="user-1", coordinator_id="user-1")
     assert event_log.entry_kind({"changed_by": "user-1"}, both) == "changed"
     assert event_log.entry_kind({"changed_by": None}, both) == "changed"
@@ -204,6 +221,8 @@ def _auth(signing_key, user_id):
 
 
 def test_coordinator_edit_is_logged(client, signing_key, monkeypatch, fake):
+    """The coordinator's direct edit through the API is logged as a
+    "changed" entry with what changed."""
     _mock_profile(monkeypatch, ["event_coordinator"])
 
     response = client.post(
@@ -220,6 +239,8 @@ def test_coordinator_edit_is_logged(client, signing_key, monkeypatch, fake):
 
 
 def test_organiser_fixing_a_rejected_session_is_logged(client, signing_key, monkeypatch, fake):
+    """The organiser fixing a rejected session is logged as a "requested"
+    entry, because it goes back to the coordinator for review."""
     fake.rows[0]["status"] = "rejected"
     _mock_profile(monkeypatch, ["event_organizer"])
 
@@ -238,6 +259,8 @@ def test_organiser_fixing_a_rejected_session_is_logged(client, signing_key, monk
 
 
 def test_draft_edits_are_not_logged(client, signing_key, monkeypatch, fake):
+    """Edits to a draft aren't logged -- it hasn't been submitted to anyone
+    yet."""
     fake.rows[0]["status"] = "draft"
     _mock_profile(monkeypatch, ["event_organizer"])
 
@@ -251,6 +274,8 @@ def test_draft_edits_are_not_logged(client, signing_key, monkeypatch, fake):
 
 
 def test_log_is_the_whole_request_newest_first(client, signing_key, monkeypatch, fake):
+    """The history covers the whole event request (opened from any of its
+    sessions), newest first, and leaves out other events' entries."""
     fake.tables["event_logs"] = [
         {"event_log_id": "old", "shared_event_id": "group-1", "changed_at": "2026-10-01T00:00:00Z"},
         {"event_log_id": "new", "shared_event_id": "group-1", "changed_at": "2026-10-02T00:00:00Z"},
@@ -265,6 +290,8 @@ def test_log_is_the_whole_request_newest_first(client, signing_key, monkeypatch,
 
 
 def test_log_includes_who_made_each_change(fake):
+    """The history query also fetches the name of whoever made each entry,
+    through the changed_by -> profiles link."""
     event_log.list_event_logs(_event(fake))
     select = next(call for call in fake.calls if call["table"] == "event_logs")
     # The changer's name, through the changed_by -> profiles foreign key.
@@ -272,12 +299,15 @@ def test_log_includes_who_made_each_change(fake):
 
 
 def test_log_is_hidden_from_unrelated_users(client, signing_key, monkeypatch, fake):
+    """A coordinator not assigned to the event gets a 404 for its history."""
     _mock_profile(monkeypatch, ["event_coordinator"])
     response = client.get("/events/session-1/logs", headers=_auth(signing_key, "coord-2"))
     assert response.status_code == 404
 
 
 def test_list_for_a_legacy_event_reads_its_own_id(fake):
+    """The history for an old event without a shared_event_id is read under
+    its own id."""
     fake.rows.append(_session(id="legacy-1", shared_event_id=None))
     fake.tables["event_logs"] = [{"event_log_id": "a", "shared_event_id": "legacy-1"}]
 

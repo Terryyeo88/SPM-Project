@@ -356,7 +356,7 @@ watch(() => props.event.id, () => {
           <form v-else class="reject-form" @submit.prevent="reject(change)">
             <label class="field">
               <span class="field-label">Reason for rejecting</span>
-              <textarea v-model="rejectReason" class="input" rows="2" placeholder="Tell the organiser why this change can't be made." />
+              <textarea v-model="rejectReason" class="input" rows="3" placeholder="Tell the organiser why this change can't be made." />
             </label>
             <div class="actions">
               <button type="submit" class="btn btn-danger" :disabled="busy">{{ busy ? 'Rejecting...' : 'Confirm Rejection' }}</button>
@@ -376,6 +376,9 @@ watch(() => props.event.id, () => {
 .small { font-size: 13px; margin: 4px 0 0; }
 .notice { margin: 0; padding: 10px 14px; border-radius: 4px; background: #f7efe1; color: #8a5a12; font-size: 13px; }
 .request-form, .reject-form { display: flex; flex-direction: column; gap: 14px; }
+/* Inside the .review button row: take the whole row, so the reason box is as
+   wide as the change table and impact list above it. */
+.reject-form { flex: 1 1 100%; }
 .actions, .review { display: flex; flex-wrap: wrap; gap: 10px; }
 .message { margin: 0; font-size: 14px; }
 .error { color: #b42318; }

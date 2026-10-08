@@ -82,6 +82,10 @@ def confirmed_event():
 
 
 def test_change_request_round_trips_and_approval_writes_the_event(confirmed_event):
+    """Against a real database: a request is saved with its before/after
+    values; approving it updates the event (still confirmed), and the event
+    log gets two entries -- the organiser's request and the coordinator's
+    applied change -- with exactly the live table's columns."""
     event, organizer, coordinator = confirmed_event
 
     change = request_event_change(event, organizer, {"changes": {"expected_attendance": 75}, "reason": "More RSVPs."})
@@ -110,6 +114,22 @@ def test_change_request_round_trips_and_approval_writes_the_event(confirmed_even
 
 
 def test_database_allows_only_one_pending_change_per_session(confirmed_event):
+    """The DATABASE itself enforces "at most one pending change request per
+    session" -- not just the app.
+
+    request_event_change checks for a pending request before saving, but two
+    requests sent at the same moment (a double click, two tabs) can both pass
+    that check before either saves. The unique index
+    uq_event_change_requests_one_pending_per_event is what stops the second.
+
+    So this test writes straight to the table, skipping the app's check:
+      1. a first pending request saves;
+      2. a second pending one for the same session is refused by Postgres
+         (error 23505, unique violation);
+      3. once the first is decided (rejected), a new pending one saves --
+         the index only counts pending rows.
+    Needs a real database (a fake can't enforce an index), so it runs only
+    against a local Supabase."""
     event, organizer, _ = confirmed_event
     row = {
         "shared_event_id": event.shared_event_id,

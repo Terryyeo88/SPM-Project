@@ -86,3 +86,38 @@ export function statusLabel(status) {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
+
+// -- One card per event request (same layout as the organiser's list) -------
+// Sessions of one request share a shared_event_id; groupIntoRequests
+// (lib/eventSessions) builds { key, name, sessions } in date order. The
+// dashboard groups each TAB's sessions, so a request whose sessions are at
+// different stages appears under each of those tabs with just its sessions
+// for that tab.
+
+/** The request's overall span: earliest session start to latest session end. */
+export function requestDateRange(request) {
+  const starts = request.sessions.map((s) => s.preferred_start_date).filter(Boolean).sort()
+  const ends = request.sessions.map((s) => s.preferred_end_date || s.preferred_start_date).filter(Boolean).sort()
+  if (!starts.length) return formatDateRange(null)
+  return formatDateRange(starts[0], ends[ends.length - 1])
+}
+
+/**
+ * One badge when every session is at the same stage, otherwise a count per
+ * status (e.g. "2 Approved", "1 Planning") so nothing is hidden -- the same
+ * rule as the organiser's list.
+ */
+export function requestStatusSummary(request) {
+  const counts = new Map()
+  for (const session of request.sessions) counts.set(session.status, (counts.get(session.status) || 0) + 1)
+  if (counts.size === 1) {
+    const [status] = counts.keys()
+    return [{ status, label: statusLabel(status) }]
+  }
+  return [...counts.entries()].map(([status, count]) => ({ status, label: `${count} ${statusLabel(status)}` }))
+}
+
+/** How many of the request's sessions are waiting on the coordinator's review. */
+export function sessionsAwaitingReview(request) {
+  return request.sessions.filter((session) => session.status === 'under_review').length
+}

@@ -5,6 +5,9 @@ import {
   formatDateRange,
   groupEventsByTab,
   isDashboardTab,
+  requestDateRange,
+  requestStatusSummary,
+  sessionsAwaitingReview,
   statusLabel,
   tabForStatus,
 } from './coordinatorDashboard'
@@ -113,5 +116,32 @@ describe('statusLabel', () => {
   it('turns snake_case statuses into title case', () => {
     expect(statusLabel('under_review')).toBe('Under Review')
     expect(statusLabel('confirmed')).toBe('Confirmed')
+  })
+})
+
+describe('request cards', () => {
+  const request = (sessions) => ({ key: 'group-1', name: 'Conference', sessions })
+
+  it('spans the earliest session start to the latest session end', () => {
+    const r = request([
+      { preferred_start_date: '2027-02-22', preferred_end_date: '2027-02-22' },
+      { preferred_start_date: '2027-03-01', preferred_end_date: '2027-03-02' },
+    ])
+    expect(requestDateRange(r)).toBe('22 Feb 2027 – 02 Mar 2027')
+    expect(requestDateRange(request([{ preferred_start_date: null }]))).toBe('Date not set')
+  })
+
+  it('shows one badge when every session is at the same stage, else a count per status', () => {
+    expect(requestStatusSummary(request([{ status: 'approved' }, { status: 'approved' }])))
+      .toEqual([{ status: 'approved', label: 'Approved' }])
+    expect(requestStatusSummary(request([{ status: 'approved' }, { status: 'planning' }, { status: 'approved' }])))
+      .toEqual([
+        { status: 'approved', label: '2 Approved' },
+        { status: 'planning', label: '1 Planning' },
+      ])
+  })
+
+  it('counts the sessions waiting on the coordinator', () => {
+    expect(sessionsAwaitingReview(request([{ status: 'under_review' }, { status: 'approved' }]))).toBe(1)
   })
 })
