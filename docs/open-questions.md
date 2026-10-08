@@ -403,3 +403,89 @@ decisions worth double-checking.
   available/occupied/maintenance -- nothing means retired. Nothing is
   silently excluded because nothing can be retired yet; flagged rather
   than assumed irrelevant.
+
+## Equipment Availability Checking (IS-18, Nawaz, 8 Oct)
+
+- **Unit level, per the AC.** The story's Note says aggregate or unit level
+  is acceptable and the team should propose one; the updated AC then adds
+  "Track equipment based on unit level." Built as unit level: one
+  `equipment_units` row per physical item, identified by an `asset_tag`, with no
+  stored quantity anywhere (availability is always a count of units). This
+  is also what the later "Specific equipment IDs are listed alongside the
+  quantity" Reservation criterion needs. If the customer meant aggregate
+  after all, the `equipment_units` table would collapse into a quantity on
+  `equipment_types` and the occupancy view would lose its per-unit detail.
+
+- **The schema for requests and reservations had to be created here.**
+  None of it existed. `equipment_requests` / `equipment_request_items` are
+  the shape the "Record Equipment Request for Event" story needs, and
+  `equipment_reservations` is the shape "Accept an equipment request and
+  reserve stock" needs, so those stories can write to them without
+  changing the tables. **Neither story is built.** There is no way in the
+  app yet to create a request, accept or reject one, update a reserved
+  quantity, or release equipment when an event is cancelled. Until the
+  first two land, requests and reservations only exist as seed data
+  (`seed_equipment_demo` in `backend/seed.py`), and the cancellation story
+  also needs a hook in the event cancel path.
+
+- **`events.equipment_needed` is left alone and is not the request.** It
+  is a free-form jsonb list on the event row from event creation, with no
+  status, requester or technical-requirements text. The new request tables
+  are a separate record. Whether creating an event's equipment list should
+  also create an `equipment_requests` row (so a coordinator doesn't enter
+  it twice) is for the Record Equipment Request story to decide.
+
+- **A unit `status` (available / maintenance / retired) was added, which no
+  AC names.** Without it a unit under repair would be counted as lendable
+  and the check would over-promise. Only `available` units count.
+  Occupancy itself is still derived from reservations, not stored on the
+  unit. Rename or drop the values if the team has a different idea of
+  out-of-service.
+
+- **"Confirmed event requests" is read as "has a reservation row."** A
+  reservation row only exists once a request has been accepted, so any
+  reservation on an overlapping period reduces availability. The check
+  does not also re-test the owning request's status: a reservation for a
+  non-confirmed request would be an inconsistency, and the safe reading is
+  that the unit is physically spoken for.
+
+- **The request's own reservations are excluded from its check.** Opening
+  an already-confirmed request would otherwise show it competing with
+  itself.
+
+- **Overlap is half-open.** A unit returned at 14:00 is available for a
+  request starting at 14:00, matching the venue booking overlap rule and
+  the database constraint. No setup or turnaround buffer is added to an
+  equipment period (venues get one from the venue's own configuration;
+  nothing in the equipment stories mentions one).
+
+- **A request's period is snapshotted** from the session's preferred
+  date/time when the request is created, rather than read from the event
+  each time, so a later edit to the event cannot silently change what a
+  submitted request or a reservation meant. When the Record story is
+  built it should compute `needed_start`/`needed_end` the way
+  `booking_service._event_window` does (Singapore time, missing end time
+  = end of day). The seed data uses its own dates, not the demo events'.
+
+- **Access.** Equipment records, the availability check and occupancy are
+  Technical Support Staff only. The occupancy view lists other events'
+  names, which no other role has a reason to see. The requesting
+  coordinator can fetch their own request through the API ("viewable
+  later"), but there is no coordinator screen for it yet. That screen
+  belongs with the Record story.
+
+- **The database exclusion constraint on reservations was not run against
+  a real Postgres.** The migration was syntax-checked and the application
+  logic is covered by unit tests, but no database was reachable while
+  building it. Apply it to a dev database (`supabase db reset`) and run
+  `python seed.py` before relying on it. The integration-test suite has no
+  equipment tests, for the same reason.
+
+- **The units table is called `equipment_units`, not `equipment`.** The live
+  database already contains an enum type named `public.equipment` that no
+  migration in this repo creates (found when the first version of this
+  migration failed with "type equipment already exists"). A table cannot
+  share a name with a type in the same schema, so the table was renamed
+  rather than touching a type whose users are unknown. Worth finding out
+  who made that enum and whether anything uses it.
+

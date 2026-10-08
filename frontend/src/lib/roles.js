@@ -181,10 +181,17 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           register for an event". Attendee only. Reached
  *                           from the attendee dashboard, not the nav.
  *
- * Technical Support Staff intentionally unlock nothing yet: Equipment
- * features aren't built (see docs/traceability.md, "Explicitly deferred").
- * That's correct for now, not a bug -- DashboardView shows a fallback
- * message rather than a blank/broken-looking nav for that role.
+ *   equipment-requests         -- Check Equipment Availability (Nawaz, IS-18):
+ *   equipment-request-details     the Technical Support Staff queue of equipment
+ *                                 requests, and one request with its availability
+ *                                 check. Technical Support Staff only, matching
+ *                                 app/authz/rules.py::rule_equipment_request_*.
+ *   equipment / equipment-details -- the unit-level inventory and a unit's record
+ *                                 (when it is occupied, and for which event).
+ *
+ * Creating, accepting or rejecting an equipment request are separate stories
+ * (see docs/traceability.md, "Explicitly deferred"), so no coordinator route
+ * exists for equipment yet either.
  */
 export const ROUTE_ACCESS = Object.freeze(
   [
@@ -228,6 +235,33 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'venue-calendar',
       label: 'Venue availability calendar',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    // Check Equipment Availability (Nawaz, IS-18). Technical Support Staff
+    // only; the two list pages are nav links, the two detail pages are
+    // reached from them.
+    {
+      routeName: 'equipment-requests',
+      label: 'Equipment Requests',
+      roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
+      inNav: true,
+    },
+    {
+      routeName: 'equipment',
+      label: 'Equipment',
+      roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
+      inNav: true,
+    },
+    {
+      routeName: 'equipment-request-details',
+      label: 'Equipment request',
+      roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
+      inNav: false,
+    },
+    {
+      routeName: 'equipment-details',
+      label: 'Equipment details',
+      roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
       inNav: false,
     },
     {

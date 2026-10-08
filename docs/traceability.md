@@ -167,6 +167,23 @@ notified of cancellation and reason" (no notification system); IS-36's
 equipment); the Confirmed Status story's field-locking. All are tracked in
 `docs/open-questions.md`.
 
+## Sprint 2 — Check Equipment Availability (IS-18, Nawaz)
+
+Unit tests: `test_equipment_service.py` (the availability arithmetic), `test_authz_equipment.py` (rules), `test_equipment_routes.py` (routes), `frontend/src/lib/equipment.test.js`, `frontend/src/views/equipment/EquipmentRequestDetailView.test.js`.
+
+| Criterion (Equipment Availability Checking) | Test | Implementation |
+|---|---|---|
+| Can select an equipment request and view the required date and time | `test_equipment_routes.py::test_get_request_for_technical_staff`, `test_equipment_service.py::test_get_request_flattens_items_and_event_name`, `EquipmentRequestDetailView.test.js` ("shows the event, the required date and time...") | `equipment_service.py::get_request`, `routes.py::get_equipment_request_route`, `EquipmentRequestsView.vue` / `EquipmentRequestDetailView.vue` |
+| Shows whether the requested quantity of each item is available for that date and time | `test_equipment_service.py::test_all_units_free_is_sufficient`, `::test_reservation_for_a_different_period_is_not_subtracted`, `::test_back_to_back_reservation_does_not_conflict`, `::test_timezones_are_compared_as_instants_not_wall_clock` | `equipment_service.py::check_availability` |
+| Flags items where available is less than requested | `test_equipment_service.py::test_flags_only_the_short_item_not_the_whole_request`, `::test_type_with_no_units_is_flagged_not_an_error`, `equipment.test.js::describeAvailability`, `EquipmentRequestDetailView.test.js` ("flags the short item...") | `check_availability` (`sufficient`, `shortfall`), `lib/equipment.js::describeAvailability` |
+| Subtracts equipment allocated to other confirmed requests for the same date and time | `test_equipment_service.py::test_overlapping_reservation_by_another_request_is_subtracted`, `::test_reservation_overlapping_by_one_minute_conflicts`, `::test_requests_own_reservations_are_excluded` | `check_availability` (reservation overlap, excluding the request's own) |
+| Submitted equipment request is viewable later | `test_authz_equipment.py::test_coordinator_can_view_their_own_request`, `test_equipment_service.py::test_coordinator_lists_only_their_own_requests` | `equipment_requests` table, `get_request`, `list_requests`, `rule_equipment_request_view` |
+| Equipment record shows when it is occupied, for which event, and the reservation period | `test_equipment_service.py::test_get_equipment_returns_occupancy_with_event_and_period`, `::test_get_equipment_only_exposes_event_id_and_name` | `equipment_service.py::get_equipment`, `EquipmentDetailView.vue` |
+| Track equipment at unit level | `test_equipment_service.py::test_units_out_of_service_are_not_counted_available`, `::test_response_carries_request_period_and_event` | `equipment_units` table (one row per unit), `20261008000000_equipment.sql` |
+| Only Technical Support Staff can run the check | `test_authz_equipment.py::test_requesting_coordinator_cannot_check_availability`, `::test_other_roles_denied_equipment_records`, `frontend/src/router/index.test.js` (equipment routes) | `rules.py::rule_equipment_request_check_availability`, `lib/roles.js` `ROUTE_ACCESS` |
+
+Not covered, because the feature doesn't exist: recording an equipment request, accepting or rejecting one, updating a reserved quantity, and releasing equipment on cancellation (separate stories); the reservation exclusion constraint itself has no integration test (see `docs/open-questions.md`).
+
 ## Week 7 change #5 — Event Coordinator Lead
 
 Unit tests: `test_coordinator_lead.py` (rules, routes, the Lead's list), `test_coordinator_assignment.py` (Lead-chosen assignment), `frontend/src/lib/leadDashboard.test.js` (dashboard grouping).

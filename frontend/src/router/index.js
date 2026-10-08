@@ -8,6 +8,10 @@ import EventsListView from '../views/events/EventsListView.vue'
 import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import EquipmentDetailView from '../views/equipment/EquipmentDetailView.vue'
+import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vue'
+import EquipmentRequestDetailView from '../views/equipment/EquipmentRequestDetailView.vue'
+import EquipmentRequestsView from '../views/equipment/EquipmentRequestsView.vue'
 import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
 import VenueBookingQueueView from '../views/venues/VenueBookingQueueView.vue'
 import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
@@ -114,6 +118,33 @@ const routes = [
     name: 'venue-calendar',
     component: VenueCalendarView,
     meta: { roles: _rolesByRouteName.get('venue-calendar') },
+  },
+  // Check Equipment Availability (Nawaz, IS-18). Static /equipment/requests
+  // paths before the dynamic /equipment/:equipmentId, same reasoning as
+  // /venues/bookings above; router/index.test.js pins it.
+  {
+    path: '/equipment',
+    name: 'equipment',
+    component: EquipmentInventoryView,
+    meta: { roles: _rolesByRouteName.get('equipment') },
+  },
+  {
+    path: '/equipment/requests',
+    name: 'equipment-requests',
+    component: EquipmentRequestsView,
+    meta: { roles: _rolesByRouteName.get('equipment-requests') },
+  },
+  {
+    path: '/equipment/requests/:requestId',
+    name: 'equipment-request-details',
+    component: EquipmentRequestDetailView,
+    meta: { roles: _rolesByRouteName.get('equipment-request-details') },
+  },
+  {
+    path: '/equipment/:equipmentId',
+    name: 'equipment-details',
+    component: EquipmentDetailView,
+    meta: { roles: _rolesByRouteName.get('equipment-details') },
   },
 ]
 
