@@ -611,6 +611,54 @@ def rule_venue_booking_reject(user: Any, booking: Any) -> Decision:
     return rule_venue_booking_approve(user, booking)
 
 
+# -- equipment.* / equipment_request.* (Nawaz, Sprint 2: IS-18) -------------
+# Source: Check Equipment Availability -- "As a Technical Support Staff,
+# I want to check whether sufficient equipment is available...". Equipment
+# is shared inventory (no owner), so equipment.list/view are role-only and
+# Technical Support Staff only: the AC names them as the ones who view an
+# equipment record's occupancy, and the occupancy lists other events'
+# names, which nobody else has a reason to see.
+#
+# equipment_request.view also admits the coordinator who raised the
+# request ("Submitted equipment request is viewable later" -- Record
+# Equipment Request AC, whose author is the requester). Any other role
+# gets a 404, not a 403: a request's existence is not theirs to know.
+# equipment_request.list is role-only and, like rule_venue_booking_list,
+# passing it does NOT mean "every request" -- the service scopes a
+# coordinator to their own. check_availability is Technical Support Staff
+# only: it is their story, and it reveals what OTHER events have reserved.
+
+
+def rule_equipment_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_equipment_view(user: Any, resource: Any = None) -> Decision:
+    return rule_equipment_list(user, resource)
+
+
+def rule_equipment_request_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff") or _has_role(user, "event_coordinator"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_equipment_request_view(user: Any, request: Any) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    if _has_role(user, "event_coordinator") and request.requested_by == user.id:
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_equipment_request_check_availability(user: Any, request: Any) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
 # Only an Event Coordinator or the Event Coordinator Lead can (re)assign
 # (rule_event_reassign_coordinator / rule_event_assign_coordinator), so

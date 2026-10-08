@@ -46,6 +46,30 @@ ATTENDEES = [
     {"email": "attendee3@example.com", "name": "Gavin Tan"},
 ]
 
+# Technical Support Staff (Check Equipment Availability, Nawaz, IS-18):
+# the role that checks requests against the equipment inventory.
+TECH_STAFF = [
+    {"email": "techsupport1@example.com", "name": "Ivan Goh"},
+]
+
+# Equipment inventory, unit level (IS-18): one entry per physical item.
+# Types match app.events.event_service.EQUIPMENT. PRJ-003 is under
+# maintenance on purpose, so the availability check has an out-of-service
+# unit to leave out of the count. Same data as supabase/seed.sql.
+EQUIPMENT_UNITS = [
+    ("projector", "PRJ-001", "available", None),
+    ("projector", "PRJ-002", "available", None),
+    ("projector", "PRJ-003", "maintenance", "Lamp replacement pending"),
+    ("microphone", "MIC-001", "available", None),
+    ("microphone", "MIC-002", "available", None),
+    ("microphone", "MIC-003", "available", None),
+    ("microphone", "MIC-004", "available", None),
+    ("screen", "SCR-001", "available", None),
+    ("screen", "SCR-002", "available", None),
+    ("wifi", "WIF-001", "available", None),
+    ("wifi", "WIF-002", "available", None),
+]
+
 REGISTRATION_DEMO_NAME = "Registration Demo: Community Workshop"
 OLD_REGISTRATION_DEMO_NAME = "Registration Demo: Tech Talk Series"
 
@@ -298,6 +322,144 @@ def seed_venue_calendar_demo(grand_ballroom_id: str, tentative_event_id: str, re
     print("Venue calendar demo ready: Grand Ballroom has 1 block, 1 tentatively-held booking, 1 confirmed booking.")
 
 
+def seed_equipment_inventory() -> dict[str, dict]:
+    """Equipment types and individual units (IS-18). Idempotent: a type or
+    unit that already exists (by name / asset tag) is left alone. Returns
+    the types by name so the demo below can reference them."""
+    types_by_name = {}
+    for type_name in sorted({unit[0] for unit in EQUIPMENT_UNITS}):
+        existing = supabase.table("equipment_types").select("*").eq("name", type_name).execute()
+        if existing.data:
+            types_by_name[type_name] = existing.data[0]
+        else:
+            types_by_name[type_name] = supabase.table("equipment_types").insert({"name": type_name}).execute().data[0]
+
+    for type_name, asset_tag, status, notes in EQUIPMENT_UNITS:
+        existing = supabase.table("equipment_units").select("id").eq("asset_tag", asset_tag).execute()
+        if not existing.data:
+            supabase.table("equipment_units").insert(
+                {
+                    "equipment_type_id": types_by_name[type_name]["id"],
+                    "asset_tag": asset_tag,
+                    "status": status,
+                    "notes": notes,
+                }
+            ).execute()
+    print(f"Equipment ready: {len(EQUIPMENT_UNITS)} units across {len(types_by_name)} types (PRJ-003 in maintenance).")
+    return types_by_name
+
+
+def seed_equipment_demo(
+    types_by_name: dict[str, dict], event_a: dict, event_b: dict, event_c: dict, requested_by_id: str
+) -> None:
+    """Demo requests for Check Equipment Availability (IS-18), so the check
+    has something to show without the unbuilt Record/Accept stories:
+
+      - Event A ("Annual Tech Symposium") holds a CONFIRMED request that
+        reserves PRJ-001 and MIC-001/MIC-002 from 10:00-14:00, 14 days out.
+      - Event B ("Product Launch Networking Night") has a PENDING request
+        for the same day, 09:00-13:00: 2 projectors, 2 microphones,
+        1 screen. Against the above: projectors are SHORT (PRJ-003 is in
+        maintenance and PRJ-001 is held, leaving 1 of 2), microphones are
+        fine (4 - 2 held = 2), the screen is fine -- one flagged line, two
+        clear ones.
+      - Event C ("Team Building Workshop") holds a CONFIRMED request three
+        days later reserving PRJ-002: it shows on PRJ-002's occupancy but
+        must NOT reduce Event B's availability (different period).
+
+    FRESH EVERY RUN, same stance as seed_registration_demo and
+    seed_venue_calendar_demo: deletes the demo events' prior equipment
+    requests (their items and reservations cascade) before inserting.
+    Reservations are inserted directly -- the "Accept an equipment request"
+    story that would normally create them is not built.
+    """
+    sgt = timezone(timedelta(hours=8))
+    today = date.today()
+    day = datetime(today.year, today.month, today.day, tzinfo=sgt) + timedelta(days=14)
+
+    for event in (event_a, event_b, event_c):
+        supabase.table("equipment_requests").delete().eq("event_id", event["id"]).execute()
+
+    def unit_ids(*asset_tags):
+        rows = (
+            supabase.table("equipment_units").select("id, asset_tag").in_("asset_tag", list(asset_tags)).execute().data
+        )
+        by_tag = {row["asset_tag"]: row["id"] for row in rows}
+        return [by_tag[tag] for tag in asset_tags]
+
+    def create_request(event, status, start, end, lines):
+        request = (
+            supabase.table("equipment_requests")
+            .insert(
+                {
+                    "event_id": event["id"],
+                    "requested_by": requested_by_id,
+                    "status": status,
+                    "needed_start": start.isoformat(),
+                    "needed_end": end.isoformat(),
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        items = {}
+        for type_name, quantity, note in lines:
+            items[type_name] = (
+                supabase.table("equipment_request_items")
+                .insert(
+                    {
+                        "request_id": request["id"],
+                        "equipment_type_id": types_by_name[type_name]["id"],
+                        "quantity": quantity,
+                        "technical_requirements": note,
+                    }
+                )
+                .execute()
+                .data[0]
+            )
+        return request, items
+
+    def reserve(items, type_name, asset_tags, start, end):
+        for unit_id in unit_ids(*asset_tags):
+            supabase.table("equipment_reservations").insert(
+                {
+                    "equipment_id": unit_id,
+                    "request_item_id": items[type_name]["id"],
+                    "reserved_start": start.isoformat(),
+                    "reserved_end": end.isoformat(),
+                }
+            ).execute()
+
+    a_start, a_end = day.replace(hour=10), day.replace(hour=14)
+    _, a_items = create_request(
+        event_a, "confirmed", a_start, a_end, [("projector", 1, "HDMI and USB-C inputs"), ("microphone", 2, None)]
+    )
+    reserve(a_items, "projector", ["PRJ-001"], a_start, a_end)
+    reserve(a_items, "microphone", ["MIC-001", "MIC-002"], a_start, a_end)
+
+    create_request(
+        event_b,
+        "pending",
+        day.replace(hour=9),
+        day.replace(hour=13),
+        [
+            ("projector", 2, "One for the main stage, one for the side room"),
+            ("microphone", 2, None),
+            ("screen", 1, "Pull-down, minimum 2.4 m wide"),
+        ],
+    )
+
+    c_start = (day + timedelta(days=3)).replace(hour=9)
+    c_end = c_start.replace(hour=12)
+    _, c_items = create_request(event_c, "confirmed", c_start, c_end, [("projector", 1, None)])
+    reserve(c_items, "projector", ["PRJ-002"], c_start, c_end)
+
+    print(
+        "Equipment demo ready: 1 pending request (short on projectors) for "
+        f"'{event_b['name']}', 2 confirmed requests holding PRJ-001, MIC-001/002 and PRJ-002."
+    )
+
+
 def main():
     coordinator_ids = []
     for c in COORDINATORS:
@@ -317,6 +479,11 @@ def main():
         uid = get_or_create_user(lead["email"], lead["name"])
         add_role(uid, "event_coordinator_lead")
         print(f"Lead ready:        {lead['name']} <{lead['email']}> -> {uid}")
+
+    for tech in TECH_STAFF:
+        uid = get_or_create_user(tech["email"], tech["name"])
+        add_role(uid, "technical_support_staff")
+        print(f"Tech staff ready:  {tech['name']} <{tech['email']}> -> {uid}")
 
     for attendee in ATTENDEES:
         uid = get_or_create_user(attendee["email"], attendee["name"])
@@ -390,7 +557,19 @@ def main():
         requested_by_id=organizer_id,
     )
 
-    print("\nDone. 3 coordinators, 1 lead, 1 organizer, 3 attendees, 4 events, 4 venues seeded.")
+    equipment_types = seed_equipment_inventory()
+    seed_equipment_demo(
+        equipment_types,
+        event_a=event_a,
+        event_b=event_b,
+        event_c=event_c,
+        requested_by_id=coordinator_ids[0],
+    )
+
+    print(
+        "\nDone. 3 coordinators, 1 lead, 1 tech staff, 1 organizer, 3 attendees, "
+        "4 events, 4 venues, 11 equipment units seeded."
+    )
 
 
 if __name__ == "__main__":
