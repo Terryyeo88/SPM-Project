@@ -720,3 +720,29 @@ def rule_registration_list(user: Any, resource: Any = None) -> Decision:
     if _has_role(user, "attendee"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
+
+
+# -- room_layout.list / room_layout.manage ----------------------------------
+# Source: see ROOM_LAYOUT_LIST / ROOM_LAYOUT_MANAGE in actions.py. Role-only;
+# there's no per-row scoping to apply afterwards -- the active list is the
+# same for everyone who may read it.
+
+_ROOM_LAYOUT_READERS = ("event_organizer", "event_coordinator", LEAD_ROLE, "venue_staff")
+
+
+def rule_room_layout_list(user: Any, resource: Any = None) -> Decision:
+    if any(_has_role(user, role) for role in _ROOM_LAYOUT_READERS):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_room_layout_manage(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_venue_edit_layouts(user: Any, venue: Any = None) -> Decision:
+    """Which layouts a venue supports is Venue Staff's to set, the same
+    people who manage the layouts themselves (rule_room_layout_manage)."""
+    return rule_room_layout_manage(user, venue)

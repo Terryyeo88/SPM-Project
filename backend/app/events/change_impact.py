@@ -32,6 +32,7 @@ from types import SimpleNamespace
 from app.events.event_service import SINGAPORE_TZ, _from_database_event
 from app.extensions import supabase
 from app.venues.booking_service import _event_window, _parse_timestamptz
+from app.venues.venue_service import VENUE_LAYOUTS_EMBED, supported_layout_names
 
 TIMING_FIELDS = frozenset({"preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time"})
 REGISTRATION_WINDOW_FIELDS = frozenset({"registration_start_datetime", "registration_end_datetime"})
@@ -68,7 +69,7 @@ def _labels(items) -> str:
 def _venue_impacts(event: SimpleNamespace, after: dict, changed: set[str]) -> list[dict]:
     result = (
         supabase.table("venue_bookings")
-        .select("*, venues(name, capacity, supported_layouts, accessibility_features)")
+        .select(f"*, venues(name, capacity, accessibility_features, {VENUE_LAYOUTS_EMBED})")
         .eq("event_id", event.id)
         .in_("status", _ACTIVE_BOOKING_STATUSES)
         .execute()
@@ -97,8 +98,7 @@ def _venue_impacts(event: SimpleNamespace, after: dict, changed: set[str]) -> li
                 f"{after['expected_attendance']} expected attendees exceeds the venue's capacity of {capacity}."
             )
 
-        layouts = venue.get("supported_layouts")
-        if "room_layout" in changed and layouts is not None and after.get("room_layout") not in layouts:
+        if "room_layout" in changed and after.get("room_layout") not in supported_layout_names(venue):
             issues.append(f"The venue doesn't support a {after.get('room_layout')} layout.")
 
         if "accessibility_needs" in changed and venue.get("accessibility_features") is not None:

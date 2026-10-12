@@ -30,6 +30,7 @@ from types import SimpleNamespace
 PRIMARY_KEYS = {
     "event_change_requests": "event_change_req_id",
     "event_logs": "event_log_id",
+    "room_layouts": "room_layout_id",
 }
 
 

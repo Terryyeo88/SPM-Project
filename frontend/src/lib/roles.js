@@ -282,6 +282,14 @@ export const ROUTE_ACCESS = Object.freeze(
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },
+    // Venue Staff manage the room layouts (app/authz/rules.py::
+    // rule_room_layout_manage) -- add, rename, delete, restore.
+    {
+      routeName: 'room-layouts',
+      label: 'Room Layouts',
+      roles: [ROLES.VENUE_STAFF],
+      inNav: true,
+    },
     // Attendee Registration (Justin): the attendee's event page (register,
     // withdraw). Attendee only, matching app/authz/rules.py::
     // rule_event_view_public / rule_event_register. Not a nav link: the

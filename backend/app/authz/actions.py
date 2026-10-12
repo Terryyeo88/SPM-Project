@@ -147,3 +147,21 @@ EQUIPMENT_VIEW = "equipment.view"
 EQUIPMENT_REQUEST_LIST = "equipment_request.list"
 EQUIPMENT_REQUEST_VIEW = "equipment_request.view"
 EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
+
+# -- room layouts ----------------------------------------------------------
+# Source: room layout types are filled in by Venue Staff, who can add,
+# update and delete them (they used to be a fixed enum -- see
+# supabase/migrations/20261012000000_room_layouts.sql). Both role-only:
+# a layout has no owner, it's shared reference data.
+#
+#   room_layout.list   -- everyone who fills in or works with an event's
+#       layout reads the active list (the organiser's request form, the
+#       coordinator's edits and change requests, the Lead, Venue Staff).
+#   room_layout.manage -- Venue Staff add, rename, soft-delete, restore and
+#       permanently delete layouts, and see soft-deleted ones.
+ROOM_LAYOUT_LIST = "room_layout.list"
+ROOM_LAYOUT_MANAGE = "room_layout.manage"
+#   venue.edit_layouts -- Venue Staff set which room layouts a venue
+#       supports (venue_room_layouts). Role-only, like the other venue
+#       actions: a venue has no owner.
+VENUE_EDIT_LAYOUTS = "venue.edit_layouts"

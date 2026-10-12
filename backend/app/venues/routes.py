@@ -22,6 +22,7 @@ from app.authz.actions import (
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
     VENUE_CALENDAR_VIEW,
+    VENUE_EDIT_LAYOUTS,
     VENUE_LIST,
     VENUE_VIEW,
 )
@@ -35,7 +36,7 @@ from app.venues.booking_service import (
     reject_booking,
 )
 from app.venues.calendar_service import get_venue_calendar
-from app.venues.venue_service import VENUE_STATUSES, get_venue, list_venues
+from app.venues.venue_service import VENUE_STATUSES, get_venue, list_venues, set_venue_room_layouts
 
 venues_bp = Blueprint("venues", __name__, url_prefix="/venues")
 
@@ -98,6 +99,14 @@ def list_venues_route():
 @require(VENUE_VIEW, loader=lambda venue_id: load_venue(venue_id))
 def get_venue_route(venue, venue_id):
     return jsonify(venue), 200
+
+
+# Venue Staff set which room layouts this venue supports:
+# {"room_layout_ids": [...]}, the complete list. Returns the venue.
+@venues_bp.route("/<venue_id>/room-layouts", methods=["POST"])
+@require(VENUE_EDIT_LAYOUTS)
+def set_venue_room_layouts_route(venue_id):
+    return jsonify(set_venue_room_layouts(venue_id, request.get_json(silent=True))), 200
 
 
 # View Venue Availability Calendar (Nawaz, Sprint 2, IS-11). `start`/`end`

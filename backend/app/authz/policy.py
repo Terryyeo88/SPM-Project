@@ -70,12 +70,15 @@ from app.authz.rules import (
     rule_event_view_public,
     rule_registration_list,
     rule_registration_withdraw,
+    rule_room_layout_list,
+    rule_room_layout_manage,
     rule_venue_booking_approve,
     rule_venue_booking_create,
     rule_venue_booking_list,
     rule_venue_booking_reject,
     rule_venue_booking_view,
     rule_venue_calendar_view,
+    rule_venue_edit_layouts,
     rule_venue_list,
     rule_venue_view,
 )
@@ -119,6 +122,9 @@ _RULES: dict[str, RuleFunc] = {
     actions.REGISTRATION_LIST: rule_registration_list,
     actions.EVENT_VIEW_PUBLIC: rule_event_view_public,
     actions.REGISTRATION_WITHDRAW: rule_registration_withdraw,
+    actions.ROOM_LAYOUT_LIST: rule_room_layout_list,
+    actions.ROOM_LAYOUT_MANAGE: rule_room_layout_manage,
+    actions.VENUE_EDIT_LAYOUTS: rule_venue_edit_layouts,
 }
 
 

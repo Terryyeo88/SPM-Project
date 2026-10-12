@@ -8,7 +8,6 @@
 
 export const DRAFT_NAME = 'Untitled event request'
 
-export const ROOM_LAYOUTS = ['theatre', 'classroom', 'boardroom', 'seminar', 'banquet', 'networking']
 export const EQUIPMENT_OPTIONS = [
   { value: 'microphone', label: 'Microphones', hasQuantity: true },
   { value: 'projector', label: 'Projectors', hasQuantity: true },

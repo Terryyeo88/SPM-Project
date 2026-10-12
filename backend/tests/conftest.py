@@ -98,6 +98,25 @@ def _forbid_database_in_unit_tests(request, monkeypatch):
     monkeypatch.setattr(_LazySupabaseClient, "_get_client", _refuse)
 
 
+# The six layouts the room_layouts migration seeds (the old enum's values).
+SEEDED_ROOM_LAYOUTS = ("theatre", "classroom", "boardroom", "seminar", "banquet", "networking")
+
+
+@pytest.fixture(autouse=True)
+def _seeded_room_layouts(request, monkeypatch):
+    """Autouse: event validation checks room layouts against the
+    room_layouts table Venue Staff manage. Unit tests get the seeded six,
+    all active, so every event test doesn't need its own fake for that
+    table. A test that needs other layouts (e.g. a soft-deleted one)
+    monkeypatches app.events.event_service._room_layouts itself.
+    Integration tests read the real table."""
+    if request.node.get_closest_marker("integration"):
+        return
+    import app.events.event_service as event_service
+
+    monkeypatch.setattr(event_service, "_room_layouts", lambda: dict.fromkeys(SEEDED_ROOM_LAYOUTS, True))
+
+
 @pytest.fixture
 def app():
     return create_app(config_override=_TestConfig)

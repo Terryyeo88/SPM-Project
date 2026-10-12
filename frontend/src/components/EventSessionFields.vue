@@ -3,15 +3,16 @@
 // requirements and registration window. The parent owns the session object
 // (from lib/eventSessions) and this component edits it in place, running
 // the same reactive validation the single-event form used to.
+import { computed, onMounted, ref } from 'vue'
 import {
   ACCESSIBILITY_OPTIONS,
   EQUIPMENT_OPTIONS,
-  ROOM_LAYOUTS,
   validateAttendance,
   validateDateRange,
   validateQuantities,
   validateRegistrationWindow,
 } from '../lib/eventSessions'
+import { fetchRoomLayouts, roomLayoutOptions } from '../lib/roomLayouts'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -27,6 +28,22 @@ defineEmits(['remove'])
 // Ties the card's heading to the section for screen readers. Keyed by the
 // session's own key, so ids stay unique with several sessions on one page.
 const headingId = `session-heading-${props.session.key}`
+
+// Room layouts are managed by Venue Staff, so they're fetched rather than
+// fixed. The layout the session had when the form opened stays selectable
+// even if it has since been soft-deleted (see roomLayoutOptions).
+const activeLayouts = ref([])
+const layoutsError = ref('')
+const keptLayout = props.session.room_layout || ''
+const layoutOptions = computed(() => roomLayoutOptions(activeLayouts.value, keptLayout))
+
+onMounted(async () => {
+  try {
+    activeLayouts.value = await fetchRoomLayouts()
+  } catch (error) {
+    layoutsError.value = error?.message || 'Could not load room layouts.'
+  }
+})
 
 function findItem(field, value) {
   return props.session[field].find((entry) => entry.item === value)
@@ -103,9 +120,10 @@ function onRegistrationToggle() {
         <span class="field-label">Room Layout</span>
         <select v-model="session.room_layout" class="input" @change="delete session.errors.room_layout">
           <option value="" disabled>Select a layout</option>
-          <option v-for="layout in ROOM_LAYOUTS" :key="layout" :value="layout">{{ layout }}</option>
+          <option v-for="layout in layoutOptions" :key="layout.value" :value="layout.value">{{ layout.label }}</option>
         </select>
         <span v-if="session.errors.room_layout" class="field-error">{{ session.errors.room_layout }}</span>
+        <span v-else-if="layoutsError" class="field-error">Couldn't load room layouts: {{ layoutsError }}</span>
       </label>
     </div>
 

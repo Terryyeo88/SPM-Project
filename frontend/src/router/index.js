@@ -13,6 +13,7 @@ import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vu
 import EquipmentRequestDetailView from '../views/equipment/EquipmentRequestDetailView.vue'
 import EquipmentRequestsView from '../views/equipment/EquipmentRequestsView.vue'
 import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
+import RoomLayoutsView from '../views/venues/RoomLayoutsView.vue'
 import VenueBookingQueueView from '../views/venues/VenueBookingQueueView.vue'
 import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
 import VenueCalendarView from '../views/venues/VenueCalendarView.vue'
@@ -118,6 +119,12 @@ const routes = [
     name: 'venue-calendar',
     component: VenueCalendarView,
     meta: { roles: _rolesByRouteName.get('venue-calendar') },
+  },
+  {
+    path: '/room-layouts',
+    name: 'room-layouts',
+    component: RoomLayoutsView,
+    meta: { roles: _rolesByRouteName.get('room-layouts') },
   },
   // Check Equipment Availability (Nawaz, IS-18). Static /equipment/requests
   // paths before the dynamic /equipment/:equipmentId, same reasoning as

@@ -89,7 +89,11 @@ def _current_details(event: SimpleNamespace) -> dict:
 def _validated_details(event: SimpleNamespace, changes: dict) -> dict:
     """The session's details with `changes` applied, validated as a complete
     request. Raises ValidationError with the usual field messages."""
-    return validate_event_payload({**_current_details(event), **changes}, for_submission=True)
+    return validate_event_payload(
+        {**_current_details(event), **changes},
+        for_submission=True,
+        current_room_layout=getattr(event, "room_layout", None),
+    )
 
 
 def _clean_text(value, field: str) -> str | None:
