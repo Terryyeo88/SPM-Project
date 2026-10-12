@@ -177,50 +177,40 @@ end $$;
 -- seed_venue_calendar_demo() in seed.py does; run that script for the
 -- full calendar demo data.
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, status, operating_hours_start, operating_hours_end)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Grand Ballroom', 'Main Building, Level 3', 300,
   array['microphone', 'projector', 'screen', 'wifi'],
   array['wheelchair_access', 'lift_access'],
+  array['theatre', 'banquet', 'networking']::text[],
   'available', '07:00', '23:59'
 where not exists (select 1 from public.venues where name = 'Grand Ballroom');
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, status, operating_hours_start, operating_hours_end)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Innovation Hub', 'Tech Wing, Level 1', 80,
   array['projector', 'screen', 'wifi'],
   array['wheelchair_access', 'removable_seats'],
+  array['classroom', 'seminar', 'boardroom']::text[],
   'available', '08:00', '20:00'
 where not exists (select 1 from public.venues where name = 'Innovation Hub');
 
-insert into public.venues (name, location, capacity, facilities, accessibility_features, status, operating_hours_start, operating_hours_end)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status, operating_hours_start, operating_hours_end)
 select 'Executive Boardroom', 'Main Building, Level 5', 20,
   array['screen', 'wifi'],
   array['wheelchair_access'],
+  array['boardroom']::text[],
   'occupied', '08:00', '18:00'
 where not exists (select 1 from public.venues where name = 'Executive Boardroom');
 
 -- Riverside Pavilion deliberately gets no operating hours (NULL/NULL) --
 -- same "no restriction recorded" case backend/seed.py's own comment on
 -- this venue explains.
-insert into public.venues (name, location, capacity, facilities, accessibility_features, status)
+insert into public.venues (name, location, capacity, facilities, accessibility_features, supported_layouts, status)
 select 'Riverside Pavilion', 'East Campus, Ground Floor', 150,
   array['microphone', 'wifi'],
   array['wheelchair_access', 'lift_access', 'extra_legroom_seats'],
+  array['banquet', 'networking', 'seminar']::text[],
   'maintenance'
 where not exists (select 1 from public.venues where name = 'Riverside Pavilion');
-
--- Which layouts each venue supports (venue_room_layouts, see
--- 20261012100000_venue_room_layouts.sql). Same as backend/seed.py's VENUES.
-insert into public.venue_room_layouts (venue_id, room_layout_id)
-select v.id, r.room_layout_id
-from (values
-  ('Grand Ballroom', 'theatre'), ('Grand Ballroom', 'banquet'), ('Grand Ballroom', 'networking'),
-  ('Innovation Hub', 'classroom'), ('Innovation Hub', 'seminar'), ('Innovation Hub', 'boardroom'),
-  ('Executive Boardroom', 'boardroom'),
-  ('Riverside Pavilion', 'banquet'), ('Riverside Pavilion', 'networking'), ('Riverside Pavilion', 'seminar')
-) as l (venue_name, layout_name)
-join public.venues v on v.name = l.venue_name
-join public.room_layouts r on r.name = l.layout_name
-on conflict do nothing;
 
 
 -- ============================================================

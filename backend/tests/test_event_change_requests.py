@@ -316,7 +316,7 @@ def test_the_same_instant_in_another_timezone_is_not_a_change(fake):
         ({"changes": {"shared_event_id": "group-9"}}, "can't be changed: shared_event_id"),
         ({"changes": {"id": "session-9"}}, "can't be changed: id"),
         ({"changes": {"expected_attendance": 0}}, "expected_attendance must be a positive integer"),
-        ({"changes": {"room_layout": "stadium"}}, "room_layout must be one of"),
+        ({"changes": {"room_layout": "stadium"}}, "no longer exists"),
         ({"changes": {"preferred_end_date": "2000-01-01"}}, "preferred_end_date must be on or after"),
         ({"changes": {"name": ""}}, "name is required"),
         ({"changes": {"room_layout": "banquet"}, "reason": 5}, "reason must be a string"),
@@ -769,17 +769,9 @@ def test_confirmed_event_changes_only_after_coordinator_approval(client, signing
 # acknowledge each affected area.
 
 
-def _layouts(*names):
-    """A venue's layouts as the venue_room_layouts embed returns them."""
-    return [{"room_layouts": {"name": name}} for name in names]
-
-
-def _book_venue(fake, *, status="confirmed", start="08:30", end="17:30", supported_layouts=("theatre", "classroom"),
-                **venue):
+def _book_venue(fake, *, status="confirmed", start="08:30", end="17:30", **venue):
     """A booking for session-1 covering 09:00-17:00 plus the usual 30 min
-    setup/turnaround either side (booking_start/end are SGT, +08:00). The
-    venue comes embedded the way change_impact selects it, its layouts
-    through venue_room_layouts."""
+    setup/turnaround either side (booking_start/end are SGT, +08:00)."""
     fake.tables.setdefault("venue_bookings", []).append(
         {
             "id": "booking-1",
@@ -792,7 +784,7 @@ def _book_venue(fake, *, status="confirmed", start="08:30", end="17:30", support
             "venues": {
                 "name": "Hall A",
                 "capacity": 200,
-                "venue_room_layouts": _layouts(*supported_layouts),
+                "supported_layouts": ["theatre", "classroom"],
                 "accessibility_features": ["wheelchair_access"],
                 **venue,
             },
@@ -1204,7 +1196,7 @@ def test_a_change_to_a_layout_venue_staff_added_is_recorded(fake, managed_layout
 
 
 def test_a_change_to_a_soft_deleted_layout_is_refused_and_nothing_is_recorded(fake, managed_layouts):
-    with pytest.raises(ValidationError, match='"banquet" room layout is no longer available'):
+    with pytest.raises(ValidationError, match='room layout "banquet" no longer exists'):
         request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "banquet"}})
     assert _change_requests(fake) == []
 
@@ -1234,7 +1226,7 @@ def test_approval_is_refused_once_the_requested_layout_is_soft_deleted(fake, mon
     change = request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "u-shape"}})
 
     offered["u-shape"] = False
-    with pytest.raises(ValidationError, match="no longer available"):
+    with pytest.raises(ValidationError, match="no longer exists"):
         approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
     assert fake.get("session-1")["room_layout"] == "theatre"
     assert _change_requests(fake)[0]["status"] == "pending"
@@ -1247,6 +1239,6 @@ def test_a_layout_venue_staff_added_is_checked_against_the_booked_venue(fake):
     _book_venue(fake, supported_layouts=["theatre", "u-shape"])
     assert _assess(fake, {"room_layout": "u-shape"}) == []
 
-    fake.tables["venue_bookings"][0]["venues"]["venue_room_layouts"] = _layouts("theatre")
+    fake.tables["venue_bookings"][0]["venues"]["supported_layouts"] = ["theatre"]
     [impact] = _assess(fake, {"room_layout": "u-shape"})
     assert impact["issues"] == ["The venue doesn't support a u-shape layout."]

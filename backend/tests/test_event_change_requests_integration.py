@@ -178,10 +178,9 @@ def test_change_history_reads_who_made_each_entry_through_the_profiles_join(conf
 
 def test_impact_warning_reads_the_booked_venue_through_the_venues_join(confirmed_event):
     """The impact warning checks a change against the booked venue by
-    joining venue_bookings -> venues(name, capacity, accessibility_features)
-    and the venue's layouts through venue_room_layouts -> room_layouts. The
-    unit tests hand the venue in already joined, so only a real database
-    proves the joins themselves work.
+    joining venue_bookings -> venues(name, capacity, supported_layouts,
+    accessibility_features). The unit tests hand the venue in already
+    joined, so only a real database proves the join itself works.
 
     The session has a booking at a 60-seat, theatre-only venue. The organiser
     asks for 75 attendees in a banquet layout; listing the request must flag
@@ -196,14 +195,13 @@ def test_impact_warning_reads_the_booked_venue_through_the_venues_join(confirmed
                 "capacity": 60,
                 "facilities": [],
                 "accessibility_features": [],
+                "supported_layouts": ["theatre"],
                 "status": "available",
             }
         )
         .execute()
         .data[0]
     )
-    theatre = supabase.table("room_layouts").select("room_layout_id").eq("name", "theatre").single().execute().data
-    supabase.table("venue_room_layouts").insert({"venue_id": venue["id"], **theatre}).execute()
     booking = (
         supabase.table("venue_bookings")
         .insert(

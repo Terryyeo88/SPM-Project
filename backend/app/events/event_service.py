@@ -189,14 +189,20 @@ def _check_room_layout(value, current: str | None = None) -> None:
     one the session already has (`current`), which it keeps even after it's
     soft-deleted, so editing other details doesn't force a layout change.
     Submitting passes no `current`: a request isn't sent for review with a
-    layout that's no longer offered."""
+    layout that's no longer offered.
+
+    A layout name that's soft-deleted or gone entirely almost always comes
+    from a page loaded before Venue Staff deleted it (the form only offers
+    real layouts), so the message tells the user to refresh and pick again."""
     if isinstance(value, str) and value and value == current:
         return
     layouts = _room_layouts()
     if isinstance(value, str) and layouts.get(value) is True:
         return
-    if isinstance(value, str) and value in layouts:
-        raise ValidationError(f'The "{value}" room layout is no longer available -- choose another.')
+    if isinstance(value, str) and value:
+        raise ValidationError(
+            f'The room layout "{value}" no longer exists. Please refresh the page and choose a new room layout.'
+        )
     active = sorted(name for name, is_active in layouts.items() if is_active)
     raise ValidationError(f"room_layout must be one of: {', '.join(active)}.")
 

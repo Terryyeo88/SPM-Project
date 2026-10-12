@@ -171,10 +171,6 @@ def get_or_create_event(event: dict) -> dict:
 
 
 def get_or_create_venue(venue: dict) -> dict:
-    """`supported_layouts` (names) isn't a venues column: a venue's layouts
-    are rows in venue_room_layouts, linked here when the venue is created."""
-    venue = dict(venue)
-    layout_names = venue.pop("supported_layouts", [])
     existing = (
         supabase.table("venues")
         .select("*")
@@ -184,13 +180,8 @@ def get_or_create_venue(venue: dict) -> dict:
     if existing.data:
         return existing.data[0]
 
-    created = supabase.table("venues").insert(venue).execute().data[0]
-    if layout_names:
-        layouts = supabase.table("room_layouts").select("room_layout_id").in_("name", layout_names).execute().data
-        supabase.table("venue_room_layouts").insert(
-            [{"venue_id": created["id"], "room_layout_id": layout["room_layout_id"]} for layout in layouts]
-        ).execute()
-    return created
+    result = supabase.table("venues").insert(venue).execute()
+    return result.data[0]
 
 
 def seed_registration_demo(organizer_id: str, coordinator_id: str) -> None:

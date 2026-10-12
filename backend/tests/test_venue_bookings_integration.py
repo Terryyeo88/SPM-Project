@@ -58,6 +58,7 @@ class _Fixtures:
             "capacity": 100,
             "facilities": [],
             "accessibility_features": [],
+            "supported_layouts": ["theatre"],
             "status": "available",
         }
         payload.update(overrides)

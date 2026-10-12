@@ -161,7 +161,3 @@ EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
 #       permanently delete layouts, and see soft-deleted ones.
 ROOM_LAYOUT_LIST = "room_layout.list"
 ROOM_LAYOUT_MANAGE = "room_layout.manage"
-#   venue.edit_layouts -- Venue Staff set which room layouts a venue
-#       supports (venue_room_layouts). Role-only, like the other venue
-#       actions: a venue has no owner.
-VENUE_EDIT_LAYOUTS = "venue.edit_layouts"

@@ -48,7 +48,6 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 | `ROOM_LAYOUT_LIST` | organiser, coordinator, Event Coordinator Lead or venue staff | role only (the active layouts) |
 | `ROOM_LAYOUT_MANAGE` | venue staff | role only (add, rename, soft-delete, restore, permanently delete; see soft-deleted layouts) |
-| `VENUE_EDIT_LAYOUTS` | venue staff | role only (set which room layouts a venue supports) |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`
 (the logic, with the source story quoted for every precondition).

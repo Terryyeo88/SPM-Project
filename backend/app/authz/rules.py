@@ -740,9 +740,3 @@ def rule_room_layout_manage(user: Any, resource: Any = None) -> Decision:
     if _has_role(user, "venue_staff"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
-
-
-def rule_venue_edit_layouts(user: Any, venue: Any = None) -> Decision:
-    """Which layouts a venue supports is Venue Staff's to set, the same
-    people who manage the layouts themselves (rule_room_layout_manage)."""
-    return rule_room_layout_manage(user, venue)

@@ -5,7 +5,9 @@
  *
  * Deleting is two steps, mirroring the backend:
  *   - Delete (soft): the layout can't be picked for new requests any more,
- *     but events and venues already using it keep it. Restore undoes it.
+ *     and drafts using it have their layout cleared; submitted events and
+ *     venues keep it. Restore makes it available again (cleared drafts
+ *     stay cleared).
  *   - Delete permanently: only for a soft-deleted layout, and the backend
  *     refuses (409, message shown here) while any event using it isn't
  *     completed or cancelled. Events that used it keep its name.
@@ -98,7 +100,7 @@ async function saveRename(layout) {
 function softDelete(layout) {
   return run(
     () => softDeleteRoomLayout(layout.room_layout_id),
-    `Deleted "${layout.name}". It can no longer be chosen for new requests; you can restore it.`,
+    `Deleted "${layout.name}". It can no longer be chosen, and drafts using it now need a new layout. You can restore it.`,
   )
 }
 
@@ -162,8 +164,8 @@ onMounted(load)
           <section class="card" aria-labelledby="deleted-heading">
             <h2 id="deleted-heading" class="card-title">Deleted ({{ deletedLayouts.length }})</h2>
             <p class="section-subtitle">
-              Events and venues already using these keep them. A layout can be permanently deleted once every event
-              using it is completed or cancelled.
+              Submitted events and venues already using these keep them; drafts had them cleared. A layout can be
+              permanently deleted once every event using it is completed or cancelled.
             </p>
             <p v-if="deletedLayouts.length === 0" class="message muted">No deleted room layouts.</p>
             <ul v-else class="layout-list">

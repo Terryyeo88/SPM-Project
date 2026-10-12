@@ -5,8 +5,10 @@ service functions the routes call:
   - an event written with a layout NAME is linked to its row
   - permanent delete only once soft-deleted AND no live event uses it
   - events that used a permanently deleted layout keep its name
-  - a rename reaches linked events and venues; a delete leaves venues
-  - venues reference layouts through venue_room_layouts
+  - a rename reaches linked events and venues' supported_layouts; a
+    permanent delete leaves venues' supported_layouts
+  - a venue's supported_layouts may only name layouts that exist
+    (supabase/migrations/20261012100000_venue_supported_layouts.sql)
 """
 
 from __future__ import annotations
@@ -18,8 +20,7 @@ import pytest
 from app.extensions import supabase
 from app.room_layouts import room_layout_service as service
 from app.room_layouts.room_layout_service import RoomLayoutConflictError
-from app.shared.errors import ValidationError
-from app.venues.venue_service import get_venue, set_venue_room_layouts
+from app.venues.venue_service import get_venue
 
 pytestmark = pytest.mark.integration
 
@@ -103,64 +104,40 @@ def test_permanent_delete_waits_until_every_event_using_it_is_completed_or_cance
 
 
 @pytest.fixture
-def venue():
+def venue(layout):
+    """A venue supporting theatre and the test layout."""
     row = (
         supabase.table("venues")
-        .insert({"name": f"Layout venue {uuid.uuid4()}", "location": "Test", "capacity": 10})
+        .insert({"name": f"Layout venue {uuid.uuid4()}", "location": "Test", "capacity": 10,
+                 "supported_layouts": ["theatre", layout["name"]]})
         .execute()
         .data[0]
     )
     yield row
-    supabase.table("venues").delete().eq("id", row["id"]).execute()  # cascades to venue_room_layouts
-
-
-def _layout_id(name):
-    return supabase.table("room_layouts").select("room_layout_id").eq("name", name).single().execute().data[
-        "room_layout_id"
-    ]
-
-
-def test_venue_staff_set_a_venues_layouts(venue, layout):
-    theatre = _layout_id("theatre")
-
-    updated = set_venue_room_layouts(venue["id"], {"room_layout_ids": [theatre, layout["room_layout_id"]]})
-    assert updated["supported_layouts"] == sorted(["theatre", layout["name"]])
-
-    updated = set_venue_room_layouts(venue["id"], {"room_layout_ids": [layout["room_layout_id"]]})
-    assert updated["supported_layouts"] == [layout["name"]]
-    assert updated["supported_room_layouts"] == [
-        {"room_layout_id": layout["room_layout_id"], "name": layout["name"], "is_active": True}
-    ]
-
-
-def test_a_soft_deleted_layout_stays_on_a_venue_but_cannot_be_added(venue, layout):
-    set_venue_room_layouts(venue["id"], {"room_layout_ids": [layout["room_layout_id"]]})
-    service.soft_delete_room_layout(layout["room_layout_id"])
-
-    kept = set_venue_room_layouts(venue["id"], {"room_layout_ids": [layout["room_layout_id"], _layout_id("theatre")]})
-    [kept_layout] = [row for row in kept["supported_room_layouts"] if row["room_layout_id"] == layout["room_layout_id"]]
-    assert kept_layout["is_active"] is False
-
-    set_venue_room_layouts(venue["id"], {"room_layout_ids": []})
-    with pytest.raises(ValidationError, match="Soft-deleted room layouts can't be added"):
-        set_venue_room_layouts(venue["id"], {"room_layout_ids": [layout["room_layout_id"]]})
+    supabase.table("venues").delete().eq("id", row["id"]).execute()
 
 
 def test_a_rename_reaches_linked_events_and_venues(organizer, layout, venue):
     event = _event(organizer, layout["name"])
-    set_venue_room_layouts(venue["id"], {"room_layout_ids": [_layout_id("theatre"), layout["room_layout_id"]]})
 
     new_name = f"renamed-{uuid.uuid4()}"
     service.rename_room_layout(layout["room_layout_id"], {"name": new_name})
 
     assert _reload(event["id"])["room_layout"] == new_name
-    assert get_venue(venue["id"])["supported_layouts"] == sorted(["theatre", new_name])
+    assert get_venue(venue["id"])["supported_layouts"] == ["theatre", new_name]
 
     supabase.table("events").update({"status": "completed"}).eq("id", event["id"]).execute()
     service.soft_delete_room_layout(layout["room_layout_id"])
     service.delete_room_layout(layout["room_layout_id"])
 
-    assert get_venue(venue["id"])["supported_layouts"] == ["theatre"]  # removed by the cascade
+    assert get_venue(venue["id"])["supported_layouts"] == ["theatre"]
+
+
+def test_a_venue_can_only_list_layouts_that_exist(venue):
+    with pytest.raises(Exception, match="Unknown room layout"):
+        supabase.table("venues").update({"supported_layouts": ["theatre", f"no-such-layout-{uuid.uuid4()}"]}).eq(
+            "id", venue["id"]
+        ).execute()
 
 
 def test_a_rename_reaches_pending_change_requests_but_not_decided_ones(organizer, layout):
@@ -202,6 +179,26 @@ def test_a_rename_reaches_pending_change_requests_but_not_decided_ones(organizer
 
     assert requested(pending) == {"room_layout": new_name, "expected_attendance": 50}
     assert requested(decided)["room_layout"] == layout["name"]
+
+
+def test_soft_deleting_a_layout_clears_it_from_drafts_only(organizer, layout):
+    """Drafts using the layout lose it (name and id), so the organiser picks
+    one still offered; submitted events keep it. Restoring doesn't put it
+    back on the drafts."""
+    draft = _event(organizer, layout["name"], status="draft")
+    other_draft = _event(organizer, "theatre", status="draft")
+    submitted = _event(organizer, layout["name"], status="submitted")
+
+    service.soft_delete_room_layout(layout["room_layout_id"])
+
+    cleared = _reload(draft["id"])
+    assert (cleared["room_layout"], cleared["room_layout_id"]) == (None, None)
+    assert _reload(other_draft["id"])["room_layout"] == "theatre"
+    kept = _reload(submitted["id"])
+    assert (kept["room_layout"], kept["room_layout_id"]) == (layout["name"], layout["room_layout_id"])
+
+    service.restore_room_layout(layout["room_layout_id"])
+    assert _reload(draft["id"])["room_layout"] is None
 
 
 def test_a_name_differing_only_in_case_is_a_duplicate(layout):

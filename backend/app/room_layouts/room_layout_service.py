@@ -4,7 +4,8 @@ for the table and the triggers behind it.
 
 Deleting is two steps:
   - soft delete (is_active = false): the layout can't be picked for new
-    requests any more, but events already using it keep it.
+    requests any more. Drafts using it have their layout cleared (database
+    trigger); submitted events keep it.
   - permanent delete: only once it's soft-deleted AND every event still
     using it is completed or cancelled. The database enforces both (whoever
     runs the DELETE); this module turns its refusals into a 409. Events that
@@ -97,6 +98,9 @@ def rename_room_layout(room_layout_id: str, body) -> dict:
 
 
 def soft_delete_room_layout(room_layout_id: str) -> dict:
+    """Drafts using the layout have it cleared by the database
+    (20261012200000_clear_draft_layouts_on_soft_delete.sql); restoring it
+    doesn't put it back on them."""
     return _update(room_layout_id, {"is_active": False})
 
 

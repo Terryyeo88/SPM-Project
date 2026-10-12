@@ -1,7 +1,7 @@
 /**
  * Room layouts come from the backend (GET /room-layouts), where Venue Staff
  * add, rename and delete them -- they're no longer a fixed list here. Also
- * the calls behind the Room Layouts page and a venue's layout editor.
+ * the calls behind the Room Layouts page.
  */
 import { apiDelete, apiGet, apiPost } from './api'
 
@@ -47,23 +47,3 @@ export const softDeleteRoomLayout = (id) => apiDelete(`/room-layouts/${id}`)
 export const restoreRoomLayout = (id) => apiPost(`/room-layouts/${id}/restore`, {})
 /** Refused (409) unless soft-deleted and every event using it is completed or cancelled. */
 export const deleteRoomLayout = (id) => apiDelete(`/room-layouts/${id}/permanent`)
-
-// -- Venue Staff: which layouts a venue supports (VenueDetailView) ----------
-
-/** Replaces the venue's layouts with exactly these ids; resolves to the updated venue. */
-export const setVenueRoomLayouts = (venueId, roomLayoutIds) =>
-  apiPost(`/venues/${venueId}/room-layouts`, { room_layout_ids: roomLayoutIds })
-
-/**
- * Checkbox choices for a venue's layouts, as [{ room_layout_id, name, retired }]
- * sorted by name: every active layout, plus any soft-deleted one the venue
- * already lists (it may stay, but a soft-deleted layout can't be newly added,
- * so others aren't offered).
- */
-export function venueLayoutChoices(allLayouts, venueLayouts) {
-  const listed = new Set((venueLayouts ?? []).map((layout) => layout.room_layout_id))
-  return (allLayouts ?? [])
-    .filter((layout) => layout.is_active || listed.has(layout.room_layout_id))
-    .map((layout) => ({ room_layout_id: layout.room_layout_id, name: layout.name, retired: !layout.is_active }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-}

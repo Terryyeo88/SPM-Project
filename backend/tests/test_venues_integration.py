@@ -17,14 +17,6 @@ from app.venues.venue_service import get_venue, list_venues
 pytestmark = pytest.mark.integration
 
 
-def _link_layouts(venue_id: str, names) -> None:
-    """A venue's layouts are rows in venue_room_layouts, not a column."""
-    layouts = supabase.table("room_layouts").select("room_layout_id").in_("name", list(names)).execute().data
-    supabase.table("venue_room_layouts").insert(
-        [{"venue_id": venue_id, "room_layout_id": layout["room_layout_id"]} for layout in layouts]
-    ).execute()
-
-
 def _insert_venue(**overrides) -> dict:
     payload = {
         "name": f"Integration Test Venue {uuid.uuid4()}",
@@ -36,10 +28,8 @@ def _insert_venue(**overrides) -> dict:
         "status": "available",
     }
     payload.update(overrides)
-    layout_names = payload.pop("supported_layouts")
-    venue = supabase.table("venues").insert(payload).execute().data[0]
-    _link_layouts(venue["id"], layout_names)
-    return venue
+    result = supabase.table("venues").insert(payload).execute()
+    return result.data[0]
 
 
 def test_list_venues_returns_seeded_and_created_rows():

@@ -18,11 +18,11 @@ from postgrest.exceptions import APIError
 import app.auth.context as context_module
 import app.events.change_request_service as change_request_service
 import app.events.event_service as event_service
+import app.events.routes as routes_module
 import app.room_layouts.room_layout_service as service
-import app.venues.venue_service as venue_service
 from app.authz import actions
 from app.authz.policy import can
-from app.shared.errors import NotFoundError, ValidationError
+from app.shared.errors import ValidationError
 from tests.factories import make_user
 from tests.fake_supabase import FakeSupabase
 
@@ -247,13 +247,19 @@ def test_a_layout_venue_staff_added_can_be_chosen(managed_layouts):
 
 
 def test_a_soft_deleted_layout_cannot_be_chosen(managed_layouts):
-    with pytest.raises(ValidationError, match='"banquet" room layout is no longer available'):
+    with pytest.raises(ValidationError, match='room layout "banquet" no longer exists'):
         event_service.validate_event_payload({"name": "Talk", "room_layout": "banquet"}, for_submission=False)
 
 
-def test_an_unknown_layout_lists_only_the_active_ones(managed_layouts):
-    with pytest.raises(ValidationError, match=r"room_layout must be one of: theatre, u-shape\.$"):
+def test_a_layout_name_that_no_longer_exists_asks_for_a_refresh(managed_layouts):
+    """E.g. permanently deleted after the page loaded."""
+    with pytest.raises(ValidationError, match="Please refresh the page and choose a new room layout"):
         event_service.validate_event_payload({"name": "Talk", "room_layout": "stadium"}, for_submission=False)
+
+
+def test_a_malformed_layout_lists_only_the_active_ones(managed_layouts):
+    with pytest.raises(ValidationError, match=r"room_layout must be one of: theatre, u-shape\.$"):
+        event_service.validate_event_payload({"name": "Talk", "room_layout": 5}, for_submission=False)
 
 
 def test_a_session_keeps_its_soft_deleted_layout_when_other_details_change(managed_layouts):
@@ -270,14 +276,14 @@ def test_a_draft_keeps_its_soft_deleted_layout_but_cannot_switch_to_one(managed_
     kept = event_service._draft_payload({"expected_attendance": 20}, {"room_layout": "banquet"})
     assert kept["room_layout"] == "banquet"
 
-    with pytest.raises(ValidationError, match="no longer available"):
+    with pytest.raises(ValidationError, match="no longer exists"):
         event_service._draft_payload({"room_layout": "banquet"}, {"room_layout": "theatre"})
 
 
 def test_a_draft_cannot_save_an_unknown_layout(managed_layouts):
     """Drafts skip completeness checks, not the layout check -- otherwise the
     database would refuse the unknown name with an unhelpful error."""
-    with pytest.raises(ValidationError, match="room_layout must be one of"):
+    with pytest.raises(ValidationError, match="no longer exists"):
         event_service._draft_payload({"room_layout": "stadium"})
 
 
@@ -306,7 +312,7 @@ def test_submitting_a_draft_whose_layout_was_soft_deleted_is_refused(managed_lay
         special_requests="",
     )
 
-    with pytest.raises(ValidationError, match="no longer available"):
+    with pytest.raises(ValidationError, match="no longer exists"):
         event_service.submit_event_request("event-1", event)
     assert fake.calls == []  # nothing changed status
 
@@ -329,7 +335,7 @@ def test_a_change_request_can_leave_a_soft_deleted_layout_alone_but_not_ask_for_
         special_requests=None,
     )
 
-    with pytest.raises(ValidationError, match="no longer available"):
+    with pytest.raises(ValidationError, match="no longer exists"):
         change_request_service._validated_details(event, {"room_layout": "banquet"})
 
     event.room_layout = "banquet"
@@ -337,109 +343,80 @@ def test_a_change_request_can_leave_a_soft_deleted_layout_alone_but_not_ask_for_
     assert details["room_layout"] == "banquet"
 
 
-# -- venues reference layouts (venue_room_layouts) --------------------------------
-
-THEATRE = "11111111-1111-1111-1111-111111111111"
-BANQUET = "22222222-2222-2222-2222-222222222222"
-OLD_LAYOUT = "33333333-3333-3333-3333-333333333333"
+# -- a stale form still holding a deleted layout -----------------------------------
 
 
 @pytest.fixture
-def venue_db(monkeypatch):
-    """Venue v1 supports theatre and a soft-deleted layout; banquet is active
-    but not on the venue."""
-    fake = FakeSupabase()
-    fake.tables["venues"] = [{"id": "v1", "name": "Hall A"}]
-    fake.tables["room_layouts"] = [
-        _layout(THEATRE, "theatre"),
-        _layout(BANQUET, "banquet"),
-        _layout(OLD_LAYOUT, "old layout", is_active=False),
-    ]
-    fake.tables["venue_room_layouts"] = [
-        {"venue_id": "v1", "room_layout_id": THEATRE},
-        {"venue_id": "v1", "room_layout_id": OLD_LAYOUT},
-    ]
-    monkeypatch.setattr(venue_service, "supabase", fake)
+def stale_draft(monkeypatch, managed_layouts):
+    """A draft whose layout was cleared when "banquet" was soft-deleted (the
+    database trigger) -- but the organiser's page was loaded before that and
+    still has "banquet" selected."""
+    fake = FakeSupabase(
+        [
+            {
+                "id": "draft-1",
+                "organizer_id": "user-1",
+                "coordinator_id": None,
+                "status": "draft",
+                "shared_event_id": "group-1",
+                "name": "Talk",
+                "description": "d",
+                "purpose": "p",
+                "preferred_start_date": "2099-01-01",
+                "preferred_end_date": "2099-01-01",
+                "preferred_start_time": None,
+                "preferred_end_time": None,
+                "expected_attendance": 20,
+                "accessibility_needs": [],
+                "room_layout": None,
+                "equipment_needed": {"equipment": []},
+                "registration_needs": False,
+                "registration_start_datetime": None,
+                "registration_end_datetime": None,
+                "special_requests": None,
+            }
+        ]
+    )
+    monkeypatch.setattr(event_service, "supabase", fake)
+    monkeypatch.setattr(routes_module, "supabase", fake)
     return fake
 
 
-def _venue_layout_ids(fake):
-    return sorted(row["room_layout_id"] for row in fake.tables["venue_room_layouts"] if row["venue_id"] == "v1")
+REFRESH_MESSAGE = 'The room layout "banquet" no longer exists. Please refresh the page and choose a new room layout.'
 
 
-def test_a_venue_lists_its_layouts_by_name_and_with_ids(monkeypatch):
-    """The join comes back nested; venues are returned with
-    supported_layouts (names, what event checks compare) and
-    supported_room_layouts (ids, for editing), sorted by name."""
-    fake = FakeSupabase()
-    fake.tables["venues"] = [
-        {
-            "id": "v1",
-            "name": "Hall A",
-            "venue_room_layouts": [
-                {"room_layouts": _layout(THEATRE, "theatre")},
-                {"room_layouts": _layout(OLD_LAYOUT, "banquet", is_active=False)},
-            ],
-        }
-    ]
-    monkeypatch.setattr(venue_service, "supabase", fake)
+def test_submitting_a_stale_draft_form_asks_to_refresh_and_choose_again(api, stale_draft):
+    """Submit first saves the form (POST /events/<id>/draft); the deleted
+    layout is refused there with the refresh message, and nothing is
+    written or submitted."""
+    body = {"name": "Talk", "sessions": [{"id": "draft-1", "room_layout": "banquet", "expected_attendance": 20}]}
 
-    [venue] = venue_service.list_venues()
+    response = api("POST", "/events/draft-1/draft", ["event_organizer"], body)
 
-    assert venue["supported_layouts"] == ["banquet", "theatre"]
-    assert venue["supported_room_layouts"][0] == {"room_layout_id": OLD_LAYOUT, "name": "banquet", "is_active": False}
-    assert "venue_room_layouts" not in venue
-    assert venue_service.VENUE_SELECT in [call["columns"] for call in fake.calls]
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == REFRESH_MESSAGE
+    assert [call["op"] for call in stale_draft.calls] == ["select", "select"]  # load_event + the draft's sessions
+    assert stale_draft.get("draft-1")["room_layout"] is None
 
 
-def test_setting_a_venues_layouts_adds_and_removes_links(venue_db):
-    venue_service.set_venue_room_layouts("v1", {"room_layout_ids": [THEATRE, BANQUET]})
+def test_creating_and_submitting_with_a_stale_layout_asks_to_refresh(api, stale_draft):
+    body = {
+        "name": "Talk",
+        "description": "d",
+        "purpose": "p",
+        "sessions": [
+            {
+                "preferred_start_date": "2099-01-01",
+                "preferred_end_date": "2099-01-01",
+                "expected_attendance": 20,
+                "room_layout": "banquet",
+                "registration_needs": False,
+            }
+        ],
+    }
 
-    assert _venue_layout_ids(venue_db) == [THEATRE, BANQUET]
-    # New links are written before old ones are removed.
-    ops = [(call["table"], call["op"]) for call in venue_db.calls]
-    assert ops.index(("venue_room_layouts", "insert")) < ops.index(("venue_room_layouts", "delete"))
+    response = api("POST", "/events", ["event_organizer"], body)
 
-
-def test_a_venue_keeps_a_soft_deleted_layout_it_already_lists(venue_db):
-    venue_service.set_venue_room_layouts("v1", {"room_layout_ids": [THEATRE, OLD_LAYOUT, BANQUET]})
-
-    assert _venue_layout_ids(venue_db) == [THEATRE, BANQUET, OLD_LAYOUT]
-
-
-def test_a_soft_deleted_layout_cannot_be_added_to_a_venue(venue_db):
-    venue_db.tables["venue_room_layouts"] = []
-
-    with pytest.raises(ValidationError, match="Soft-deleted room layouts can't be added to a venue: old layout"):
-        venue_service.set_venue_room_layouts("v1", {"room_layout_ids": [OLD_LAYOUT]})
-    assert _venue_layout_ids(venue_db) == []
-
-
-@pytest.mark.parametrize(
-    ("body", "message"),
-    [
-        (["x"], "must be a JSON object"),
-        ({"room_layout_ids": "theatre"}, "must be a list of room layout ids"),
-        ({"room_layout_ids": [THEATRE], "name": "x"}, "Unknown fields: name"),
-        ({"room_layout_ids": ["not-a-uuid"]}, "Unknown room layout id: not-a-uuid"),
-        ({"room_layout_ids": ["44444444-4444-4444-4444-444444444444"]}, "Unknown room layout id"),
-    ],
-)
-def test_bad_venue_layout_lists_are_refused_and_nothing_changes(venue_db, body, message):
-    with pytest.raises(ValidationError, match=message):
-        venue_service.set_venue_room_layouts("v1", body)
-    assert _venue_layout_ids(venue_db) == [THEATRE, OLD_LAYOUT]
-
-
-def test_setting_layouts_on_an_unknown_venue_is_a_404(venue_db):
-    with pytest.raises(NotFoundError):
-        venue_service.set_venue_room_layouts("nope", {"room_layout_ids": []})
-
-
-def test_only_venue_staff_set_a_venues_layouts(api, venue_db):
-    body = {"room_layout_ids": [THEATRE]}
-
-    assert api("POST", "/venues/v1/room-layouts", ["venue_staff"], body).status_code == 200
-    for role in ("event_coordinator", "event_organizer", "event_coordinator_lead"):
-        assert api("POST", "/venues/v1/room-layouts", [role], body).status_code == 403, role
-    assert _venue_layout_ids(venue_db) == [THEATRE]
+    assert response.status_code == 400
+    assert response.get_json()["error"]["message"] == REFRESH_MESSAGE
+    assert len(stale_draft.rows) == 1  # nothing created
