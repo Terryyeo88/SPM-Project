@@ -1,0 +1,32 @@
+@startuml 01-system-context
+' C4 Level 1 -- System Context for ConnectSphere.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_TOP_DOWN()
+
+title System Context diagram for ConnectSphere
+
+Person(organizer, "Event Organizer", "Creates, drafts and submits event requests; requests changes to submitted or confirmed events.")
+Person(coordinator, "Event Coordinator", "Reviews assigned requests; approves/rejects; moves events through planning, confirmed, completed or cancelled; requests venues; reviews change requests.")
+Person(lead, "Event Coordinator Lead", "Works the unassigned queue; assigns and reassigns coordinators; oversees active events.")
+Person(venueStaff, "Venue Staff", "Approves or rejects venue booking requests; views venue availability calendars and booking conflicts.")
+Person(techStaff, "Technical Support Staff", "Views equipment inventory and equipment requests; checks availability for a request's date/time.")
+Person(attendee, "Attendee", "Browses events open for registration; registers, joins the waiting list or withdraws.")
+Person(safety, "Safety Officer", "Runs the Operational Feasibility Check before an event proceeds to preparation.")
+
+System(connectSphere, "ConnectSphere", "Event planning and coordination platform: event requests, status lifecycle, coordinator assignment, venues and bookings, equipment, change requests, attendee registration and audit logs.")
+
+System_Ext(supabaseAuth, "Supabase Auth", "Hosted identity provider. Signs users in and issues ES256-signed JWT access tokens.")
+
+Rel(organizer, connectSphere, "Creates and tracks event requests, raises change requests")
+Rel(coordinator, connectSphere, "Reviews and manages assigned events")
+Rel(lead, connectSphere, "Assigns and reassigns coordinators")
+Rel(venueStaff, connectSphere, "Reviews venue bookings and calendars")
+Rel(techStaff, connectSphere, "Checks equipment availability")
+Rel(attendee, connectSphere, "Registers for events")
+Rel(safety, connectSphere, "Approves / rejects / requests changes to safety arrangements")
+
+Rel(connectSphere, supabaseAuth, "Authenticates users; verifies tokens against JWKS", "HTTPS")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,30 @@
+@startuml 02-container
+' C4 Level 2 -- Containers inside ConnectSphere.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+
+title Container diagram for ConnectSphere
+
+Person(staff, "Staff users", "Event Organizer, Event Coordinator, Coordinator Lead, Venue Staff, Technical Support Staff, Safety Officer")
+Person(attendee, "Attendee", "Registers for events")
+
+System_Boundary(cs, "ConnectSphere") {
+    Container(spa, "Web Application", "Vue 3, Vite, Pinia, Vue Router", "Single-page app served to the browser. Role-based dashboards and views for events, venues, bookings, equipment and registrations, and shows in-app notifications. Holds only the Supabase publishable key.")
+    Container(api, "API Application", "Python 3, Flask, flask-cors, PyJWT", "JSON REST API. Verifies JWTs, enforces idle timeout and role/relationship authorisation, owns all business rules, the event status state machine and in-app notifications.")
+    ContainerDb(db, "Database", "PostgreSQL (Supabase)", "profiles, user_roles, events, event_status_log, coordinator_assignment_log, session_activity, venues, venue_bookings (+ no-overlap exclusion constraint), venue_booking_status_log, venue_blocks, equipment_*, registrations, event_change_requests, event_logs")
+}
+
+System_Ext(supabaseAuth, "Supabase Auth", "Hosted identity provider; issues ES256 JWTs and publishes a JWKS endpoint.")
+
+Rel(staff, spa, "Uses", "HTTPS, browser")
+Rel(attendee, spa, "Uses", "HTTPS, browser")
+
+Rel(spa, supabaseAuth, "Signs in / out, refreshes session", "supabase-js, HTTPS")
+Rel(spa, api, "Calls with Authorization: Bearer <access token>", "JSON/HTTPS")
+
+Rel(api, supabaseAuth, "Fetches and caches JWKS to verify token signatures", "HTTPS")
+Rel(api, db, "Reads and writes using the service role key", "supabase-py / PostgREST, HTTPS")
+
+SHOW_LEGEND()
+@enduml

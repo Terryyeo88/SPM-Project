@@ -1,0 +1,132 @@
+@startuml 03-component-api
+' C4 Level 3 -- Components inside the API Application (backend/app).
+' Laid out in layers, top to bottom: request pipeline -> HTTP routes ->
+' domain services (grouped by domain) -> persistence.
+' Each component's technology field is the module it lives in.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+SetDefaultLegendEntries("")
+skinparam nodesep 40
+skinparam ranksep 70
+
+AddElementTag("crosscut", $bgColor="#5a7d9a", $legendText="cross-cutting")
+AddElementTag("route", $bgColor="#3c7fc0", $legendText="HTTP routes (Flask Blueprint)")
+AddElementTag("service", $bgColor="#85bbf0", $fontColor="#000000", $legendText="domain service")
+
+title Component diagram for ConnectSphere - API Application
+
+Container(spa, "Web Application", "Vue 3 SPA", "Sends JSON requests with a Bearer token")
+System_Ext(supabaseAuth, "Supabase Auth", "JWKS endpoint")
+ContainerDb(db, "Database", "PostgreSQL (Supabase)")
+
+Container_Boundary(api, "API Application (Flask)") {
+
+    Boundary(pipeline, "Request pipeline") {
+        Component(authCtx, "Auth Context", "auth/context.py, auth/jwt.py", "before_request hook: verifies the JWT, enforces idle timeout, loads profile + roles", $tags="crosscut")
+        Component(authz, "Authorisation Policy", "authz/*", "@require(action): rules on role, ownership, assignment and status", $tags="crosscut")
+        Component(errors, "Error Handling", "shared/errors.py", "Maps AppError to {error:{code,message}} JSON; hides other exceptions as 500", $tags="crosscut")
+    }
+
+    Boundary(routes, "HTTP routes") {
+        Component(meRoutes, "Me / Health Routes", "me/, health/", "GET /me, /health, /health/db", $tags="route")
+        Component(eventRoutes, "Event Routes", "events/routes.py", "/events: lifecycle actions, change requests, logs, coordinator assignment, venue bookings", $tags="route")
+        Component(venueRoutes, "Venue Routes", "venues/routes.py, conflict_routes.py", "/venues: catalogue, calendar, booking queue, approve/reject, conflicts", $tags="route")
+        Component(equipRoutes, "Equipment Routes", "equipment/routes.py", "/equipment: inventory, requests, availability", $tags="route")
+        Component(regRoutes, "Registration Routes", "registrations/routes.py", "/registrations: open events, mine, register, withdraw", $tags="route")
+    }
+
+    Boundary(eventsDomain, "Events domain") {
+        Component(eventSvc, "Event Request Service", "events/event_service.py", "Validation, drafts, multi-session submission, approve/reject, role-scoped lists", $tags="service")
+        Component(coordSvc, "Coordinator Assignment Service", "events/coordinator_service.py", "Lead assigns / reassigns; availability and workload checks", $tags="service")
+        Component(changeSvc, "Change Request Service", "events/change_request_service.py", "Raise, approve (with impact ack) or reject change requests", $tags="service")
+        Component(impact, "Change Impact Assessor", "events/change_impact.py", "Which arrangements a change touches", $tags="service")
+        Component(transitions, "Status Transition Engine", "events/transitions.py", "Guarded state machine for events.status; 409 on races; status log", $tags="service")
+        Component(eventLog, "Event Audit Log", "events/event_log.py", "Field-level diffs: what, who, when", $tags="service")
+        Component(notifyHook, "Notification Service", "coordinator_service.py (placeholder)", "In-app notifications for the website. Today only prints on coordinator assignment", $tags="service")
+    }
+
+    Boundary(venuesDomain, "Venues domain") {
+        Component(venueSvc, "Venue Catalogue Service", "venues/venue_service.py", "Read-only venue list and detail", $tags="service")
+        Component(calendarSvc, "Venue Calendar Service", "venues/calendar_service.py", "Tentatively held / confirmed / blocked entries", $tags="service")
+        Component(bookingSvc, "Venue Booking Service", "venues/booking_service.py", "Create (pending), confirm, reject with reason; overlap guard", $tags="service")
+        Component(conflicts, "Booking Conflict Detector", "venues/booking_conflicts.py", "Lists confirmed bookings a booking clashes with", $tags="service")
+    }
+
+    Boundary(equipDomain, "Equipment domain") {
+        Component(equipSvc, "Equipment Service", "equipment/equipment_service.py", "Unit-level inventory; availability vs overlapping reservations", $tags="service")
+    }
+
+    Boundary(regDomain, "Registrations domain") {
+        Component(regSvc, "Registration Service", "registrations/registration_service.py", "Confirmed vs waitlisted by capacity; withdraw promotes next", $tags="service")
+    }
+
+    Component(dbClient, "Supabase Client", "extensions.py", "Shared lazy client using the service role key", $tags="crosscut")
+}
+
+' --- request pipeline -----------------------------------------------------
+Rel_D(spa, authCtx, "All requests", "JSON/HTTPS")
+Rel_R(authCtx, supabaseAuth, "JWKS (cached)", "HTTPS")
+Lay_R(authCtx, authz)
+Lay_R(authz, errors)
+
+Rel_D(authCtx, meRoutes, "")
+Rel_D(authCtx, eventRoutes, "")
+Rel_D(authCtx, venueRoutes, "")
+Rel_D(authCtx, equipRoutes, "")
+Rel_D(authCtx, regRoutes, "")
+
+Rel_U(eventRoutes, authz, "@require")
+Rel_U(venueRoutes, authz, "@require")
+Rel_U(equipRoutes, authz, "@require")
+Rel_U(regRoutes, authz, "@require")
+
+Lay_R(meRoutes, eventRoutes)
+Lay_R(eventRoutes, venueRoutes)
+Lay_R(venueRoutes, equipRoutes)
+Lay_R(equipRoutes, regRoutes)
+
+' --- routes -> services -----------------------------------------------------
+Rel_D(eventRoutes, eventSvc, "")
+Rel_D(eventRoutes, coordSvc, "")
+Rel_D(eventRoutes, changeSvc, "")
+Rel_D(eventRoutes, transitions, "planning / confirm / complete / cancel")
+Rel_D(eventRoutes, eventLog, "direct edits, logs")
+Rel(eventRoutes, bookingSvc, "request booking")
+
+Rel_D(venueRoutes, venueSvc, "")
+Rel_D(venueRoutes, calendarSvc, "")
+Rel_D(venueRoutes, bookingSvc, "")
+Rel_D(venueRoutes, conflicts, "")
+
+Rel_D(equipRoutes, equipSvc, "")
+Rel_D(regRoutes, regSvc, "")
+
+' --- within / across domains -----------------------------------------------
+Rel_D(eventSvc, transitions, "submit, approve, reject")
+Rel_D(coordSvc, transitions, "submitted -> under review")
+Rel_D(coordSvc, notifyHook, "assigned")
+Rel_D(changeSvc, impact, "")
+Rel_D(changeSvc, eventLog, "")
+Rel_L(changeSvc, eventSvc, "re-validate")
+Rel(impact, bookingSvc, "event windows")
+Rel_L(bookingSvc, transitions, "event status")
+Rel_R(conflicts, bookingSvc, "overlap predicate")
+Rel_L(calendarSvc, venueSvc, "")
+
+' --- persistence ------------------------------------------------------------
+Rel_D(transitions, dbClient, "")
+Rel_D(eventLog, dbClient, "")
+Rel_D(eventSvc, dbClient, "")
+Rel_D(coordSvc, dbClient, "")
+Rel_D(changeSvc, dbClient, "")
+Rel_D(bookingSvc, dbClient, "")
+Rel_D(calendarSvc, dbClient, "")
+Rel_D(venueSvc, dbClient, "")
+Rel_D(equipSvc, dbClient, "")
+Rel_D(regSvc, dbClient, "")
+Rel_U(authCtx, dbClient, "session_activity, profiles")
+Rel_D(dbClient, db, "PostgREST", "HTTPS")
+
+SHOW_LEGEND()
+@enduml
