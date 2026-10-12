@@ -1,4 +1,6 @@
-"""Tests for saving incomplete event requests as drafts."""
+"""Tests for saving incomplete event requests as drafts (IS-32).
+
+The end-to-end tests for each acceptance criterion are at the bottom."""
 
 from __future__ import annotations
 
@@ -7,7 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.auth.context as context_module
 import app.events.event_service as service
+import app.events.routes as routes_module
 import app.events.transitions as transitions
 from app.events.event_service import (
     DRAFT_NAME,
@@ -15,6 +19,7 @@ from app.events.event_service import (
     create_draft_request,
     delete_draft_request,
     save_draft_request,
+    validate_event_group,
 )
 from app.shared.errors import ValidationError
 from tests.fake_supabase import FakeSupabase
@@ -507,3 +512,134 @@ def test_save_draft_treats_malformed_stored_equipment_as_none(fake_db):
     save_draft_request("a", SimpleNamespace(**fake_db.get("a")), {"sessions": [{"id": "a", "expected_attendance": 40}]})
 
     assert fake_db.get("a")["equipment_needed"] == {"equipment": []}
+
+
+# -- IS-32 acceptance criteria, end to end -------------------------------------
+# "As an Event Organizer, I want to save a partially completed event request
+# as a draft, so that I can finish it later without losing my progress."
+# These go through the real routes, @require and the service; only the
+# database (FakeSupabase) and the caller's profile lookup are faked.
+
+ROLES_BY_USER = {
+    "organizer-1": ["event_organizer"],
+    "organizer-2": ["event_organizer"],
+    "coordinator-1": ["event_coordinator"],
+    "lead-1": ["event_coordinator_lead"],
+}
+
+
+@pytest.fixture
+def api(client, signing_key, monkeypatch, fake_db):
+    """Calls the API as one of ROLES_BY_USER's users, against fake_db."""
+    monkeypatch.setattr(routes_module, "supabase", fake_db)
+    monkeypatch.setattr(
+        context_module,
+        "_load_profile_with_roles",
+        lambda user_id: ("Test User", f"{user_id}@example.com", frozenset(ROLES_BY_USER[user_id])),
+    )
+    monkeypatch.setattr(context_module, "_get_last_active", lambda session_id: None)
+    monkeypatch.setattr(context_module, "_touch_session_activity", lambda *a, **k: None)
+
+    def call(method, path, user, body=None):
+        headers = {"Authorization": f"Bearer {signing_key.make_token(sub=user)}"}
+        return client.open(path, method=method, headers=headers, json=body)
+
+    return call
+
+
+INCOMPLETE_FORM = {"name": "Half-planned workshop", "sessions": [{"expected_attendance": 40}]}
+
+
+def _save_new_draft(api, fake_db):
+    response = api("POST", "/events/draft", "organizer-1", INCOMPLETE_FORM)
+    assert response.status_code == 201
+    event_id = response.get_json()["sessions"][0]["id"]
+    # Postgres fills every column the insert left out with NULL; the fake
+    # stores only what was sent, so do the same here.
+    for column in _row(event_id):
+        fake_db.get(event_id).setdefault(column, None)
+    return event_id
+
+
+# AC1: Saving an incomplete form sets status to "draft"
+
+
+def test_ac1_saving_an_incomplete_form_sets_status_to_draft(api, fake_db):
+    """The form is incomplete -- it would fail submission validation -- yet
+    saving it succeeds, and the stored request has status "draft"."""
+    with pytest.raises(ValidationError):
+        validate_event_group(INCOMPLETE_FORM, for_submission=True)
+
+    response = api("POST", "/events/draft", "organizer-1", INCOMPLETE_FORM)
+
+    assert response.status_code == 201
+    assert [s["status"] for s in response.get_json()["sessions"]] == ["draft"]
+    assert [(row["status"], row["organizer_id"]) for row in fake_db.rows] == [("draft", "organizer-1")]
+
+
+# AC2: Draft can be reopened and edited later
+
+
+def test_ac2_draft_can_be_reopened_and_edited_later(api, fake_db):
+    """The organiser reopens the draft (GET), sees what they saved, edits
+    it (POST /draft), and on reopening again sees the edit plus the
+    earlier progress -- still a draft, nothing lost."""
+    event_id = _save_new_draft(api, fake_db)
+
+    reopened = api("GET", f"/events/{event_id}", "organizer-1")
+    assert reopened.status_code == 200
+    assert reopened.get_json()["status"] == "draft"
+    assert reopened.get_json()["expected_attendance"] == 40
+
+    edited = api(
+        "POST",
+        f"/events/{event_id}/draft",
+        "organizer-1",
+        {"name": "Half-planned workshop", "sessions": [{"id": event_id, "room_layout": "classroom"}]},
+    )
+    assert edited.status_code == 200
+
+    session = api("GET", f"/events/{event_id}/sessions", "organizer-1").get_json()["sessions"][0]
+    assert session["status"] == "draft"
+    assert session["room_layout"] == "classroom"  # the edit
+    assert session["expected_attendance"] == 40  # earlier progress kept
+
+
+# AC3: Draft is only visible to the Organizer who created it
+
+
+@pytest.mark.parametrize("path", ["/events/{id}", "/events/{id}/sessions"])
+def test_ac3_only_the_creator_can_open_the_draft(api, fake_db, path):
+    """Another organiser, a coordinator and the Lead all get 404 -- the
+    draft is hidden, not merely forbidden."""
+    event_id = _save_new_draft(api, fake_db)
+    url = path.format(id=event_id)
+
+    assert api("GET", url, "organizer-1").status_code == 200
+    for other in ("organizer-2", "coordinator-1", "lead-1"):
+        assert api("GET", url, other).status_code == 404, other
+
+
+def test_ac3_draft_only_appears_in_the_creators_event_list(api, fake_db):
+    event_id = _save_new_draft(api, fake_db)
+
+    def listed_ids(user):
+        response = api("GET", "/events", user)
+        assert response.status_code == 200
+        return [event["id"] for event in response.get_json()]
+
+    assert listed_ids("organizer-1") == [event_id]
+    for other in ("organizer-2", "coordinator-1", "lead-1"):
+        assert event_id not in listed_ids(other), other
+
+
+def test_ac3_another_organiser_cannot_edit_or_delete_the_draft(api, fake_db):
+    event_id = _save_new_draft(api, fake_db)
+    before = dict(fake_db.get(event_id))
+
+    edit_body = {"sessions": [{"id": event_id, "room_layout": "banquet"}]}
+    edit = api("POST", f"/events/{event_id}/draft", "organizer-2", edit_body)
+    delete = api("DELETE", f"/events/{event_id}", "organizer-2")
+
+    assert (edit.status_code, delete.status_code) == (404, 404)
+    assert fake_db.get(event_id) == before

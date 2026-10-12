@@ -181,7 +181,7 @@ insert into public.venues (name, location, capacity, facilities, accessibility_f
 select 'Grand Ballroom', 'Main Building, Level 3', 300,
   array['microphone', 'projector', 'screen', 'wifi'],
   array['wheelchair_access', 'lift_access'],
-  array['theatre', 'banquet', 'networking']::public.room_layout[],
+  array['theatre', 'banquet', 'networking']::text[],
   'available', '07:00', '23:59'
 where not exists (select 1 from public.venues where name = 'Grand Ballroom');
 
@@ -189,7 +189,7 @@ insert into public.venues (name, location, capacity, facilities, accessibility_f
 select 'Innovation Hub', 'Tech Wing, Level 1', 80,
   array['projector', 'screen', 'wifi'],
   array['wheelchair_access', 'removable_seats'],
-  array['classroom', 'seminar', 'boardroom']::public.room_layout[],
+  array['classroom', 'seminar', 'boardroom']::text[],
   'available', '08:00', '20:00'
 where not exists (select 1 from public.venues where name = 'Innovation Hub');
 
@@ -197,7 +197,7 @@ insert into public.venues (name, location, capacity, facilities, accessibility_f
 select 'Executive Boardroom', 'Main Building, Level 5', 20,
   array['screen', 'wifi'],
   array['wheelchair_access'],
-  array['boardroom']::public.room_layout[],
+  array['boardroom']::text[],
   'occupied', '08:00', '18:00'
 where not exists (select 1 from public.venues where name = 'Executive Boardroom');
 
@@ -208,7 +208,7 @@ insert into public.venues (name, location, capacity, facilities, accessibility_f
 select 'Riverside Pavilion', 'East Campus, Ground Floor', 150,
   array['microphone', 'wifi'],
   array['wheelchair_access', 'lift_access', 'extra_legroom_seats'],
-  array['banquet', 'networking', 'seminar']::public.room_layout[],
+  array['banquet', 'networking', 'seminar']::text[],
   'maintenance'
 where not exists (select 1 from public.venues where name = 'Riverside Pavilion');
 

@@ -33,6 +33,7 @@ import app.auth.context as context_module
 import app.events.change_impact as impact_module
 import app.events.change_request_service as service
 import app.events.event_log as event_log_module
+import app.events.event_service as event_service_module
 import app.events.routes as routes_module
 from app.authz import actions
 from app.authz.policy import authorise, can
@@ -315,7 +316,7 @@ def test_the_same_instant_in_another_timezone_is_not_a_change(fake):
         ({"changes": {"shared_event_id": "group-9"}}, "can't be changed: shared_event_id"),
         ({"changes": {"id": "session-9"}}, "can't be changed: id"),
         ({"changes": {"expected_attendance": 0}}, "expected_attendance must be a positive integer"),
-        ({"changes": {"room_layout": "stadium"}}, "room_layout must be one of"),
+        ({"changes": {"room_layout": "stadium"}}, "no longer exists"),
         ({"changes": {"preferred_end_date": "2000-01-01"}}, "preferred_end_date must be on or after"),
         ({"changes": {"name": ""}}, "name is required"),
         ({"changes": {"room_layout": "banquet"}, "reason": 5}, "reason must be a string"),
@@ -1168,3 +1169,76 @@ def test_a_new_registration_period_is_flagged_when_attendees_are_registered(fake
 
     assert impact["area"] == "registration"
     assert impact["issues"] == ["The registration period changes while 2 confirmed attendee(s) are registered."]
+
+
+# -- room layouts managed by Venue Staff --------------------------------------
+# Layouts come from the room_layouts table, not a fixed list: a change may
+# ask for any layout Venue Staff currently offer, and a session keeps a
+# layout that has since been soft-deleted -- but can't ask for one.
+
+
+@pytest.fixture
+def managed_layouts(monkeypatch):
+    """theatre, classroom and u-shape (added by Venue Staff) are offered;
+    banquet has been soft-deleted."""
+    monkeypatch.setattr(
+        event_service_module,
+        "_room_layouts",
+        lambda: {"theatre": True, "classroom": True, "u-shape": True, "banquet": False},
+    )
+
+
+def test_a_change_to_a_layout_venue_staff_added_is_recorded(fake, managed_layouts):
+    change = request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "u-shape"}})
+
+    assert change["requested_changes"] == {"room_layout": "u-shape"}
+    assert change["previous_values"] == {"room_layout": "theatre"}
+
+
+def test_a_change_to_a_soft_deleted_layout_is_refused_and_nothing_is_recorded(fake, managed_layouts):
+    with pytest.raises(ValidationError, match='room layout "banquet" no longer exists'):
+        request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "banquet"}})
+    assert _change_requests(fake) == []
+
+
+def test_a_session_on_a_soft_deleted_layout_can_still_change_other_details(fake, managed_layouts):
+    """The session's current layout was soft-deleted after it was chosen: a
+    change to something else is still recorded and approved, and the
+    session keeps its layout."""
+    _no_equipment(fake)
+    fake.rows[0]["room_layout"] = "banquet"
+
+    change = request_event_change(_event(fake), ORGANISER, {"changes": {"expected_attendance": 120}})
+    assert change["requested_changes"] == {"expected_attendance": 120}
+
+    approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
+    assert fake.get("session-1")["expected_attendance"] == 120
+    assert fake.get("session-1")["room_layout"] == "banquet"
+
+
+def test_approval_is_refused_once_the_requested_layout_is_soft_deleted(fake, monkeypatch):
+    """Venue Staff soft-deleted the layout while the change waited for review:
+    approving it is refused, nothing is written, and it stays pending for the
+    coordinator to reject."""
+    _no_equipment(fake)
+    offered = {"theatre": True, "u-shape": True}
+    monkeypatch.setattr(event_service_module, "_room_layouts", lambda: dict(offered))
+    change = request_event_change(_event(fake), ORGANISER, {"changes": {"room_layout": "u-shape"}})
+
+    offered["u-shape"] = False
+    with pytest.raises(ValidationError, match="no longer exists"):
+        approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
+    assert fake.get("session-1")["room_layout"] == "theatre"
+    assert _change_requests(fake)[0]["status"] == "pending"
+
+
+def test_a_layout_venue_staff_added_is_checked_against_the_booked_venue(fake):
+    """The venue check works on layout names, whichever layouts exist: a
+    venue listing the new layout raises nothing; one that doesn't is flagged."""
+    _no_equipment(fake)
+    _book_venue(fake, supported_layouts=["theatre", "u-shape"])
+    assert _assess(fake, {"room_layout": "u-shape"}) == []
+
+    fake.tables["venue_bookings"][0]["venues"]["supported_layouts"] = ["theatre"]
+    [impact] = _assess(fake, {"room_layout": "u-shape"})
+    assert impact["issues"] == ["The venue doesn't support a u-shape layout."]

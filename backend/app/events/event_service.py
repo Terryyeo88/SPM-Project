@@ -23,6 +23,7 @@ from app.authz.actions import EVENT_VIEW
 from app.authz.policy import can
 from app.events.transitions import TransitionConflictError, record_creation, transition
 from app.extensions import supabase
+from app.room_layouts.room_layout_service import list_room_layouts
 from app.shared.errors import ValidationError
 
 EVENT_STATUSES = {
@@ -36,7 +37,6 @@ EVENT_STATUSES = {
     "cancelled",
     "rejected",
 }
-ROOM_LAYOUTS = {"theatre", "classroom", "boardroom", "seminar", "banquet", "networking"}
 EQUIPMENT = {"microphone", "projector", "screen", "wifi"}
 ACCESSIBILITY_NEEDS = {
     "wheelchair_access",
@@ -179,7 +179,39 @@ def _validate_registration_window(validated: dict, *, for_submission: bool) -> N
             )
 
 
-def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
+def _room_layouts() -> dict[str, bool]:
+    """Every room layout Venue Staff have defined: name -> is_active."""
+    return {row["name"]: row["is_active"] for row in list_room_layouts(include_inactive=True)}
+
+
+def _check_room_layout(value, current: str | None = None) -> None:
+    """A room layout must be one Venue Staff currently offer -- except the
+    one the session already has (`current`), which it keeps even after it's
+    soft-deleted, so editing other details doesn't force a layout change.
+    Submitting passes no `current`: a request isn't sent for review with a
+    layout that's no longer offered.
+
+    A layout name that's soft-deleted or gone entirely almost always comes
+    from a page loaded before Venue Staff deleted it (the form only offers
+    real layouts), so the message tells the user to refresh and pick again."""
+    if isinstance(value, str) and value and value == current:
+        return
+    layouts = _room_layouts()
+    if isinstance(value, str) and layouts.get(value) is True:
+        return
+    if isinstance(value, str) and value:
+        raise ValidationError(
+            f'The room layout "{value}" no longer exists. Please refresh the page and choose a new room layout.'
+        )
+    active = sorted(name for name, is_active in layouts.items() if is_active)
+    raise ValidationError(f"room_layout must be one of: {', '.join(active)}.")
+
+
+def validate_event_payload(
+    payload: dict, *, for_submission: bool, current_room_layout: str | None = None
+) -> dict:
+    """`current_room_layout` is the layout the session has now, if it's an
+    existing one -- see _check_room_layout."""
     if not isinstance(payload, dict):
         raise ValidationError("The event request body must be a JSON object.")
     unknown_fields = set(payload) - EVENT_FIELDS
@@ -276,8 +308,8 @@ def validate_event_payload(payload: dict, *, for_submission: bool) -> dict:
     if "expected_attendance" in validated:
         if not isinstance(validated["expected_attendance"], int) or validated["expected_attendance"] <= 0:
             raise ValidationError("expected_attendance must be a positive integer.")
-    if "room_layout" in validated and validated["room_layout"] not in ROOM_LAYOUTS:
-        raise ValidationError(f"room_layout must be one of: {', '.join(sorted(ROOM_LAYOUTS))}.")
+    if "room_layout" in validated:
+        _check_room_layout(validated["room_layout"], current_room_layout)
     if "equipment" in validated:
         validated["equipment"] = _validate_item_list(
             validated["equipment"], "equipment", EQUIPMENT, quantity_required=True
@@ -325,6 +357,9 @@ def _normalize_draft_row(payload: dict, existing: dict | None = None) -> dict:
             database_payload[field] = None
     if database_payload.get("expected_attendance") == "":
         database_payload["expected_attendance"] = None
+    layout = database_payload.get("room_layout")
+    if layout is not None and layout != (existing or {}).get("room_layout"):
+        _check_room_layout(layout)
     if database_payload.get("registration_needs") is False:
         for field in REGISTRATION_WINDOW_FIELDS:
             database_payload[field] = None
@@ -574,7 +609,9 @@ def create_draft_request(organizer_id: str, payload: dict) -> dict:
 def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
     # validate_event_payload requires `name`, so a validated payload is
     # never empty -- no separate "at least one field" check is needed.
-    payload = validate_event_payload(payload, for_submission=False)
+    payload = validate_event_payload(
+        payload, for_submission=False, current_room_layout=getattr(event, "room_layout", None)
+    )
     database_payload = _to_database_payload(payload, _from_database_event(event))
     result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
     return _first_row(result)
