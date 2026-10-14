@@ -815,3 +815,37 @@ units. `equipment_requests.status` has no `released` value and none was
 added: the event's own `cancelled` status already says it, and releasing
 the units themselves (deleting the reservation rows) is the separate
 "release equipment on cancel" story.
+
+## Release Equipment on Cancel (Justin, Sprint 3, 2026-10-14)
+
+### Release = delete the event's reservation rows
+
+`app/equipment/reservation_release.py::release_event_equipment` deletes
+every `equipment_reservations` row belonging to the event's requests. The
+`equipment_requests` and `equipment_request_items` rows are kept, so the
+event page still shows what was asked for (as "Released").
+
+Deleting, rather than keeping the rows with a `released_at` flag, because
+everything that decides whether a unit is free already counts reservation
+rows and nothing else: IS-18's `check_availability`, `get_equipment`'s
+occupancy, and the `equipment_reservations_no_unit_overlap` exclusion
+constraint. Once the rows are gone all three see the units as free, with
+no change to IS-18's code or the migration. A flag would have needed a
+migration, changes to both IS-18 functions, and a partial exclusion
+constraint. What is lost is a record of exactly which units were held
+before the cancel; the cancellation itself (who, when, why) is still in
+`event_status_log`.
+
+### Done in the cancel route, after transition()
+
+`POST /events/<id>/cancel` calls `release_event_equipment` right after
+`transition(..., "cancelled")` succeeds, so a cancel that is refused (no
+reason, wrong status) or loses a race (409) releases nothing. It is not
+atomic with the status change -- the same trade-off `transition()` already
+makes for its history insert (see that module's docstring). A database
+trigger would have been atomic and caught every path to `cancelled`, but
+cancel has one path today and the team writes this logic in Python; see
+`docs/open-questions.md`.
+
+The release lives in its own module, not `equipment_service.py`, so IS-18's
+file is not changed by this story.

@@ -38,6 +38,7 @@ from app.authz.actions import (
 )
 from app.authz.decorators import require
 from app.equipment.equipment_service import list_requests_for_event as list_equipment_requests_for_event
+from app.equipment.reservation_release import release_event_equipment
 from app.events.change_request_service import (
     approve_change_request,
     list_change_requests,
@@ -251,9 +252,23 @@ def cancel_event(event, event_id):
     """IS-39: approved/planning/confirmed -> cancelled. The reason is
     required (enforced by transition(), which 400s without one). It's
     stored in event_status_log, not on the event, and the organiser reads
-    it back via GET /events/<id>/status-history."""
+    it back via GET /events/<id>/status-history.
+
+    Release Equipment on Cancel (Justin, Sprint 3): once the event is
+    cancelled, every equipment unit reserved for it is released so other
+    events can book it (app.equipment.reservation_release). Only after
+    transition() succeeds -- a refused or conflicting cancel releases
+    nothing. Not atomic with the status change, same as transition()'s own
+    history insert; see docs/open-questions.md."""
     updated = _move(event, event_id, "cancelled")
-    return jsonify({**updated, "cancellation_reason": request.get_json(silent=True)["reason"].strip()}), 200
+    released = release_event_equipment(event_id)
+    return jsonify(
+        {
+            **updated,
+            "cancellation_reason": request.get_json(silent=True)["reason"].strip(),
+            "released_equipment_units": released,
+        }
+    ), 200
 
 
 @events_bp.route("/<event_id>/status-history", methods=["GET"])

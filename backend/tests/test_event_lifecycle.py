@@ -118,6 +118,11 @@ def test_is39_cancel_refused_before_approval_or_when_finished(status):
 class _Store:
     def __init__(self, status):
         self.status, self.history = status, []
+        self.released = []  # event ids release_event_equipment was called for
+
+    def release_equipment(self, event_id):
+        self.released.append(event_id)
+        return 3
 
     def current_status(self, event_id):
         return self.status
@@ -148,6 +153,7 @@ def world(monkeypatch):
         monkeypatch.setattr(transitions, "_db_conditional_update", store.conditional_update)
         monkeypatch.setattr(transitions, "_db_insert_history", store.insert_history)
         monkeypatch.setattr(transitions, "_db_list_history", store.list_history)
+        monkeypatch.setattr(routes_module, "release_event_equipment", store.release_equipment)
         monkeypatch.setattr(
             routes_module,
             "load_event",
@@ -269,3 +275,52 @@ def test_lost_race_between_authz_and_write_is_409(client, signing_key, world):
     assert response.get_json()["error"]["code"] == "status_conflict"
     assert store.status == "cancelled"
     assert store.history == []
+
+
+# -- Release Equipment on Cancel (Justin, Sprint 3) ---------------------------
+# The release itself (which rows are deleted) is tested in
+# test_reservation_release.py; these check WHEN the route calls it.
+
+
+def test_cancelling_releases_the_events_equipment(client, signing_key, world):
+    store = world(["event_coordinator"], "planning")
+    response = client.post("/events/event-1/cancel", headers=_auth(signing_key), json={"reason": "Venue unavailable"})
+
+    assert response.status_code == 200
+    assert store.released == ["event-1"]
+    assert response.get_json()["released_equipment_units"] == 3
+
+
+def test_a_cancel_refused_for_no_reason_releases_nothing(client, signing_key, world):
+    store = world(["event_coordinator"], "planning")
+    response = client.post("/events/event-1/cancel", headers=_auth(signing_key), json={"reason": " "})
+
+    assert response.status_code == 400
+    assert store.released == []
+
+
+def test_a_cancel_refused_by_status_releases_nothing(client, signing_key, world):
+    store = world(["event_coordinator"], "under_review")
+    response = client.post("/events/event-1/cancel", headers=_auth(signing_key), json={"reason": "No venue"})
+
+    assert response.status_code == 403
+    assert store.released == []
+
+
+def test_a_cancel_that_lost_a_race_releases_nothing(client, signing_key, world):
+    # @require saw "approved", but someone else already moved it on.
+    store = world(["event_coordinator"], "completed", loaded_status="approved")
+    response = client.post("/events/event-1/cancel", headers=_auth(signing_key), json={"reason": "No venue"})
+
+    assert response.status_code == 409
+    assert store.released == []
+
+
+@pytest.mark.parametrize("path,from_status", [("start-planning", "approved"), ("confirm", "planning"),
+                                              ("complete", "confirmed")])
+def test_other_lifecycle_moves_do_not_release_equipment(client, signing_key, world, path, from_status):
+    store = world(["event_coordinator"], from_status)
+    response = client.post(f"/events/event-1/{path}", headers=_auth(signing_key), json={})
+
+    assert response.status_code == 200
+    assert store.released == []
