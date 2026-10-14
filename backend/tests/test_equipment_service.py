@@ -419,3 +419,115 @@ def test_get_equipment_missing_raises_not_found(install):
     install()
     with pytest.raises(NotFoundError):
         service.get_equipment("nope")
+
+
+# -- list_requests_for_event (View Reserved Equipment, Justin, Sprint 3) -----
+
+
+def _event_request(request_id, status, created_at, items, event_id="event-1"):
+    """An equipment_requests row with its items (and their reservations)
+    already embedded, the shape list_requests_for_event selects."""
+    return {
+        "id": request_id,
+        "event_id": event_id,
+        "requested_by": "coord-1",
+        "status": status,
+        "needed_start": "2026-11-10T10:00:00+08:00",
+        "needed_end": "2026-11-10T14:00:00+08:00",
+        "created_at": created_at,
+        "equipment_request_items": items,
+    }
+
+
+def _event_item(type_, quantity, reserved_tags=()):
+    return {
+        "id": f"item-{type_['name']}",
+        "equipment_type_id": type_["id"],
+        "quantity": quantity,
+        "technical_requirements": None,
+        "equipment_types": {"name": type_["name"]},
+        "equipment_reservations": [
+            {"id": f"res-{tag}", "equipment_id": f"unit-{tag}", "equipment_units": {"asset_tag": tag}}
+            for tag in reserved_tags
+        ],
+    }
+
+
+def test_event_requests_are_scoped_to_the_event_and_newest_first(install):
+    install(
+        equipment_requests=[
+            _event_request("old", "rejected", "2026-10-01T00:00:00Z", [_event_item(PROJECTOR, 1)]),
+            _event_request("new", "pending", "2026-10-02T00:00:00Z", [_event_item(PROJECTOR, 1)]),
+            _event_request("other", "pending", "2026-10-03T00:00:00Z", [], event_id="event-2"),
+        ]
+    )
+    assert [r["id"] for r in service.list_requests_for_event("event-1")] == ["new", "old"]
+
+
+def test_event_request_totals_the_quantity_asked_for(install):
+    install(
+        equipment_requests=[
+            _event_request(
+                "req-1", "pending", "2026-10-01T00:00:00Z",
+                [_event_item(PROJECTOR, 2), _event_item(MIC, 2), _event_item(SCREEN, 1)],
+            )
+        ]
+    )
+    request = service.list_requests_for_event("event-1")[0]
+    assert request["total_quantity"] == 5
+    lines = [(i["type"], i["quantity"]) for i in request["items"]]
+    assert lines == [("projector", 2), ("microphone", 2), ("screen", 1)]
+    assert "equipment_request_items" not in request
+
+
+def test_confirmed_request_lists_reserved_units_by_type_then_asset_tag(install):
+    install(
+        equipment_requests=[
+            _event_request(
+                "req-1", "confirmed", "2026-10-01T00:00:00Z",
+                [_event_item(PROJECTOR, 1, ["PRJ-001"]), _event_item(MIC, 2, ["MIC-002", "MIC-001"])],
+            )
+        ]
+    )
+    allocated = service.list_requests_for_event("event-1")[0]["allocated"]
+    assert [(g["type"], g["quantity"]) for g in allocated] == [("microphone", 2), ("projector", 1)]
+    assert [u["asset_tag"] for u in allocated[0]["units"]] == ["MIC-001", "MIC-002"]
+    assert allocated[0]["units"][0]["id"] == "unit-MIC-001"
+
+
+def test_allocated_quantity_counts_units_held_not_units_asked_for(install):
+    install(
+        equipment_requests=[
+            _event_request("req-1", "confirmed", "2026-10-01T00:00:00Z", [_event_item(MIC, 3, ["MIC-001"])])
+        ]
+    )
+    allocated = service.list_requests_for_event("event-1")[0]["allocated"]
+    assert allocated == [
+        {"equipment_type_id": "type-mic", "type": "microphone", "quantity": 1,
+         "units": [{"id": "unit-MIC-001", "asset_tag": "MIC-001"}]}
+    ]
+
+
+def test_only_confirmed_requests_show_allocated_units(install):
+    # A stray reservation on a pending request is not shown as allocated.
+    install(
+        equipment_requests=[
+            _event_request("req-1", "pending", "2026-10-01T00:00:00Z", [_event_item(PROJECTOR, 1, ["PRJ-001"])])
+        ]
+    )
+    assert service.list_requests_for_event("event-1")[0]["allocated"] == []
+
+
+def test_confirmed_request_with_released_units_has_nothing_allocated(install):
+    # After the event is cancelled its reservation rows are gone.
+    install(
+        equipment_requests=[
+            _event_request("req-1", "confirmed", "2026-10-01T00:00:00Z", [_event_item(PROJECTOR, 1)])
+        ]
+    )
+    assert service.list_requests_for_event("event-1")[0]["allocated"] == []
+
+
+def test_event_with_no_requests_returns_empty_list(install):
+    install()
+    assert service.list_requests_for_event("event-1") == []

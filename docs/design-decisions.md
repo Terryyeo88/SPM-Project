@@ -782,3 +782,36 @@ renamed to `event_log_id` (it is the entry's own id, not a link), and
 `event_change_requests.reviewed_at` restored (so a rejection records when
 it was decided).
 
+
+## View Reserved Equipment (Justin, Sprint 3, 2026-10-14)
+
+### Equipment Booking section on the coordinator's event page
+
+`GET /events/<id>/equipment-requests` (gated on `event.view`, same split as
+`GET /events/<id>/venue-bookings`: one event's own history, not the
+cross-event queue) returns every equipment request for the session,
+newest first. `components/EquipmentBookingStatus.vue` shows it below Venue
+Booking, in the assigned coordinator's view only: a table of what was
+requested, the total quantity, when it is needed and its status, then --
+for confirmed requests -- the allocated units grouped by equipment type
+(A-Z), each with its asset tags.
+
+### Conventions this relies on from "Accept an equipment request"
+
+That story (not yet built) is what writes `equipment_reservations`. This
+section assumes, as `seed_equipment_demo` and the IS-18 availability check
+already do:
+
+- one reservation row per physical unit (reserving 3 projectors = 3 rows);
+  the quantity shown is the number of rows held, not the number asked for;
+- the request's `status` becomes `confirmed` when its reservation rows are
+  written, and only confirmed requests' units are shown;
+- `reserved_start`/`reserved_end` are the request's `needed_start`/`needed_end`.
+
+### "Released" is derived, not stored
+
+A confirmed request on a cancelled event shows as **Released** and lists no
+units. `equipment_requests.status` has no `released` value and none was
+added: the event's own `cancelled` status already says it, and releasing
+the units themselves (deleting the reservation rows) is the separate
+"release equipment on cancel" story.

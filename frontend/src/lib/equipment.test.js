@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   REQUEST_TABS,
+  allocatedEquipment,
   describeAvailability,
+  equipmentTypeLabel,
+  eventRequestStatus,
   formatPeriod,
   groupRequestsByTab,
   isRequestTab,
@@ -127,5 +130,64 @@ describe('formatPeriod', () => {
 
   it('returns an empty string when either end is missing', () => {
     expect(formatPeriod(null, '2026-12-01T05:00:00+00:00')).toBe('')
+  })
+})
+
+describe('eventRequestStatus', () => {
+  it('labels a request by its own status', () => {
+    expect(eventRequestStatus({ status: 'pending' }, 'planning')).toEqual({ key: 'pending', label: 'Pending' })
+    expect(eventRequestStatus({ status: 'confirmed' }, 'planning')).toEqual({ key: 'confirmed', label: 'Confirmed' })
+    expect(eventRequestStatus({ status: 'rejected' }, 'cancelled')).toEqual({ key: 'rejected', label: 'Rejected' })
+  })
+
+  it('shows a confirmed request on a cancelled event as released', () => {
+    expect(eventRequestStatus({ status: 'confirmed' }, 'cancelled')).toEqual({ key: 'released', label: 'Released' })
+  })
+})
+
+describe('allocatedEquipment', () => {
+  const prj = (tag) => ({ id: `u-${tag}`, asset_tag: tag })
+  const confirmed = {
+    status: 'confirmed',
+    allocated: [
+      { equipment_type_id: 't-prj', type: 'projector', quantity: 1, units: [prj('PRJ-001')] },
+      { equipment_type_id: 't-mic', type: 'microphone', quantity: 2, units: [prj('MIC-002'), prj('MIC-001')] },
+    ],
+  }
+
+  it('groups units by type A-Z and sorts each type by asset tag', () => {
+    const groups = allocatedEquipment([confirmed], 'planning')
+    expect(groups.map((g) => [g.type, g.quantity])).toEqual([['microphone', 2], ['projector', 1]])
+    expect(groups[0].units.map((u) => u.asset_tag)).toEqual(['MIC-001', 'MIC-002'])
+  })
+
+  it('merges the same type across several confirmed requests', () => {
+    const second = {
+      status: 'confirmed',
+      allocated: [{ equipment_type_id: 't-prj', type: 'projector', quantity: 1, units: [prj('PRJ-002')] }],
+    }
+    const projector = allocatedEquipment([confirmed, second], 'planning').find((g) => g.type === 'projector')
+    expect(projector.quantity).toBe(2)
+    expect(projector.units.map((u) => u.asset_tag)).toEqual(['PRJ-001', 'PRJ-002'])
+  })
+
+  it('ignores requests that are not confirmed', () => {
+    const pending = { ...confirmed, status: 'pending' }
+    expect(allocatedEquipment([pending], 'planning')).toEqual([])
+  })
+
+  it('lists nothing once the event is cancelled', () => {
+    expect(allocatedEquipment([confirmed], 'cancelled')).toEqual([])
+  })
+
+  it('handles no requests', () => {
+    expect(allocatedEquipment(undefined, 'planning')).toEqual([])
+  })
+})
+
+describe('equipmentTypeLabel', () => {
+  it('capitalises the stored lower-case type name', () => {
+    expect(equipmentTypeLabel('projector')).toBe('Projector')
+    expect(equipmentTypeLabel(undefined)).toBe('')
   })
 })

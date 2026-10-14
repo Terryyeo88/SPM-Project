@@ -113,3 +113,52 @@ export function formatPeriod(startIso, endIso) {
   if (start.date === end.date) return `${start.date}, ${start.time} – ${end.time}`
   return `${start.date} ${start.time} – ${end.date} ${end.time}`
 }
+
+// -- Equipment Booking section on the event page (View Reserved Equipment,
+// Justin, Sprint 3): components/EquipmentBookingStatus.vue ---------------
+
+/**
+ * The status pill for one of an event's equipment requests. A confirmed
+ * request on a cancelled event reads "Released": cancelling the event
+ * gives its units back to the pool, so nothing is allocated any more.
+ * Derived from the event's status, not stored -- equipment_requests has
+ * no "released" status.
+ */
+export function eventRequestStatus(request, eventStatus) {
+  if (request.status === 'confirmed' && eventStatus === 'cancelled') {
+    return { key: 'released', label: 'Released' }
+  }
+  const label = (request.status ?? '').charAt(0).toUpperCase() + (request.status ?? '').slice(1)
+  return { key: request.status, label }
+}
+
+/**
+ * Every unit reserved for the event, merged across its confirmed requests
+ * into one group per equipment type: types A-Z, units by asset tag, with
+ * the quantity actually held. Empty once the event is cancelled (see
+ * eventRequestStatus). Each request's `allocated` comes from
+ * app.equipment.equipment_service.list_requests_for_event.
+ */
+export function allocatedEquipment(requests, eventStatus) {
+  if (eventStatus === 'cancelled') return []
+  const byType = new Map()
+  for (const request of requests ?? []) {
+    if (request.status !== 'confirmed') continue
+    for (const group of request.allocated ?? []) {
+      const key = group.equipment_type_id ?? group.type
+      if (!byType.has(key)) byType.set(key, { type: group.type, units: [] })
+      byType.get(key).units.push(...group.units)
+    }
+  }
+  return [...byType.values()]
+    .map((group) => {
+      const units = [...group.units].sort((a, b) => (a.asset_tag ?? '').localeCompare(b.asset_tag ?? ''))
+      return { type: group.type, quantity: units.length, units }
+    })
+    .sort((a, b) => (a.type ?? '').localeCompare(b.type ?? ''))
+}
+
+/** "projector" -> "Projector": equipment_types.name is stored lower case. */
+export function equipmentTypeLabel(type) {
+  return (type ?? '').charAt(0).toUpperCase() + (type ?? '').slice(1)
+}

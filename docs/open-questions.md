@@ -582,3 +582,35 @@ written up in docs/design-decisions.md; please confirm or correct:
   rather than touching a type whose users are unknown. Worth finding out
   who made that enum and whether anything uses it.
 
+
+## View Reserved Equipment (Justin, 14 Oct)
+
+Each of these has its reasoning in `docs/design-decisions.md` §View Reserved
+Equipment; listed here for confirmation.
+
+- **The quantity shown is the number of units actually reserved, not the
+  number asked for.** The AC says "confirmed equipment reservations display
+  quantity per item"; read as "how many units are held", counted from
+  `equipment_reservations` rows. The quantity *requested* is still shown
+  in the request table. They only differ if a request is confirmed with
+  fewer units than asked for, which the (unbuilt) accept story would have
+  to allow. Please confirm.
+
+- **"Released" is derived from the event being cancelled, not stored.**
+  `equipment_requests.status` stays `confirmed` on a cancelled event; the
+  page shows "Released" because the event is `cancelled`. No enum value
+  was added. If a stored status is wanted (e.g. for the Technical Support
+  Staff's request list), the release-on-cancel story would add it.
+
+- **Only the assigned coordinator sees the section.** The AC names the
+  Coordinator, so it is rendered in the coordinator's view of the event
+  page only, like Venue Booking. The API itself is gated on `event.view`
+  (same as `GET /events/<id>/venue-bookings`), so the event's organiser
+  and the coordinator lead could read it through the API; the frontend
+  just doesn't show it to them. Please confirm the organiser shouldn't
+  also see what's allocated to their event.
+
+- **Depends on conventions the accept story must follow.** One
+  reservation row per unit; the request becomes `confirmed` when its rows
+  are written; reservation times copy the request's. Whoever builds
+  "Accept an equipment request" should confirm these.
