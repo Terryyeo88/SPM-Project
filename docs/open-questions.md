@@ -658,10 +658,14 @@ Lead-only. Judgement calls made while applying it, for confirmation:
   colleagues (e.g. to suggest a hand-over to the Lead), this needs to
   come back.
 
-- **A coordinator who wants to hand an event over has no in-system way to
-  ask.** They tell the Lead offline, and the Lead reassigns. If the
-  customer wants a "request reassignment" button for coordinators, that's
-  a new story.
+- **Assumed: a coordinator raises a hand-over with the Lead offline.**
+  Week 4 had coordinators agree hand-overs offline between themselves;
+  Week 9 moved the reassignment itself to the Lead. We assume the
+  conversation stays offline (now with the Lead), and the Lead records
+  the outcome in the system -- consistent with "cross-department
+  communications can be assumed to happen offline" (Week 2). So there is
+  no in-system "request reassignment" for coordinators; if one is wanted,
+  that's a new story.
 
 - **The Sprint 1 story "Coordinator needs reassignment" is superseded**,
   not deleted: its other criteria (one coordinator at a time, the new one
