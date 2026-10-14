@@ -9,6 +9,11 @@
  *   Reject   -> POST /events/<id>/reject    (under_review -> rejected, reason required)
  *   Both decide the whole request: every session still under review moves
  *   together, so the organiser resubmits a rejected request as one.
+ *   Cancel   -> POST /events/<id>/cancel    (approved / planning / confirmed ->
+ *               cancelled, reason required; IS-39's route, this button added
+ *               with Release Equipment on Cancel). Cancels THIS session only.
+ *               The backend then releases the session's reserved equipment
+ *               and says how many units it freed.
  *   Reassign -> POST /events/<id>/reassign-coordinator, choosing from
  *               GET /events/coordinators. Afterwards this coordinator no
  *               longer has the event, so they're sent back to their dashboard.
@@ -55,12 +60,13 @@ const emit = defineEmits(['updated'])
 const auth = useAuthStore()
 const router = useRouter()
 
-const openPanel = ref(null) // null | 'reject' | 'reassign'
+const openPanel = ref(null) // null | 'reject' | 'cancel' | 'reassign'
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
 
 const rejectReason = ref('')
+const cancelReason = ref('')
 const coordinators = ref([])
 const coordinatorsLoading = ref(false)
 const newCoordinatorId = ref('')
@@ -73,6 +79,9 @@ function sessionWhen(session) {
   const times = [time(session.preferred_start_time), time(session.preferred_end_time)].filter(Boolean).join(' – ')
   return times ? `${range} · ${times}` : range
 }
+// Same status window as rule_event_cancel (_CANCELLABLE_STATUSES) on the
+// backend: after approval, until the event is completed.
+const canCancel = computed(() => ['approved', 'planning', 'confirmed'].includes(props.event.status))
 // Past events (completed / cancelled / rejected) have nothing left to hand over.
 const canReassign = computed(() => ['under_review', 'approved', 'planning', 'confirmed'].includes(props.event.status))
 const otherCoordinators = computed(() => coordinators.value.filter((c) => c.id !== auth.profile?.id))
@@ -251,6 +260,24 @@ function reject() {
   })
 }
 
+function cancelEvent() {
+  if (!cancelReason.value.trim()) {
+    error.value = 'Please give a reason for cancelling.'
+    return
+  }
+  return run(async () => {
+    const updated = await apiPost(`/events/${props.event.id}/cancel`, { reason: cancelReason.value.trim() })
+    openPanel.value = null
+    cancelReason.value = ''
+    const released = updated.released_equipment_units ?? 0
+    const unitWord = released === 1 ? 'unit' : 'units'
+    success.value = released
+      ? `Session cancelled. ${released} reserved equipment ${unitWord} released for other events.`
+      : 'Session cancelled.'
+    emit('updated', updated)
+  })
+}
+
 function reassign() {
   if (!newCoordinatorId.value) {
     error.value = 'Choose a coordinator to hand this event to.'
@@ -360,6 +387,10 @@ function reassign() {
             Reject Request
           </button>
         </template>
+        <button v-if="canCancel" type="button" class="btn reject" :aria-expanded="openPanel === 'cancel'"
+          :disabled="busy || editing" @click="togglePanel('cancel')">
+          Cancel Event
+        </button>
         <button v-if="canReassign" type="button" class="btn neutral" :aria-expanded="openPanel === 'reassign'"
           :disabled="busy || editing" @click="togglePanel('reassign')">
           Reassign Coordinator
@@ -375,6 +406,24 @@ function reassign() {
             {{ busy ? 'Rejecting...' : 'Confirm Rejection' }}
           </button>
           <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reject')">Cancel</button>
+        </div>
+      </form>
+
+      <form v-if="openPanel === 'cancel'" class="panel panel-reject" @submit.prevent="cancelEvent">
+        <label for="cancel-reason">Reason for cancelling</label>
+        <textarea id="cancel-reason" v-model="cancelReason" rows="3"
+          placeholder="e.g. no suitable venue for the requested date. The organiser will see this." />
+        <p class="muted small">
+          This cancels this session only. Any equipment reserved for it is released for other events.
+          It can't be undone.
+        </p>
+        <div class="panel-actions">
+          <button type="submit" class="btn small reject-solid" :disabled="busy">
+            {{ busy ? 'Cancelling...' : 'Confirm Cancellation' }}
+          </button>
+          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('cancel')">
+            Keep Event
+          </button>
         </div>
       </form>
 

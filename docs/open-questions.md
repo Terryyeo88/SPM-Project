@@ -614,3 +614,34 @@ Equipment; listed here for confirmation.
   reservation row per unit; the request becomes `confirmed` when its rows
   are written; reservation times copy the request's. Whoever builds
   "Accept an equipment request" should confirm these.
+
+## Release Equipment on Cancel (Justin, 14 Oct)
+
+Reasoning in `docs/design-decisions.md` §Release Equipment on Cancel.
+
+- **Release deletes the reservation rows.** No history of which exact units
+  were held is kept after a cancel (the cancel itself is in
+  `event_status_log`). Please confirm nobody needs that record -- e.g. the
+  Technical Support Staff seeing "PRJ-001 was booked for X, then released".
+
+- **Not atomic with the status change.** If the release fails after the
+  event is already `cancelled`, the route returns an error but the event
+  stays cancelled with its units still reserved, and cancel can't be
+  retried (cancelled -> cancelled isn't allowed). Rare (the database would
+  have to fail between two writes), but there is no repair path in the app
+  yet; someone would delete the rows by hand. A database trigger on
+  events.status would close this; not done to keep the logic in Python
+  like the rest of the codebase.
+
+- **Only the cancel route releases.** If another way to reach `cancelled`
+  is added later, it must call `release_event_equipment` too.
+
+- **A Cancel Event button was added to the coordinator's review page.**
+  IS-39 built `POST /events/<id>/cancel` but no UI called it, so this story
+  added one to "Your Decision" in `CoordinatorEventReview.vue`: shown to
+  the assigned coordinator while the session is approved / planning /
+  confirmed (same window as `rule_event_cancel`), with a required reason,
+  same pattern as Reject. It cancels **this session only**, like the
+  route; cancelling every session of a request at once was not built.
+  Please confirm that's acceptable, and IS-39's owner should OK the
+  button living there.
