@@ -13,8 +13,9 @@
  * Not in this pass (tracked separately):
  *   - Approve / reject / clarify actions -- Event Review and Approval.
  *     Rows link to the existing event details page for now.
- *   - The wireframe's inline per-row Reassign picker -- reassignment is
- *     still on its own page (/events/reassign).
+ *   - The wireframe's inline per-row Reassign picker -- coordinators no
+ *     longer reassign at all (Week 9 clarification: only the Event
+ *     Coordinator Lead does, from the Lead dashboard).
  *   - Client organisation / category in each row -- the events table has
  *     neither column yet, so rows show date and attendance instead.
  */

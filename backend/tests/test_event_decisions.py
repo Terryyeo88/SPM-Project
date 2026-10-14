@@ -137,8 +137,8 @@ def test_reject_route_404_for_coordinator_not_assigned(client, signing_key, monk
 # -- GET /events/coordinators ---------------------------------------------
 
 
-def test_coordinators_route_lists_for_coordinator(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["event_coordinator"])
+def test_coordinators_route_lists_for_lead(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_coordinator_lead"])
     coordinators = [{"id": "c1", "name": "Alice", "email": "a@example.com"}]
     monkeypatch.setattr(routes_module, "list_coordinators", lambda: coordinators)
 
@@ -156,9 +156,10 @@ def test_coordinators_route_forbidden_for_organiser(client, signing_key, monkeyp
     assert response.status_code == 403
 
 
-def test_coordinator_list_rule_allows_only_coordinators():
-    assert can(make_user(["event_coordinator"]), actions.COORDINATOR_LIST) is True
-    for role in ["event_organizer", "venue_staff", "technical_support_staff", "attendee"]:
+def test_coordinator_list_rule_allows_only_the_lead():
+    """Only the Lead assigns/reassigns (Week 9), so only they pick from the list."""
+    assert can(make_user(["event_coordinator_lead"]), actions.COORDINATOR_LIST) is True
+    for role in ["event_coordinator", "event_organizer", "venue_staff", "technical_support_staff", "attendee"]:
         assert can(make_user([role]), actions.COORDINATOR_LIST) is False
 
 

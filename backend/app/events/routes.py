@@ -367,21 +367,17 @@ def reassign_coordinator_route(event, event_id):
     if not new_coordinator_id:
         raise ValidationError("new_coordinator_id is required.")
 
-    # @require has already confirmed the caller IS event.coordinator_id,
-    # or is the Event Coordinator Lead (see rule_event_reassign_coordinator)
-    # before this line ever runs -- that's the real enforcement now. For the
-    # current coordinator, passing requested_by keeps
-    # coordinator_service.reassign_coordinator's own "only the current
-    # coordinator" check satisfied too (defense in depth). The Lead isn't
-    # the current coordinator, so for them that check is skipped (None), as
-    # that function's docstring allows for an override.
-    user = current_user()
-    is_current_coordinator = event.coordinator_id == user.id
+    # @require has already confirmed the caller is the Event Coordinator
+    # Lead (rule_event_reassign_coordinator: Lead only since the Week 9
+    # clarification) before this line runs -- that's the enforcement. The
+    # Lead is not the event's coordinator, so coordinator_service's
+    # "requested_by must be the current coordinator" check is skipped
+    # (None), as that function's docstring allows for an override.
     try:
         new_coordinator = reassign_coordinator(
             event_id=event.id,
             new_coordinator_id=new_coordinator_id,
-            requested_by=user.id if is_current_coordinator else None,
+            requested_by=None,
             reason=body.get("reason"),
         )
     except NoCoordinatorAvailableError as exc:

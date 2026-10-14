@@ -56,11 +56,10 @@ EVENT_REQUEST_CHANGE = "event.request_change"
 EVENT_REVIEW_CHANGE = "event.review_change"
 
 # -- coordinators --------------------------------------------------------
-# Source: "Coordinator needs reassignment" -- the current coordinator
-# picks who to hand the event to, so they need the list of other Event
-# Coordinators to choose from (the Reassign dropdown on the coordinator's
-# event review page). Role-only: it lists names/emails of staff, not
-# anything tied to a particular event.
+# Source: Week 7 change #5 / Week 9 clarification -- the Event
+# Coordinator Lead assigns and reassigns, so they need the list of Event
+# Coordinators to choose from (the Lead dashboard's pickers). Role-only:
+# it lists names/emails of staff, not anything tied to a particular event.
 
 COORDINATOR_LIST = "coordinator.list"
 

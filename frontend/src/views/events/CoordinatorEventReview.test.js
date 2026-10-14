@@ -98,3 +98,11 @@ describe('CoordinatorEventReview -- Cancel Event', () => {
     expect(wrapper.emitted('updated')).toBeUndefined()
   })
 })
+
+describe('CoordinatorEventReview -- no Reassign (Week 9: only the Lead reassigns)', () => {
+  it.each(['under_review', 'approved', 'planning', 'confirmed'])('offers no Reassign Coordinator when %s', (status) => {
+    const wrapper = mountWith(status)
+    expect(wrapper.findAll('button').some((b) => /reassign/i.test(b.text()))).toBe(false)
+    expect(wrapper.find('#reassign-to').exists()).toBe(false)
+  })
+})

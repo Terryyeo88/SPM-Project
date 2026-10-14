@@ -14,9 +14,9 @@
  *               with Release Equipment on Cancel). Cancels THIS session only.
  *               The backend then releases the session's reserved equipment
  *               and says how many units it freed.
- *   Reassign -> POST /events/<id>/reassign-coordinator, choosing from
- *               GET /events/coordinators. Afterwards this coordinator no
- *               longer has the event, so they're sent back to their dashboard.
+ *   No Reassign here: since the Week 9 clarification only the Event
+ *   Coordinator Lead reassigns ("it is now manually assigned by the lead"),
+ *   from the Lead dashboard -- rule_event_reassign_coordinator.
  *
  * Editing:
  *   Edit Details -> POST /events/<id>. Once a request is submitted only the
@@ -36,10 +36,8 @@
  * exist (Request Clarification isn't built yet).
  */
 import { computed, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { apiGet, apiPost } from '../../lib/api'
-import { useAuthStore } from '../../stores/auth'
-import { formatDateRange, statusLabel, tabForStatus } from '../../lib/coordinatorDashboard'
+import { apiPost } from '../../lib/api'
+import { formatDateRange, statusLabel } from '../../lib/coordinatorDashboard'
 import {
   minimumStartDate,
   sessionFromEvent,
@@ -57,20 +55,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['updated'])
 
-const auth = useAuthStore()
-const router = useRouter()
-
-const openPanel = ref(null) // null | 'reject' | 'cancel' | 'reassign'
+const openPanel = ref(null) // null | 'reject' | 'cancel'
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
 
 const rejectReason = ref('')
 const cancelReason = ref('')
-const coordinators = ref([])
-const coordinatorsLoading = ref(false)
-const newCoordinatorId = ref('')
-const reassignReason = ref('')
 
 const isUnderReview = computed(() => props.event.status === 'under_review')
 
@@ -82,9 +73,6 @@ function sessionWhen(session) {
 // Same status window as rule_event_cancel (_CANCELLABLE_STATUSES) on the
 // backend: after approval, until the event is completed.
 const canCancel = computed(() => ['approved', 'planning', 'confirmed'].includes(props.event.status))
-// Past events (completed / cancelled / rejected) have nothing left to hand over.
-const canReassign = computed(() => ['under_review', 'approved', 'planning', 'confirmed'].includes(props.event.status))
-const otherCoordinators = computed(() => coordinators.value.filter((c) => c.id !== auth.profile?.id))
 
 // Same status window as rule_event_edit's coordinator branch on the backend:
 // any time, until the event is completed or cancelled.
@@ -210,18 +198,6 @@ function togglePanel(name) {
   error.value = ''
   success.value = ''
   openPanel.value = openPanel.value === name ? null : name
-  if (openPanel.value === 'reassign' && coordinators.value.length === 0) loadCoordinators()
-}
-
-async function loadCoordinators() {
-  coordinatorsLoading.value = true
-  try {
-    coordinators.value = await apiGet('/events/coordinators')
-  } catch (requestError) {
-    error.value = `Couldn't load coordinators: ${requestError.message}`
-  } finally {
-    coordinatorsLoading.value = false
-  }
 }
 
 async function run(action) {
@@ -275,21 +251,6 @@ function cancelEvent() {
       ? `Session cancelled. ${released} reserved equipment ${unitWord} released for other events.`
       : 'Session cancelled.'
     emit('updated', updated)
-  })
-}
-
-function reassign() {
-  if (!newCoordinatorId.value) {
-    error.value = 'Choose a coordinator to hand this event to.'
-    return
-  }
-  return run(async () => {
-    await apiPost(`/events/${props.event.id}/reassign-coordinator`, {
-      new_coordinator_id: newCoordinatorId.value,
-      reason: reassignReason.value.trim() || undefined,
-    })
-    // No longer ours -- back to the dashboard tab the event was listed under.
-    router.push({ name: 'dashboard', query: { tab: tabForStatus(props.event.status) ?? 'needsReview' } })
   })
 }
 </script>
@@ -391,10 +352,6 @@ function reassign() {
           :disabled="busy || editing" @click="togglePanel('cancel')">
           Cancel Event
         </button>
-        <button v-if="canReassign" type="button" class="btn neutral" :aria-expanded="openPanel === 'reassign'"
-          :disabled="busy || editing" @click="togglePanel('reassign')">
-          Reassign Coordinator
-        </button>
       </div>
 
       <form v-if="openPanel === 'reject'" class="panel panel-reject" @submit.prevent="reject">
@@ -424,24 +381,6 @@ function reassign() {
           <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('cancel')">
             Keep Event
           </button>
-        </div>
-      </form>
-
-      <form v-if="openPanel === 'reassign'" class="panel" @submit.prevent="reassign">
-        <label for="reassign-to">Reassign to</label>
-        <p v-if="coordinatorsLoading" class="muted small">Loading coordinators...</p>
-        <select v-else id="reassign-to" v-model="newCoordinatorId">
-          <option value="" disabled>Choose a coordinator</option>
-          <option v-for="c in otherCoordinators" :key="c.id" :value="c.id">{{ c.name }} ({{ c.email }})</option>
-        </select>
-        <label for="reassign-reason">Reason <span class="muted">(optional)</span></label>
-        <input id="reassign-reason" v-model="reassignReason" type="text" placeholder="e.g. on leave that week" />
-        <p class="muted small">Agree the handover with them first. Once confirmed, the event leaves your dashboard.</p>
-        <div class="panel-actions">
-          <button type="submit" class="btn small primary" :disabled="busy || coordinatorsLoading">
-            {{ busy ? 'Reassigning...' : 'Confirm Reassignment' }}
-          </button>
-          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reassign')">Cancel</button>
         </div>
       </form>
 

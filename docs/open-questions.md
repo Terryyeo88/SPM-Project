@@ -33,10 +33,10 @@ decisions worth double-checking.
   Event to event_organizer/event_coordinator and event_organizer only
   respectively (Event Request Creation is organiser-only per its own
   story); Venues to event_coordinator/venue_staff (quoting the Week 4
-  instructions' Venue Catalogue description); Reassign Coordinator and
-  an event's own detail page to event_coordinator (plus event_organizer
-  for the detail page, since an organiser can view/edit their own
-  event). This mapping isn't specified anywhere in the stories — it's
+  instructions' Venue Catalogue description); an event's own detail page
+  to event_coordinator (plus event_organizer, since an organiser can
+  view/edit their own event). The coordinator-only Reassign Coordinator
+  page was removed in Sprint 3 (only the Lead reassigns -- Week 9). This mapping isn't specified anywhere in the stories — it's
   inferred per-route from which story or authz rule owns that feature.
   attendee and technical_support_staff currently unlock nothing on the
   dashboard (see `docs/traceability.md`'s "Explicitly deferred" —
@@ -645,3 +645,25 @@ Reasoning in `docs/design-decisions.md` §Release Equipment on Cancel.
   route; cancelling every session of a request at once was not built.
   Please confirm that's acceptable, and IS-39's owner should OK the
   button living there.
+
+## Reassignment is Lead-only (Justin, 14 Oct)
+
+Driven by the Week 9 clarification (reassignment "is now manually assigned
+by the lead"); reasoning in `docs/design-decisions.md` §Reassignment is
+Lead-only. Judgement calls made while applying it, for confirmation:
+
+- **Coordinators can no longer see the list of other coordinators**
+  (`GET /events/coordinators` is Lead-only). It only existed for their
+  Reassign dropdown. If a coordinator should still be able to look up
+  colleagues (e.g. to suggest a hand-over to the Lead), this needs to
+  come back.
+
+- **A coordinator who wants to hand an event over has no in-system way to
+  ask.** They tell the Lead offline, and the Lead reassigns. If the
+  customer wants a "request reassignment" button for coordinators, that's
+  a new story.
+
+- **The Sprint 1 story "Coordinator needs reassignment" is superseded**,
+  not deleted: its other criteria (one coordinator at a time, the new one
+  takes over, the previous one is unassigned) still hold for the Lead's
+  reassignment. Please confirm the backlog marks it accordingly.

@@ -131,7 +131,7 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('event_coordinator sees the sections built for them, but NOT Create event (organiser-only)', () => {
     expect(visibleLinks([ROLES.EVENT_COORDINATOR]).sort()).toEqual(
-      ['events', 'reassign-coordinator', 'venues'].sort(),
+      ['events', 'venues'].sort(),
     )
     expect(visibleLinks([ROLES.EVENT_COORDINATOR])).not.toContain('create-event')
   })
@@ -208,7 +208,7 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('a multi-role user (coordinator + venue_staff) sees the UNION, not just one role\'s links', () => {
     expect(visibleLinks([ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF]).sort()).toEqual(
-      ['events', 'reassign-coordinator', 'room-layouts', 'venue-booking-queue', 'venues'].sort(),
+      ['events', 'room-layouts', 'venue-booking-queue', 'venues'].sort(),
     )
   })
 
@@ -220,14 +220,14 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
 
   it('a user who is BOTH organiser and coordinator gets the union of both roles', () => {
     expect(visibleLinks([ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR]).sort()).toEqual(
-      ['events', 'reassign-coordinator', 'venues'].sort(),
+      ['events', 'venues'].sort(),
     )
   })
 
   it('holding every role at once yields the union of everything, each link exactly once', () => {
     const all = visibleLinks(Object.values(ROLES))
     expect(all.sort()).toEqual(
-      ['equipment', 'equipment-requests', 'events', 'reassign-coordinator', 'room-layouts', 'venue-booking-queue', 'venues'].sort(),
+      ['equipment', 'equipment-requests', 'events', 'room-layouts', 'venue-booking-queue', 'venues'].sort(),
     )
     expect(new Set(all).size).toBe(all.length)
   })
