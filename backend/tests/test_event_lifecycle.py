@@ -30,6 +30,10 @@ def _coordinator(user_id=COORD):
     return make_user(["event_coordinator"], user_id=user_id)
 
 
+def _lead():
+    return make_user(["event_coordinator_lead"], user_id="lead-1")
+
+
 def _event(status, coordinator_id=COORD):
     return FakeEvent(id="event-1", organizer_id=ORG, coordinator_id=coordinator_id, status=status)
 
@@ -87,6 +91,8 @@ def test_completed_event_refuses_edit_submit_cancel_and_reassign():
                        actions.EVENT_START_PLANNING, actions.EVENT_CONFIRM, actions.EVENT_COMPLETE,
                        actions.EVENT_APPROVE, actions.EVENT_REJECT):
             assert not can(user, action, event), (user.roles, action)
+    # The Lead -- the only role that may reassign -- can't once completed either.
+    assert not can(_lead(), actions.EVENT_REASSIGN_COORDINATOR, completed)
     # ...but it can still be viewed.
     assert can(organiser, actions.EVENT_VIEW, completed)
     assert can(coordinator, actions.EVENT_VIEW, completed)
@@ -95,8 +101,9 @@ def test_completed_event_refuses_edit_submit_cancel_and_reassign():
 @pytest.mark.parametrize("status", ["under_review", "approved", "planning", "confirmed", "cancelled", "rejected"])
 def test_reassign_still_allowed_before_completion(status):
     """The new precondition excludes ONLY completed -- no story makes any
-    other status read-only (cancelled/rejected flagged in open-questions)."""
-    assert can(_coordinator(), actions.EVENT_REASSIGN_COORDINATOR, _event(status))
+    other status read-only (cancelled/rejected flagged in open-questions).
+    Checked for the Lead, the only role that reassigns since Week 9."""
+    assert can(_lead(), actions.EVENT_REASSIGN_COORDINATOR, _event(status))
 
 
 # -- IS-39: cancel rule ----------------------------------------------------
@@ -208,9 +215,10 @@ def test_is38_complete_refused_unless_confirmed(client, signing_key, world):
 
 
 def test_is38_reassign_route_refused_on_completed_event(client, signing_key, world):
-    world(["event_coordinator"], "completed")
+    world(["event_coordinator_lead"], "completed", user_id="lead-1")
     response = client.post(
-        "/events/event-1/reassign-coordinator", headers=_auth(signing_key), json={"new_coordinator_id": "coord-2"}
+        "/events/event-1/reassign-coordinator", headers=_auth(signing_key, "lead-1"),
+        json={"new_coordinator_id": "coord-2"},
     )
     assert response.status_code == 403
 

@@ -35,7 +35,7 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |
-| `EVENT_REASSIGN_COORDINATOR` | current coordinator (assigned) or Event Coordinator Lead | event has a coordinator, any status **except `completed`** (IS-38) |
+| `EVENT_REASSIGN_COORDINATOR` | Event Coordinator Lead only (Week 9 clarification; the event's own coordinator and organiser get 403) | event has a coordinator, any status **except `completed`** (IS-38) |
 | `EVENT_ASSIGN_COORDINATOR` | Event Coordinator Lead | status `submitted` and no coordinator yet (the unassigned queue) — Week 7 change #5 |
 | `EVENT_START_PLANNING` | coordinator (assigned) | status must be `approved` (IS-36) |
 | `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |

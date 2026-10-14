@@ -129,7 +129,7 @@ async function request(path, options = {}) {
       // be surprised by an `undefined` it didn't ask for. The component
       // whose request failed may briefly show this error's message
       // before the redirect takes it off-screen (e.g.
-      // ReassignCoordinatorView's own `error` ref) -- that's acceptable,
+      // a component's own `error` ref) -- that's acceptable,
       // and more honest than hiding it. stores/auth.js's restoreSession()
       // is the one caller that specifically needs to tell this case
       // apart from the "something's actually broken" codes below; it

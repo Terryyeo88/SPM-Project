@@ -114,16 +114,6 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           by Event Coordinators and Venue Staff when
  *                           planning events" -- quoted directly, not
  *                           inferred.
- *   reassign-coordinator -- app/authz/rules.py::
- *                           rule_event_reassign_coordinator only ever
- *                           allows the currently-assigned coordinator;
- *                           showing/serving this to a role that could
- *                           never pass that check would be misleading,
- *                           so it's gated to event_coordinator here too.
- *                           The backend still re-checks per-event -- the
- *                           gate here (both the nav link AND, via
- *                           router/index.js, the route itself) is
- *                           belt-and-braces, not the real enforcement.
  *   create-event        -- Create Event Request story: "As an Event
  *                           Organizer, I can create an event request";
  *                           app/authz/rules.py::rule_event_create allows
@@ -211,12 +201,6 @@ export const ROUTE_ACCESS = Object.freeze(
       routeName: 'venues',
       label: 'Venues',
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
-      inNav: true,
-    },
-    {
-      routeName: 'reassign-coordinator',
-      label: 'Reassign Coordinator',
-      roles: [ROLES.EVENT_COORDINATOR],
       inNav: true,
     },
     {

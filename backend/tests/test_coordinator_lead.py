@@ -24,7 +24,12 @@ import app.events.event_service as service_module
 import app.events.routes as routes_module
 from app.authz import actions
 from app.authz.policy import can
-from app.authz.rules import Decision, rule_event_assign_coordinator, rule_event_view
+from app.authz.rules import (
+    Decision,
+    rule_event_assign_coordinator,
+    rule_event_reassign_coordinator,
+    rule_event_view,
+)
 from app.events.coordinator_service import NoCoordinatorAvailableError
 from tests.factories import FakeEvent, make_user
 from tests.fake_supabase import FakeSupabase
@@ -122,8 +127,25 @@ def test_lead_cannot_reassign_an_unassigned_request():
     assert not can(LEAD, actions.EVENT_REASSIGN_COORDINATOR, _event(status="submitted"))
 
 
-def test_assigned_coordinator_can_still_reassign_their_own_event():
-    assert can(COORDINATOR, actions.EVENT_REASSIGN_COORDINATOR, _event(status="planning", coordinator_id="coord-1"))
+def test_only_the_lead_reassigns_week_9():
+    """Week 9 clarification: "it is now manually assigned by the lead". The
+    event's coordinator and organiser can see it, so 403; an outsider 404."""
+    event = _event(status="planning", coordinator_id="coord-1")
+    assert rule_event_reassign_coordinator(COORDINATOR, event) is Decision.DENY_FORBIDDEN
+    assert rule_event_reassign_coordinator(ORGANISER, event) is Decision.DENY_FORBIDDEN
+    outsider = make_user(["event_coordinator"], user_id="coord-9")
+    assert rule_event_reassign_coordinator(outsider, event) is Decision.DENY_NOT_FOUND
+
+
+def test_lead_may_reassign_after_arrangements_are_confirmed():
+    """Week 9 (Shanise): the Lead can reassign after venue and technical
+    arrangements are confirmed."""
+    assert can(LEAD, actions.EVENT_REASSIGN_COORDINATOR, _event(status="confirmed", coordinator_id="coord-1"))
+
+
+def test_coordinators_no_longer_list_other_coordinators():
+    """coordinator.list was only for the coordinator's Reassign dropdown."""
+    assert not can(COORDINATOR, actions.COORDINATOR_LIST)
 
 
 # -- routes ----------------------------------------------------------------------

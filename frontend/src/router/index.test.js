@@ -36,7 +36,7 @@ function mockMe(rolesOrRole) {
 // This file tests the fix for the most serious finding from the code
 // review: only the NAV LINK was role-filtered (DashboardView.vue) --
 // the route itself had no guard, so an authenticated user of any role
-// could reach e.g. /events/reassign by typing the URL directly, using a
+// could reach e.g. /venues by typing the URL directly, using a
 // bookmark, or browser back/forward. router/index.js's beforeEach now
 // checks `to.meta.roles` (sourced from roles.js's ROUTE_ACCESS) for this.
 describe('router: authentication and role-based route guarding', () => {
@@ -81,28 +81,28 @@ describe('router: authentication and role-based route guarding', () => {
     it('a role WITHOUT access to a gated route is redirected to /dashboard, not served the page', async () => {
       mockSession(true)
       mockMe('attendee')
-      await router.push('/events/reassign')
+      await router.push('/venues')
       expect(router.currentRoute.value.name).toBe('dashboard')
     })
 
     it('a role WITH access reaches the route directly', async () => {
       mockSession(true)
       mockMe('event_coordinator')
-      await router.push('/events/reassign')
-      expect(router.currentRoute.value.name).toBe('reassign-coordinator')
+      await router.push('/venues')
+      expect(router.currentRoute.value.name).toBe('venues')
     })
 
-    it('venue_staff can reach /venues but not /events/reassign', async () => {
+    it('venue_staff can reach /venues but not /equipment', async () => {
       mockSession(true)
       mockMe('venue_staff')
       await router.push('/venues')
       expect(router.currentRoute.value.name).toBe('venues')
 
-      await router.push('/events/reassign')
+      await router.push('/equipment')
       expect(router.currentRoute.value.name).toBe('dashboard')
     })
 
-    it('event_organizer can reach /events but not /venues or /events/reassign', async () => {
+    it('event_organizer can reach /events but not /venues or /equipment', async () => {
       mockSession(true)
       mockMe('event_organizer')
 
@@ -112,8 +112,16 @@ describe('router: authentication and role-based route guarding', () => {
       await router.push('/venues')
       expect(router.currentRoute.value.name).toBe('dashboard')
 
-      await router.push('/events/reassign')
+      await router.push('/equipment')
       expect(router.currentRoute.value.name).toBe('dashboard')
+    })
+
+    it('the old coordinator-only /events/reassign page is gone (Week 9: only the Lead reassigns)', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      expect(router.hasRoute('reassign-coordinator')).toBe(false)
+      // It now resolves as an event id on the event details page, like any other.
+      expect(router.resolve('/events/reassign').name).toBe('event-details')
     })
 
     it('a multi-role user reaches a route via EITHER of their roles, not just roles[0] (the exact case Terry flagged)', async () => {
@@ -128,7 +136,7 @@ describe('router: authentication and role-based route guarding', () => {
     it('a user with an unrecognised/future role is denied a gated route rather than the check throwing', async () => {
       mockSession(true)
       mockMe('some_future_role')
-      await router.push('/events/reassign')
+      await router.push('/venues')
       expect(router.currentRoute.value.name).toBe('dashboard')
     })
   })
@@ -379,39 +387,6 @@ describe('router: authentication and role-based route guarding', () => {
       mockMe('technical_support_staff')
       await router.push('/equipment/requests')
       expect(router.currentRoute.value.name).toBe('equipment-requests')
-    })
-  })
-
-  // The sharpest regression guard here: if the dynamic /events/:eventId
-  // ever swallowed the static /events/reassign, an ORGANISER (allowed on
-  // event-details, denied on reassign) would suddenly be let through to a
-  // page treating the literal string "reassign" as an event id.
-  describe('static /events/reassign is never swallowed by /events/:eventId', () => {
-    it('a coordinator lands on reassign-coordinator, not event-details', async () => {
-      mockSession(true)
-      mockMe('event_coordinator')
-      await router.push('/events/reassign')
-      expect(router.currentRoute.value.name).toBe('reassign-coordinator')
-    })
-
-    it('an organiser is DENIED (dashboard) -- not let through to event-details with eventId="reassign"', async () => {
-      mockSession(true)
-      mockMe('event_organizer')
-      await router.push('/events/reassign')
-      expect(router.currentRoute.value.name).toBe('dashboard')
-    })
-
-    it('a trailing slash resolves the same way (coordinator allowed, organiser denied)', async () => {
-      mockSession(true)
-      mockMe('event_coordinator')
-      await router.push('/events/reassign/')
-      expect(router.currentRoute.value.name).toBe('reassign-coordinator')
-
-      const organiserRouter = createAppRouter()
-      setActivePinia(createPinia())
-      mockMe('event_organizer')
-      await organiserRouter.push('/events/reassign/')
-      expect(organiserRouter.currentRoute.value.name).toBe('dashboard')
     })
   })
 

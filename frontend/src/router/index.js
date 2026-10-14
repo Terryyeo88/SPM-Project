@@ -5,7 +5,6 @@ import DashboardView from '../views/DashboardView.vue'
 import CreateEventView from '../views/events/CreateEventView.vue'
 import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListView from '../views/events/EventsListView.vue'
-import ReassignCoordinatorView from '../views/events/ReassignCoordinatorView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import EquipmentDetailView from '../views/equipment/EquipmentDetailView.vue'
@@ -28,7 +27,7 @@ import AttendeeEventView from '../views/registrations/AttendeeEventView.vue'
 // same array means the two can never drift apart from each other (they
 // did, briefly: the route itself had no gate at all, only the nav link
 // was hidden -- an authenticated user of any role could still reach e.g.
-// /events/reassign by typing the URL directly -- and later a second,
+// /venues by typing the URL directly -- and later a second,
 // inline copy of the same decision appeared on /create-event). A route
 // with no entry in ROUTE_ACCESS has no role restriction -- currently
 // just '/' and '/login'. router/index.test.js asserts every ROUTE_ACCESS
@@ -56,16 +55,6 @@ const routes = [
     component: CreateEventView,
     meta: { roles: _rolesByRouteName.get('create-event') },
   },
-  // Static path before the dynamic one for readability -- vue-router
-  // already ranks a static segment above `:eventId` regardless of
-  // declaration order, and router/index.test.js pins that down so
-  // /events/reassign can never be swallowed as an event id.
-  {
-    path: '/events/reassign',
-    name: 'reassign-coordinator',
-    component: ReassignCoordinatorView,
-    meta: { roles: _rolesByRouteName.get('reassign-coordinator') },
-  },
   {
     path: '/events/:eventId',
     name: 'event-details',
@@ -90,8 +79,7 @@ const routes = [
     component: VenueCatalogueView,
     meta: { roles: _rolesByRouteName.get('venues') },
   },
-  // Static paths before the dynamic /venues/:venueId below -- same
-  // static-before-dynamic reasoning as /events/reassign above (vue-router
+  // Static paths before the dynamic /venues/:venueId below (vue-router
   // ranks a static segment above a dynamic one regardless of declaration
   // order, but /venues/bookings and /venues/bookings/:bookingId are
   // listed first anyway for readability, and router/index.test.js pins
@@ -203,7 +191,7 @@ export function createAppRouter() {
     }
     // Route-level role gate. Still only a UI-layer convenience, not the
     // real enforcement -- app/authz/rules.py on the backend is (e.g.
-    // rule_event_reassign_coordinator) -- this just stops an
+    // rule_event_cancel) -- this just stops an
     // unauthorised role from being served a page whose every action
     // would 403/404 anyway. Redirects to dashboard rather than a
     // dedicated "forbidden" page, since none exists yet.

@@ -1,6 +1,9 @@
 """
 Tests for POST /events/<event_id>/reassign-coordinator (app/events/routes.py).
 
+Lead only since the Week 9 clarification ("it is now manually assigned by
+the lead"); the event's own coordinator can no longer hand it over.
+
 Unit-level, like test_me_route.py / test_authz_decorators.py: no real
 Supabase, no network. `load_event` and `reassign_coordinator` (the
 service function, imported into this route module's namespace) are
@@ -27,9 +30,9 @@ def _mock_profile(monkeypatch, roles):
     monkeypatch.setattr(context_module, "_touch_session_activity", lambda *a, **k: None)
 
 
-def test_reassign_route_succeeds_for_assigned_coordinator(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["event_coordinator"])
-    event = FakeEvent(id="event-1", coordinator_id="user-1")
+def test_reassign_route_succeeds_for_the_lead(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_coordinator_lead"])
+    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="planning")
     monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
 
     calls = []
@@ -55,10 +58,31 @@ def test_reassign_route_succeeds_for_assigned_coordinator(client, signing_key, m
         {
             "event_id": "event-1",
             "new_coordinator_id": "new-coord",
-            "requested_by": "user-1",
+            "requested_by": None,  # the Lead isn't the current coordinator
             "reason": "going on leave",
         }
     ]
+
+
+def test_reassign_route_refuses_the_events_own_coordinator(client, signing_key, monkeypatch):
+    """Week 9: coordinators no longer reassign, not even their own event.
+    They can see the event, so it's a 403 (not a 404), and the service
+    never runs."""
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    event = FakeEvent(id="event-1", coordinator_id="user-1", status="planning")
+    monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
+    reassign_called = []
+    monkeypatch.setattr(routes_module, "reassign_coordinator", lambda **kwargs: reassign_called.append(kwargs))
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.post(
+        "/events/event-1/reassign-coordinator",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"new_coordinator_id": "new-coord"},
+    )
+
+    assert response.status_code == 403
+    assert reassign_called == []
 
 
 def test_reassign_route_denies_coordinator_not_assigned_to_this_event(client, signing_key, monkeypatch):
@@ -88,8 +112,8 @@ def test_reassign_route_denies_coordinator_not_assigned_to_this_event(client, si
 
 
 def test_reassign_route_requires_new_coordinator_id(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["event_coordinator"])
-    event = FakeEvent(id="event-1", coordinator_id="user-1")
+    _mock_profile(monkeypatch, ["event_coordinator_lead"])
+    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="planning")
     monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
 
     token = signing_key.make_token(sub="user-1")
@@ -104,8 +128,8 @@ def test_reassign_route_requires_new_coordinator_id(client, signing_key, monkeyp
 
 
 def test_reassign_route_translates_no_coordinator_available_to_400(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["event_coordinator"])
-    event = FakeEvent(id="event-1", coordinator_id="user-1")
+    _mock_profile(monkeypatch, ["event_coordinator_lead"])
+    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="planning")
     monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
 
     def fake_reassign(**kwargs):

@@ -333,10 +333,21 @@ def rule_event_cancel(user: Any, event: Any) -> Decision:
 
 
 # -- event.reassign_coordinator -------------------------------------------
-# Source: explicit instruction to ready this for coordinator_service.py's
-# reassign_coordinator(requested_by=...) escape hatch. Mirrors that
-# function's own existing check exactly: only the CURRENT coordinator of
-# record may request a reassignment.
+# Lead only. Week 9 clarification (Sreya): "Is the reassignment of
+# coordinators now handled by Event Coordinator Lead role instead of
+# offline agreement by coordinators?" -- "yes, it is now manually assigned
+# by the lead". That supersedes the Sprint 1 "Coordinator needs
+# reassignment" story and the Week 4 answer, under which the CURRENT
+# coordinator handed the event over themselves; that path is removed.
+# Week 7 change #5 already let the Lead "reassign events where
+# necessary", and Week 9 (Shanise) confirms the Lead may reassign even
+# after venue and technical arrangements are confirmed.
+#
+# Relationship first, same shape as rule_event_assign_coordinator: the
+# Lead may act on any event that already HAS a coordinator (an
+# unassigned one goes through event.assign_coordinator instead). Anyone
+# else who can see the event -- its coordinator, its organiser -- gets a
+# 403, not a 404: they already know it exists. Everyone else, 404.
 #
 # Status precondition (IS-38, added Sprint 2): not once `completed`.
 # Source: "completed events are read-only going forward". Reassigning
@@ -349,16 +360,10 @@ def rule_event_cancel(user: Any, event: Any) -> Decision:
 # guessed.
 
 
-#
-# Week 7 change #5: the Event Coordinator Lead may also reassign ("assign
-# a suitable Event Coordinator, and reassign events where necessary"),
-# any event that already HAS a coordinator -- an unassigned one goes
-# through event.assign_coordinator instead. Same `completed` exclusion.
-
-
 def rule_event_reassign_coordinator(user: Any, event: Any) -> Decision:
-    is_current = _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)
-    if not (is_current or _is_lead_over(user, event)):
+    if not _is_lead_over(user, event):
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
         return Decision.DENY_NOT_FOUND
     if _event_status_in(event, "completed") or not event.coordinator_id:
         return Decision.DENY_FORBIDDEN
@@ -660,13 +665,15 @@ def rule_equipment_request_check_availability(user: Any, request: Any) -> Decisi
 
 
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
-# Only an Event Coordinator or the Event Coordinator Lead can (re)assign
-# (rule_event_reassign_coordinator / rule_event_assign_coordinator), so
-# only they need to see who they could pick.
+# Only the Event Coordinator Lead assigns and reassigns
+# (rule_event_assign_coordinator / rule_event_reassign_coordinator), so
+# only they need to see who they could pick. Event Coordinators lost
+# this with reassignment (Week 9 clarification): nothing they can do
+# needs the list of other coordinators' names and emails.
 
 
 def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
-    if _has_role(user, "event_coordinator") or _has_role(user, LEAD_ROLE):
+    if _has_role(user, LEAD_ROLE):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
 

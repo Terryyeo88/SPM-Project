@@ -356,14 +356,14 @@ def reassign_coordinator(
 
     Implements "Coordinator needs reassignment": the event keeps exactly
     one coordinator throughout, the new one takes over, and the previous
-    one is fully unassigned. Per the Week4 clarifications, the actual
-    decision to hand off happens OFFLINE between coordinators ("the
-    original co-ordinator can make the change and request the new
-    co-ordinator to accept the change... detail process and UI
-    implementation is up to the team") -- so this function just records
-    the outcome once it's agreed; it doesn't run any in-system
-    approval/accept step, and a coordinator can't decline via the system
-    either (also confirmed in the clarifications).
+    one is fully unassigned. Since the Week 9 clarification, only the
+    Event Coordinator Lead reassigns ("it is now manually assigned by the
+    lead"); the route enforces that (rule_event_reassign_coordinator) and
+    calls this with requested_by=None. Originally (Week 4) the current
+    coordinator handed the event over after agreeing it offline, which is
+    what the requested_by check below was for; it is kept for any caller
+    that still wants it. There is no in-system approval/accept step, and
+    the incoming coordinator can't decline via the system.
 
     Args:
         event_id: the event being reassigned.

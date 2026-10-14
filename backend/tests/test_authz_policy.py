@@ -326,10 +326,14 @@ def test_organiser_allowed_event_submit_from_draft():
 # -- event.reassign_coordinator (for Justin -- not wired into coordinator_service.py) --
 
 
-def test_coordinator_allowed_reassign_when_currently_assigned():
+def test_coordinator_denied_reassign_even_when_currently_assigned():
+    """Week 9 clarification: only the Lead reassigns now. The event's own
+    coordinator can see it, so the denial is a 403, not a 404."""
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(coordinator_id="coord-1", status="planning")
-    assert can(user, actions.EVENT_REASSIGN_COORDINATOR, event) is True
+    assert can(user, actions.EVENT_REASSIGN_COORDINATOR, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_REASSIGN_COORDINATOR, event)
 
 
 def test_coordinator_denied_reassign_when_not_currently_assigned():

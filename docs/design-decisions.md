@@ -849,3 +849,30 @@ cancel has one path today and the team writes this logic in Python; see
 
 The release lives in its own module, not `equipment_service.py`, so IS-18's
 file is not changed by this story.
+
+## Reassignment is Lead-only (Justin, Sprint 3, 2026-10-14)
+
+Source: Week 9 clarification (Sreya) — "Is the reassignment of coordinators
+now handled by Event Coordinator Lead role instead of offline agreement by
+coordinators?" — "yes, it is now manually assigned by the lead and no more
+system auto-assignment of co-ordinator". Week 9 (Shanise) also confirms the
+Lead may reassign after venue and technical arrangements are confirmed.
+
+- **`rule_event_reassign_coordinator` is Lead-only.** Same relationship-first
+  shape as `rule_event_assign_coordinator`: the event's coordinator and
+  organiser can see the event, so they get 403; anyone else 404. The status
+  precondition is unchanged (has a coordinator, not `completed`).
+- **`coordinator.list` is Lead-only.** It existed for the coordinator's
+  Reassign dropdown; nothing a coordinator does now needs other
+  coordinators' names and emails.
+- **The route always passes `requested_by=None`** to
+  `coordinator_service.reassign_coordinator`, whose "must be the current
+  coordinator" check was the Week 4 hand-over rule. The check is left in
+  the service (unused by the app) rather than deleted, so its integration
+  test still documents it.
+- **Removed from the frontend:** the Reassign panel on the coordinator's
+  review page, and the coordinator-only `/events/reassign` page (an early
+  raw-ID form) with its route and `ROUTE_ACCESS` nav entry. The Lead
+  reassigns from the Lead dashboard, which already did.
+- This supersedes the Sprint 1 story "Coordinator needs reassignment" —
+  recorded in `traceability.md` rather than silently dropped.
