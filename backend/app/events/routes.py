@@ -37,6 +37,7 @@ from app.authz.actions import (
     VENUE_BOOKING_CREATE,
 )
 from app.authz.decorators import require
+from app.equipment.equipment_service import list_requests_for_event as list_equipment_requests_for_event
 from app.events.change_request_service import (
     approve_change_request,
     list_change_requests,
@@ -149,6 +150,16 @@ def create_venue_booking(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_venue_bookings_for_event(event, event_id):
     return jsonify(list_bookings_for_event(event_id)), 200
+
+
+# View Reserved Equipment (Justin, Sprint 3). Gated on EVENT_VIEW for the
+# same reason as get_venue_bookings_for_event above: this event's own
+# equipment requests (and, once confirmed, the units reserved for them),
+# not the cross-event queue EQUIPMENT_REQUEST_LIST guards.
+@events_bp.route("/<event_id>/equipment-requests", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_equipment_requests_for_event(event, event_id):
+    return jsonify(list_equipment_requests_for_event(event_id)), 200
 
 
 @events_bp.route("/<event_id>", methods=["DELETE"])

@@ -27,6 +27,7 @@ import EventLogHistory from '../../components/EventLogHistory.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
 import VenueBookingStatus from '../../components/VenueBookingStatus.vue'
+import EquipmentBookingStatus from '../../components/EquipmentBookingStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -396,6 +397,7 @@ watch(() => route.params.eventId, (eventId) => {
           />
           <EventLogHistory :event="event" :refresh-key="logRefresh" />
           <VenueBookingStatus :event="event" />
+          <EquipmentBookingStatus :event="event" />
         </template>
         <template v-else-if="event">
           <div class="card-header">

@@ -180,6 +180,69 @@ def get_request(request_id: str) -> dict:
     return row
 
 
+def _allocated_units(raw_items: list[dict]) -> list[dict]:
+    """A confirmed request's reserved units, one group per equipment type
+    (a request holds at most one line per type -- the
+    equipment_request_items_one_per_type constraint), types A-Z and units
+    by asset tag. `quantity` counts the reservation rows actually held, not
+    the quantity asked for: this is what is allocated."""
+    groups = []
+    for item in raw_items:
+        units = [
+            {"id": reservation["equipment_id"], "asset_tag": _one(reservation.get("equipment_units")).get("asset_tag")}
+            for reservation in item.get("equipment_reservations") or []
+        ]
+        if not units:
+            continue
+        units.sort(key=lambda unit: unit["asset_tag"] or "")
+        groups.append(
+            {
+                "equipment_type_id": item["equipment_type_id"],
+                "type": _one(item.get("equipment_types")).get("name"),
+                "quantity": len(units),
+                "units": units,
+            }
+        )
+    groups.sort(key=lambda group: group["type"] or "")
+    return groups
+
+
+def list_requests_for_event(event_id: str) -> list[dict]:
+    """Every equipment request raised for one event session, newest first,
+    for the Equipment Booking section of the event page (View Reserved
+    Equipment story): what was asked for, its status and -- once confirmed
+    -- which units are reserved for it.
+
+    Not scoped per caller like list_requests: the route gates on
+    EVENT_VIEW for this one event, same split as
+    booking_service.list_bookings_for_event (one event's own history vs
+    the cross-event queue).
+
+    Each request carries `items` (the lines asked for), `total_quantity`
+    (sum of those lines) and `allocated` (_allocated_units; empty unless
+    the request is confirmed, since a reservation row only exists once a
+    request has been accepted -- see the module docstring)."""
+    result = (
+        supabase.table("equipment_requests")
+        .select(
+            "*, equipment_request_items(id, equipment_type_id, quantity, technical_requirements, "
+            "equipment_types(name), equipment_reservations(id, equipment_id, equipment_units(asset_tag)))"
+        )
+        .eq("event_id", event_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    requests = []
+    for source in result.data or []:
+        row = dict(source)
+        raw_items = row.pop("equipment_request_items", None) or []
+        row["items"] = [_flatten_item(item) for item in raw_items]
+        row["total_quantity"] = sum(item["quantity"] for item in row["items"])
+        row["allocated"] = _allocated_units(raw_items) if row["status"] == "confirmed" else []
+        requests.append(row)
+    return requests
+
+
 def list_requests(user, status: str | None = None) -> list[dict]:
     """Every request the caller is entitled to see, scoped per role -- the
     role-only authz check (rule_equipment_request_list) does NOT mean
