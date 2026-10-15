@@ -245,9 +245,29 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
         has_relationship = True
         if not _event_status_in(event, *_COORDINATOR_EDIT_CLOSED):
             return Decision.ALLOW
-    if has_relationship:
+    # IS-9: "others can view but not edit" -- the Lead oversees (views)
+    # every submitted request, so a refusal is a 403, not a 404.
+    if has_relationship or _is_lead_over(user, event):
         return Decision.DENY_FORBIDDEN
     return Decision.DENY_NOT_FOUND
+
+
+def explain_event_edit_denial(user: Any, event: Any) -> str:
+    """The reason given with a 403 from rule_event_edit (IS-9: "update
+    attempts are refused with a given reason"). Only called once the rule
+    has said DENY_FORBIDDEN, so the caller may already see the event."""
+    if (
+        _has_role(user, "event_coordinator")
+        and _is_assigned_coordinator(user, event)
+        and _event_status_in(event, *_COORDINATOR_EDIT_CLOSED)
+    ):
+        return f"This event is {event.status}, so its details can no longer be updated."
+    if _has_role(user, "event_organizer") and _owns_event(user, event):
+        return (
+            "This event has been submitted, so only its assigned Event Coordinator can update it. "
+            "Request a change instead."
+        )
+    return "Only the Event Coordinator assigned to this event can update it. You can view it, but not edit it."
 
 
 # -- event.delete --------------------------------------------------------
@@ -530,28 +550,18 @@ def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
 # checked here is the EVENT (the booking doesn't exist yet), reusing
 # EventLike/_is_assigned_coordinator exactly like event.edit does.
 #
-# Status precondition: "approved" or "planning". The Event Status
-# Management "Planning Status" story says a venue/equipment search
-# requires the event to already be in "planning" -- but nothing in this
-# codebase transitions an event TO "planning" (that's a separate,
-# unassigned sub-story; see app.events.event_service, which only ever
-# writes draft/submitted/under_review/approved/rejected). Rather than
-# make this feature unreachable until someone else ships that
-# transition, app.venues.booking_service.create_booking_request performs
-# the narrow approved -> planning transition itself, as a documented
-# side effect of starting the venue search -- directly matching the
-# story's own framing ("the Coordinator has to change the status to
-# 'planning' before... searching for a venue"). Allowing "planning" here
-# too covers a second booking request on an event already in planning
-# (e.g. a multi-session request's other sessions, or a second attempt
-# after a rejection). See docs/design-decisions.md for the full
-# reasoning and the sign-off this needed.
+# Status precondition: "planning" only. The Event Status Management
+# "Planning Status" story: "the Coordinator has to change the status to
+# 'planning' before... searching for a venue". The coordinator does that
+# themselves with Start Planning (event.start_planning, approved ->
+# planning); requesting a venue no longer moves an approved event there
+# as a side effect. See docs/design-decisions.md.
 
 
 def rule_venue_booking_create(user: Any, event: Any) -> Decision:
     if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
         return Decision.DENY_NOT_FOUND
-    if not _event_status_in(event, "approved", "planning"):
+    if not _event_status_in(event, "planning"):
         return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
 

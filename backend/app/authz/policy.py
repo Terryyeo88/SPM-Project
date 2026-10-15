@@ -43,6 +43,7 @@ from typing import Any
 from app.authz import actions
 from app.authz.rules import (
     Decision,
+    explain_event_edit_denial,
     rule_coordinator_list,
     rule_equipment_list,
     rule_equipment_request_check_availability,
@@ -126,6 +127,13 @@ _RULES: dict[str, RuleFunc] = {
 }
 
 
+# Actions whose 403 says WHY, not just "not authorised". Each explainer is
+# called only after its rule returned DENY_FORBIDDEN.
+_DENIAL_REASONS: dict[str, Callable[[Any, Any], str]] = {
+    actions.EVENT_EDIT: explain_event_edit_denial,
+}
+
+
 def _decide(user: Any, action: str, resource: Any) -> Decision:
     rule = _RULES.get(action)
     if rule is None:
@@ -143,4 +151,5 @@ def authorise(user: Any, action: str, resource: Any = None) -> None:
         return
     if decision is Decision.DENY_NOT_FOUND:
         raise NotFoundError("Resource not found.")
-    raise AuthorisationError(f"Not authorised to perform '{action}'.")
+    explain = _DENIAL_REASONS.get(action)
+    raise AuthorisationError(explain(user, resource) if explain else f"Not authorised to perform '{action}'.")

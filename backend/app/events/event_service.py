@@ -606,17 +606,6 @@ def create_draft_request(organizer_id: str, payload: dict) -> dict:
     return _group_response(inserted)
 
 
-def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
-    # validate_event_payload requires `name`, so a validated payload is
-    # never empty -- no separate "at least one field" check is needed.
-    payload = validate_event_payload(
-        payload, for_submission=False, current_room_layout=getattr(event, "room_layout", None)
-    )
-    database_payload = _to_database_payload(payload, _from_database_event(event))
-    result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
-    return _first_row(result)
-
-
 def save_draft_request(event_id: str, event: SimpleNamespace, payload: dict) -> dict:
     """Save edits to an editable request (authz has already checked the
     caller owns it and it's "draft" or "rejected").
@@ -688,7 +677,7 @@ def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
     (rule_event_delete restricts it to the owning organizer while status
     is still "draft") -- this function only re-checks status on the
     SIBLING rows, which authz never saw, the same trust boundary
-    edit_event_request/submit_event_request rely on for their own
+    event_update.update_event/submit_event_request rely on for their own
     authz-gated preconditions.
     """
     shared_event_id = getattr(event, "shared_event_id", None)
@@ -778,9 +767,17 @@ def list_event_sessions(event: SimpleNamespace, user) -> dict:
     return _group_response(_attach_rejections(visible))
 
 
-def _decide(event_id: str, event: SimpleNamespace, to_status: str, decided_by: str, reason: str | None):
-    """Moves an under_review request to `to_status` -- the session the
-    coordinator opened AND every other session of the same request.
+def _decide(
+    event_id: str,
+    event: SimpleNamespace,
+    to_status: str,
+    decided_by: str,
+    reason: str | None,
+    from_status: str = "under_review",
+):
+    """Moves a request from `from_status` (under_review unless given) to
+    `to_status` -- the session the coordinator opened AND every other
+    session of the same request.
 
     A decision applies to the whole request, not one session (Aaralyn,
     IS-46 follow-up): the request has one coordinator, and the organiser
@@ -803,12 +800,12 @@ def _decide(event_id: str, event: SimpleNamespace, to_status: str, decided_by: s
 
     Returns the row for `event_id`.
     """
-    decided = transition(event_id, to_status, decided_by, reason=reason, expected_from="under_review")
-    for session in _load_sessions_with_status(event, "under_review"):
+    decided = transition(event_id, to_status, decided_by, reason=reason, expected_from=from_status)
+    for session in _load_sessions_with_status(event, from_status):
         if session["id"] == event_id or session.get("coordinator_id") != decided_by:
             continue
         try:
-            transition(session["id"], to_status, decided_by, reason=reason, expected_from="under_review")
+            transition(session["id"], to_status, decided_by, reason=reason, expected_from=from_status)
         except TransitionConflictError:
             continue
     return decided
@@ -819,6 +816,14 @@ def approve_event_request(event_id: str, event: SimpleNamespace, approved_by: st
     (Week 4: "Approval = sufficient info for planning"). Applies to every
     under_review session of the request -- see _decide."""
     return _decide(event_id, event, "approved", approved_by, None)
+
+
+def start_planning_request(event_id: str, event: SimpleNamespace, started_by: str):
+    """IS-36: approved -> planning, for every approved session of the
+    request (same shared_event_id), not just the one opened -- the request
+    is planned as one, as it was approved as one. A session that already
+    left approved (e.g. cancelled) is skipped -- see _decide."""
+    return _decide(event_id, event, "planning", started_by, None, from_status="approved")
 
 
 def reject_event_request(event_id: str, event: SimpleNamespace, rejected_by: str, reason):

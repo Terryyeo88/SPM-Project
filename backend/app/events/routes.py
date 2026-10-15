@@ -57,13 +57,14 @@ from app.events.event_service import (
     create_draft_request,
     create_event_request,
     delete_draft_request,
-    edit_event_request,
     list_event_requests,
     list_event_sessions,
     reject_event_request,
     save_draft_request,
+    start_planning_request,
     submit_event_request,
 )
+from app.events.event_update import preview_event_update, update_event
 from app.events.transitions import status_history, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
@@ -101,18 +102,39 @@ def create_draft():
     return jsonify(event), 201
 
 
+# IS-9 Update Event Information During Planning (app.events.event_update).
+# Body: the event fields to change, plus "acknowledge_impacts" (the impact
+# areas the coordinator reviewed) when the change touches arrangements.
 @events_bp.route("/<event_id>", methods=["POST"])
 @require(EVENT_EDIT, loader=lambda event_id: load_event(event_id))
 def edit_event(event, event_id):
-    updated_event = edit_event_request(event_id, event, request.get_json(silent=True) or {})
-    _log_direct_edit(event, updated_event)
-    return jsonify(updated_event), 200
+    fields, acknowledged = _update_body()
+    return jsonify(update_event(event, fields, current_user().id, acknowledged)), 200
+
+
+# The same checks as saving, writing nothing: what the update would change,
+# whether that's significant, which arrangements it touches, and whether a
+# confirmed event would go back to planning. Gated like the save itself.
+@events_bp.route("/<event_id>/update-preview", methods=["POST"])
+@require(EVENT_EDIT, loader=lambda event_id: load_event(event_id))
+def preview_event_update_route(event, event_id):
+    fields, _ = _update_body()
+    return jsonify(preview_event_update(event, fields)), 200
+
+
+def _update_body() -> tuple[dict, list | None]:
+    body = request.get_json(silent=True)
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        raise ValidationError("The event update body must be a JSON object.")
+    fields = dict(body)
+    return fields, fields.pop("acknowledge_impacts", None)
 
 
 def _log_direct_edit(before, after_row: dict) -> None:
-    """event_logs entry for a direct edit to a SUBMITTED event: the
-    assigned coordinator (under review / planning) or the organiser fixing
-    a rejected session. Drafts aren't logged -- not submitted to anyone yet."""
+    """event_logs entry for the organiser fixing a rejected session through
+    the draft form. Drafts aren't logged -- not submitted to anyone yet."""
     if before.status == "draft":
         return
     record_event_change(before, after_row, current_user().id)
@@ -224,8 +246,8 @@ def _move(event, event_id: str, to_status: str) -> dict:
 @events_bp.route("/<event_id>/start-planning", methods=["POST"])
 @require(EVENT_START_PLANNING, loader=lambda event_id: load_event(event_id))
 def start_planning(event, event_id):
-    """IS-36: approved -> planning."""
-    return jsonify(_move(event, event_id, "planning")), 200
+    """IS-36: approved -> planning, every approved session of the request."""
+    return jsonify(start_planning_request(event_id, event, current_user().id)), 200
 
 
 @events_bp.route("/<event_id>/confirm", methods=["POST"])

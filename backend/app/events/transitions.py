@@ -73,6 +73,12 @@ _EDGE_SOURCES: dict[tuple[str, str], str] = {
     ),
     ("approved", "planning"): "Coordinator can set planning only if current status is approved.",
     ("planning", "confirmed"): "Coordinator can set confirmed only from planning.",
+    # Not a button: app.events.event_update takes this edge itself when
+    # details change on a confirmed event.
+    ("confirmed", "planning"): (
+        "IS-9: Any changes to the event details made after the status of the event is confirmed "
+        "will result in the status of the event reverting to planning again."
+    ),
     ("confirmed", "completed"): (
         "Coordinator can set completed only from confirmed; completed events are read-only going forward."
     ),

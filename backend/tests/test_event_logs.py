@@ -21,7 +21,9 @@ import app.events.change_impact as impact_module
 import app.events.change_request_service as change_service
 import app.events.event_log as event_log
 import app.events.event_service as event_service
+import app.events.event_update as event_update
 import app.events.routes as routes_module
+import app.events.transitions as transitions
 from app.events.change_request_service import approve_change_request, reject_change_request, request_event_change
 from tests.fake_supabase import FakeSupabase
 
@@ -66,7 +68,7 @@ def fake(monkeypatch):
             _session(id="other-org-session", organizer_id="org-2", coordinator_id="coord-2"),
         ]
     )
-    for module in (change_service, impact_module, event_log, event_service, routes_module):
+    for module in (change_service, impact_module, event_log, event_service, event_update, transitions, routes_module):
         monkeypatch.setattr(module, "supabase", db)
     return db
 
@@ -119,7 +121,8 @@ def test_entry_records_what_who_and_which_request(fake):
     }
     # Exactly the live columns; WHEN is the database's changed_at default
     # (now()), not a client clock.
-    assert set(fake.calls[-1]["payload"]) == {"shared_event_id", "changes", "changed_by"}
+    assert set(fake.calls[-1]["payload"]) == {"shared_event_id", "changes", "significance", "changed_by"}
+    assert entry["significance"] == "significant"
 
 
 def test_nothing_is_logged_when_nothing_changed(fake):

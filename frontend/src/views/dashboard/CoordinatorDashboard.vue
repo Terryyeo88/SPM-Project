@@ -266,10 +266,15 @@ h2 { margin: 0; font-size: 20px; color: #1f1f1f; }
 .attention-text { font-size: 11px; font-weight: 600; color: #8a5a12; }
 
 .status { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 3px 10px; white-space: nowrap; background: #eee; color: #5a5a5a; }
-.status-under_review { background: #f7efe1; color: #8a5a12; }
-.status-approved, .status-planning { background: #e7f0fb; color: #1f5fae; }
-.status-confirmed { background: #eaf5ec; color: #2f6b3f; }
-.status-cancelled, .status-rejected { background: #f5e6e6; color: #a33f3f; }
+.status-draft { color: #5f5f5f; background: #efefef; }
+.status-submitted { color: #6b3fa0; background: #f1ebf8; }
+.status-under_review { color: #8a6d00; background: #fff4c2; }
+.status-approved { color: #1f5a9e; background: #e4eefb; }
+.status-planning { color: #2f7a3f; background: #e4f5e8; }
+.status-confirmed { color: #0f6e6a; background: #ddf3f1; }
+.status-completed { color: #3f4a57; background: #e3e7ec; }
+.status-cancelled { color: #a3521b; background: #fcebdd; }
+.status-rejected { color: #b42318; background: #fde8e6; }
 
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;

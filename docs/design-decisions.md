@@ -368,6 +368,15 @@ unrepresentable.
 
 ### `approved → planning` is a side effect of requesting a venue, not a separate feature
 
+> **Superseded (2026-10-15).** The coordinator now moves an event to
+> planning themselves with **Start Planning** (`POST
+> /events/<id>/start-planning`, a button under "Your Decision" on an
+> approved session). `rule_venue_booking_create` accepts `planning` only, and
+> `create_booking_request` no longer changes the event's status. This keeps
+> the "Planning Status" story's order (planning first, then search for a
+> venue) and lines up with IS-9, where arrangements are checked from
+> planning on. The reasoning below is kept for history.
+
 The written Event Status Management "Planning Status" story requires an
 event to already be in `planning` before a venue/equipment search starts —
 but nothing in this codebase transitions any event TO `planning`; that's a
@@ -876,3 +885,89 @@ Lead may reassign after venue and technical arrangements are confirmed.
   reassigns from the Lead dashboard, which already did.
 - This supersedes the Sprint 1 story "Coordinator needs reassignment" —
   recorded in `traceability.md` rather than silently dropped.
+
+## Update Event Information During Planning (IS-9, Sprint 3, 2026-10-15)
+
+### One write path for the coordinator's update: `app/events/event_update.py`
+
+`POST /events/<id>` (event.edit) now goes through `update_event`, which
+replaces `event_service.edit_event_request`. In order: validate, work out
+what actually changes, assess the impact, check it was acknowledged, write
+(conditional on the status @require authorised), log, copy shared details
+to the other sessions, revert a confirmed event to planning. A no-op save
+writes and logs nothing.
+
+`POST /events/<id>/update-preview` runs the same steps up to the impact and
+writes nothing. The page calls it on Save, so the coordinator reviews a
+significant or impactful change before committing it, and the save itself
+re-checks -- an impact that appeared in between (a new registration, a
+booking just confirmed) is a 409 `change_impact_unacknowledged`, the same
+gate IS-21 approvals use (`change_impact.check_acknowledged`, moved there
+so both paths share it).
+
+### Validation is of the whole session, not the payload
+
+The update is merged onto the session's stored details and validated as a
+complete request (`for_submission=True` once it has been submitted), so a
+partial update is checked against the fields it didn't send -- an end time
+before the stored start time is refused. The old edit path validated only
+the payload, so it could store a combination that would never have passed
+submission. Validation runs before any write, so a refused update leaves
+the event exactly as it was.
+
+### Significant vs ordinary
+
+Significant fields (`event_log.SIGNIFICANT_FIELDS`): the four date/time
+fields, `expected_attendance`, `room_layout` (venue requirements) and
+`equipment`. Everything else is ordinary. Accessibility needs are listed in
+the story as their own field, separate from venue requirements, so they
+are ordinary -- but the impact check still runs on them (and on every other
+field), so an accessibility change a booked venue can't meet is still shown
+and must be acknowledged. Stored in `event_logs.significance` on every new
+entry, including the organiser's "requested" entries; entries written
+before the column existed are classified from their `changes` on read.
+
+### A change to a confirmed event sends it back to planning
+
+New edge `confirmed -> planning` in `transitions.ALLOWED`, taken only by
+`event_update.revert_to_planning` -- there is no button for it. It runs
+after any change that actually alters a confirmed session: the coordinator's
+update, an approved IS-21 change request, and a shared detail (name,
+description, purpose) copied onto a confirmed sibling session. The reason
+in `event_status_log` names the fields that changed.
+
+### Shared details reach every open session
+
+Name, description and purpose are shared by a request's sessions. The old
+direct edit changed only the session it was made on, so sessions of one
+request could disagree about their own name. The coordinator's update now
+copies them to the other sessions, as an approved change request already
+did -- except completed or cancelled ones, which are read-only. An
+organiser fixing a rejected session still changes only that session.
+
+### Refusals say why
+
+`policy.authorise` can attach a reason to a 403 (`_DENIAL_REASONS`); for
+event.edit it's `rules.explain_event_edit_denial`: the event is completed or
+cancelled, or only the assigned coordinator can update it. The Lead, who
+can view every submitted request, now gets that 403 instead of a 404.
+
+### Impacts are checked only from planning on
+
+The coordinator's update is checked against arrangements only while the
+event is in planning or confirmed (`event_update.IMPACT_CHECKED_STATUSES`).
+Under review or approved, the details are still being settled, so the
+coordinator edits freely: nothing to acknowledge and no review step on the
+page (the preview says `impacts_checked: false`). Significance is still
+recorded either way. Trade-off: a venue booking can already exist while the
+event is approved (`rule_venue_booking_create`), and an edit then is not
+flagged against it. IS-21 change requests keep the wider
+`change_impact.ARRANGED_STATUSES` (from approval on).
+
+### Equipment impacts read the equipment requests
+
+Since `equipment_requests` exists (IS-18), a timing or equipment change on a
+session with a pending or confirmed request is a "conflict" naming the
+request's period. Without a request it stays a "check manually", as before.
+Technical support is still "check manually" -- there are no assignment
+records yet.

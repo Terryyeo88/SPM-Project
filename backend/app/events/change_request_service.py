@@ -43,7 +43,11 @@ from types import SimpleNamespace
 
 from app.authz.actions import EVENT_VIEW
 from app.authz.policy import can
-from app.events.change_impact import assess_change_impact
+from app.events.change_impact import (
+    ChangeImpactNotAcknowledgedError,  # noqa: F401 -- re-exported; raised by check_acknowledged
+    assess_change_impact,
+    check_acknowledged,
+)
 from app.events.event_log import comparable, group_id, record_event_change, record_requested_change
 from app.events.event_service import (
     EVENT_FIELDS,
@@ -53,21 +57,13 @@ from app.events.event_service import (
     _to_database_payload,
     validate_event_payload,
 )
+from app.events.event_update import apply_shared_details, revert_to_planning
 from app.extensions import supabase
 from app.shared.errors import AppError, NotFoundError, ValidationError
 
 TABLE = "event_change_requests"
 KEY = "event_change_req_id"  # the table's primary key
 REQUEST_BODY_FIELDS = {"changes", "reason"}
-
-
-class ChangeImpactNotAcknowledgedError(AppError):
-    """Approving would disturb arrangements already made for the session
-    (see app.events.change_impact) that the coordinator hasn't acknowledged
-    -- including one that appeared after they loaded the page."""
-
-    status_code = 409
-    code = "change_impact_unacknowledged"
 
 
 class ChangeRequestConflictError(AppError):
@@ -221,23 +217,6 @@ def _claim(change_id: str, status: str, reviewed_by: str, comment: str | None, *
     return result.data[0]
 
 
-def _check_acknowledged(impacts: list[dict], acknowledged) -> None:
-    """Every impacted area must be acknowledged by name -- a plain "yes"
-    would also wave through an impact that appeared after the coordinator
-    loaded the page (a new registration, a booking just confirmed)."""
-    if acknowledged is not None and (
-        not isinstance(acknowledged, list) or not all(isinstance(area, str) for area in acknowledged)
-    ):
-        raise ValidationError("acknowledge_impacts must be a list of impact areas.")
-    unacknowledged = sorted({impact["area"] for impact in impacts} - set(acknowledged or []))
-    if unacknowledged:
-        raise ChangeImpactNotAcknowledgedError(
-            "This change affects arrangements already made for the event ("
-            + ", ".join(area.replace("_", " ") for area in unacknowledged)
-            + "). Review them and acknowledge before approving."
-        )
-
-
 def approve_change_request(
     event: SimpleNamespace, change_id: str, reviewed_by: str, comment=None, acknowledge_impacts=None
 ) -> dict:
@@ -249,8 +228,10 @@ def approve_change_request(
     `acknowledge_impacts`, or nothing is written (409). The impacts the
     coordinator accepted are recorded on the change request.
 
-    What changed is logged once in event_logs (what, who, when) -- even
-    when a shared detail is written to every session of the request.
+    What changed is logged once in event_logs (what, who, when, significant
+    or ordinary) -- even when a shared detail is written to every session
+    of the request. As with the coordinator's own update (IS-9), a change
+    to a confirmed session sends it back to planning.
 
     Re-validated against the session's details as they are NOW, not as they
     were when the change was requested: the coordinator may have edited the
@@ -268,7 +249,7 @@ def approve_change_request(
     change = _load_change(event, change_id)
     validated = _validated_details(event, change["requested_changes"])
     impacts = assess_change_impact(event, change["requested_changes"])
-    _check_acknowledged(impacts, acknowledge_impacts)
+    check_acknowledged(impacts, acknowledge_impacts)
     claimed = _claim(change[KEY], "approved", reviewed_by, comment, acknowledged_impacts=impacts or None)
 
     database_payload = _to_database_payload(validated)
@@ -276,15 +257,8 @@ def approve_change_request(
     record_event_change(event, updated, reviewed_by)
 
     shared_changes = {field: validated[field] for field in SHARED_FIELDS if field in change["requested_changes"]}
-    if shared_changes and getattr(event, "shared_event_id", None):
-        (
-            supabase.table("events")
-            .update(shared_changes)
-            .eq("shared_event_id", event.shared_event_id)
-            .eq("organizer_id", event.organizer_id)
-            .neq("id", event.id)
-            .execute()
-        )
+    apply_shared_details(event, shared_changes, reviewed_by)
+    updated = revert_to_planning(event.id, event.status, change["requested_changes"], reviewed_by) or updated
     return {"change_request": claimed, "event": updated}
 
 

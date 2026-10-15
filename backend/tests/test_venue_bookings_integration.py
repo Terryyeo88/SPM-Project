@@ -106,12 +106,12 @@ def _event_namespace(event: dict) -> SimpleNamespace:
     return SimpleNamespace(**event)
 
 
-def test_create_booking_request_persists_padded_span_and_moves_event_to_planning(fixtures):
+def test_create_booking_request_persists_padded_span_and_leaves_event_status(fixtures):
     coordinator = fixtures.create_user("Booking Test Coordinator", "event_coordinator")
     organizer = fixtures.create_user("Booking Test Organizer", "event_organizer")
     venue = fixtures.create_venue(setup_minutes=20, turnaround_minutes=40)
     event = fixtures.create_event(
-        organizer_id=organizer["id"], coordinator_id=coordinator["id"], status="approved"
+        organizer_id=organizer["id"], coordinator_id=coordinator["id"], status="planning"
     )
 
     booking = create_booking_request(_event_namespace(event), venue["id"], coordinator["id"])

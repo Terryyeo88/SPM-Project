@@ -315,6 +315,25 @@ def test_approve_approves_every_under_review_session_of_the_request(request_db):
     assert all(entry["to_status"] == "approved" and entry["changed_by"] == "coord-1" for entry in logs)
 
 
+def test_start_planning_moves_every_approved_session_of_the_request(request_db):
+    for row in request_db.rows:
+        if row["status"] == "under_review" and row["id"] in ("s1", "s2"):
+            row["status"] = "approved"
+    session = _loaded_session()
+    session.status = "approved"
+
+    result = service_module.start_planning_request("s1", session, "coord-1")
+
+    assert result["id"] == "s1"
+    statuses = {row["id"]: row["status"] for row in request_db.rows}
+    assert statuses == {
+        "s1": "planning", "s2": "planning", "s3": "planning", "s4": "under_review", "other": "under_review",
+    }
+    logs = request_db.tables["event_status_log"]
+    assert sorted(entry["event_id"] for entry in logs) == ["s1", "s2", "s3"]
+    assert all(entry["to_status"] == "planning" and entry["changed_by"] == "coord-1" for entry in logs)
+
+
 def test_reject_is_refused_without_a_reason_before_any_session_moves(request_db):
     with pytest.raises(ValidationError):
         service_module.reject_event_request("s1", _loaded_session(), "coord-1", "   ")

@@ -1,28 +1,33 @@
-"""What an IS-21 change request would disturb, if approved.
+"""What a change to a session would disturb, before it is committed.
 
-Before the assigned coordinator commits a change, they're shown which
-arrangements already made for the session it touches, so a significant
-change is never approved blind. Each impact is one dict:
+Used for an IS-21 change request (before the coordinator approves it) and
+for the coordinator's own IS-9 update (app.events.event_update): before a
+change is committed, the coordinator is shown which arrangements already
+made for the session it touches, so a significant change is never made
+blind. Each impact is one dict:
 
     {"area": "venue" | "registration" | "equipment" | "technical_support",
      "severity": "conflict" | "check",
      "title": str, "issues": [str, ...], ...area-specific keys}
 
   conflict -- checked against real records (venue_bookings + venues,
-              registrations): the change contradicts something that exists.
-  check    -- the area has no records in the system yet (no equipment
-              allocation or technical-support assignment tables exist), so
-              nothing can be checked. Raised whenever the change touches what
-              those arrangements depend on, once the event is past approval
-              (when arrangements start being made), so the coordinator
-              confirms with the people involved by hand.
+              registrations, equipment_requests): the change contradicts
+              something that exists.
+  check    -- nothing can be checked: there are no technical-support
+              assignment records at all, and a session that needs equipment
+              may have none requested through the system yet. Raised
+              whenever the change touches what those arrangements depend
+              on, once the event is past approval (when arrangements start
+              being made), so the coordinator confirms by hand.
 
-Nothing here writes. In particular an approved timing change does NOT move
-a venue booking: booking_start/end are deliberately snapshotted (see
-20261005100000_venue_bookings.sql), so the coordinator is told instead.
+Nothing here writes. In particular a timing change does NOT move a venue
+booking or an equipment request: booking_start/end and needed_start/end are
+deliberately snapshotted (see 20261005100000_venue_bookings.sql and
+20261008000000_equipment.sql), so the coordinator is told instead. Each
+booking is assessed on its own, and none is ever removed.
+
+check_acknowledged is the gate: the commit must name every affected area.
 """
-
-#
 
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ from types import SimpleNamespace
 
 from app.events.event_service import SINGAPORE_TZ, _from_database_event
 from app.extensions import supabase
+from app.shared.errors import AppError, ValidationError
 from app.venues.booking_service import _event_window, _parse_timestamptz
 
 TIMING_FIELDS = frozenset({"preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time"})
@@ -40,6 +46,16 @@ REGISTRATION_WINDOW_FIELDS = frozenset({"registration_start_datetime", "registra
 # (rule_venue_booking_create).
 ARRANGED_STATUSES = frozenset({"approved", "planning", "confirmed"})
 _ACTIVE_BOOKING_STATUSES = ("pending", "confirmed")
+_ACTIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
+
+
+class ChangeImpactNotAcknowledgedError(AppError):
+    """Committing would disturb arrangements already made for the session
+    that the coordinator hasn't acknowledged -- including one that appeared
+    after they loaded the page."""
+
+    status_code = 409
+    code = "change_impact_unacknowledged"
 
 _ITEM_LABELS = {
     "microphone": "microphones",
@@ -153,35 +169,73 @@ def _registration_impacts(after: dict, before: dict, changed: set[str], event_id
     ]
 
 
-def _untracked_impacts(after: dict, before: dict, changed: set[str]) -> list[dict]:
-    impacts = []
-    equipment = _items(after.get("equipment")) or _items(before.get("equipment"))
-    if equipment and changed & (TIMING_FIELDS | {"equipment"}):
+def _equipment_impacts(event: SimpleNamespace, after: dict, before: dict, changed: set[str]) -> list[dict]:
+    """Checked against the session's equipment requests when it has any;
+    otherwise a manual check, as long as the session needs equipment."""
+    if not changed & (TIMING_FIELDS | {"equipment"}):
+        return []
+    requests = (
+        supabase.table("equipment_requests")
+        .select("id, status, needed_start, needed_end")
+        .eq("event_id", event.id)
+        .in_("status", _ACTIVE_EQUIPMENT_REQUEST_STATUSES)
+        .execute()
+        .data
+        or []
+    )
+    if not requests:
+        if not (_items(after.get("equipment")) or _items(before.get("equipment"))):
+            return []
         what = "the new equipment list" if "equipment" in changed else "the new date/time"
-        impacts.append(
+        return [
             {
                 "area": "equipment",
                 "severity": "check",
                 "title": "Equipment",
                 "issues": [
-                    f"Equipment allocations aren't recorded in the system yet. Confirm that "
+                    "No equipment request has been made through the system for this session yet. Confirm that "
                     f"{_labels(_items(after.get('equipment'))) or 'no equipment'} can be provided for {what}."
                 ],
             }
-        )
-    if equipment and changed & (TIMING_FIELDS | {"equipment", "room_layout"}):
-        impacts.append(
-            {
-                "area": "technical_support",
-                "severity": "check",
-                "title": "Technical support",
-                "issues": [
-                    "Technical support assignments aren't recorded in the system yet. Let the Technical Support "
-                    "Staff know about the change to " + _labels_of_changes(changed) + "."
-                ],
-            }
-        )
-    return impacts
+        ]
+
+    issues = []
+    for equipment_request in requests:
+        what = f"The {equipment_request['status']} equipment request"
+        if changed & TIMING_FIELDS and after.get("preferred_start_date"):
+            start, end = _event_window(SimpleNamespace(**after))
+            needed_start = _parse_timestamptz(equipment_request["needed_start"])
+            needed_end = _parse_timestamptz(equipment_request["needed_end"])
+            if start < needed_start or end > needed_end:
+                issues.append(
+                    f"{what} covers {_when(needed_start)} to {_when(needed_end)}; the new timing is "
+                    f"{_when(start)} to {_when(end)}. It will not move automatically."
+                )
+        if "equipment" in changed:
+            issues.append(
+                f"{what} was made for the previous equipment list; the new list is "
+                f"{_labels(_items(after.get('equipment'))) or 'no equipment'}."
+            )
+    if not issues:
+        return []
+    return [{"area": "equipment", "severity": "conflict", "title": "Equipment requests", "issues": issues}]
+
+
+def _technical_support_impacts(after: dict, before: dict, changed: set[str]) -> list[dict]:
+    equipment = _items(after.get("equipment")) or _items(before.get("equipment"))
+    if not (equipment and changed & (TIMING_FIELDS | {"equipment", "room_layout"})):
+        return []
+    return [
+        {
+            "area": "technical_support",
+            "severity": "check",
+            "title": "Technical support",
+            "issues": [
+                "Technical support assignments aren't recorded in the system yet. Let the Technical Support "
+                "Staff know about the change to " + _labels_of_changes(changed) + "."
+            ],
+        }
+    ]
 
 
 def _labels_of_changes(changed: set[str]) -> str:
@@ -196,9 +250,10 @@ def _labels_of_changes(changed: set[str]) -> str:
 
 
 def assess_change_impact(event: SimpleNamespace, requested_changes: dict) -> list[dict]:
-    """Every arrangement for this session that `requested_changes` would
-    disturb. Empty when nothing already arranged is affected (e.g. a name
-    change, or any change before the event is approved)."""
+    """Every arrangement for this session that `requested_changes` (field ->
+    new value) would disturb. Empty when nothing already arranged is
+    affected (e.g. a name change, or any change before the event is
+    approved)."""
     if event.status not in ARRANGED_STATUSES:
         return []
     changed = set(requested_changes)
@@ -207,5 +262,23 @@ def assess_change_impact(event: SimpleNamespace, requested_changes: dict) -> lis
     return [
         *_venue_impacts(event, after, changed),
         *_registration_impacts(after, before, changed, event.id),
-        *_untracked_impacts(after, before, changed),
+        *_equipment_impacts(event, after, before, changed),
+        *_technical_support_impacts(after, before, changed),
     ]
+
+
+def check_acknowledged(impacts: list[dict], acknowledged) -> None:
+    """Every impacted area must be acknowledged by name -- a plain "yes"
+    would also wave through an impact that appeared after the coordinator
+    loaded the page (a new registration, a booking just confirmed)."""
+    if acknowledged is not None and (
+        not isinstance(acknowledged, list) or not all(isinstance(area, str) for area in acknowledged)
+    ):
+        raise ValidationError("acknowledge_impacts must be a list of impact areas.")
+    unacknowledged = sorted({impact["area"] for impact in impacts} - set(acknowledged or []))
+    if unacknowledged:
+        raise ChangeImpactNotAcknowledgedError(
+            "This change affects arrangements already made for the event ("
+            + ", ".join(area.replace("_", " ") for area in unacknowledged)
+            + "). Review them and acknowledge before saving."
+        )

@@ -19,6 +19,12 @@ no kind column -- see `kind` in list_event_logs):
 Drafts aren't logged: nothing has been submitted to anyone yet. Status
 changes have their own history (event_status_log, app.events.transitions).
 
+IS-9: each entry is also classified "significant" (it touches the date,
+time, expected attendance, venue requirements or equipment requirements --
+SIGNIFICANT_FIELDS) or "ordinary" (anything else), stored in
+`significance`. A coordinator's update also keeps the impacts they
+acknowledged before saving, in `acknowledged_impacts`.
+
 public.event_change_requests holds the change requests themselves (and
 their review); event_logs is the request's timeline of what was asked for
 and what was changed.
@@ -33,6 +39,31 @@ from types import SimpleNamespace
 
 from app.events.event_service import REGISTRATION_WINDOW_FIELDS, _from_database_event, _parse_registration_datetime
 from app.extensions import supabase
+
+# IS-9: "Changes to date, time, expected attendance, venue requirements, or
+# equipment requirements are recorded as significant; changes to other
+# fields are recorded as ordinary." Venue requirements = the room layout
+# (accessibility needs are listed as their own field in the story).
+SIGNIFICANT_FIELDS = frozenset(
+    {
+        "preferred_start_date",
+        "preferred_end_date",
+        "preferred_start_time",
+        "preferred_end_time",
+        "expected_attendance",
+        "room_layout",
+        "equipment",
+    }
+)
+
+
+def significance(fields) -> str | None:
+    """"significant" if any of `fields` is in SIGNIFICANT_FIELDS, else
+    "ordinary"; None when nothing changed."""
+    fields = set(fields)
+    if not fields:
+        return None
+    return "significant" if fields & SIGNIFICANT_FIELDS else "ordinary"
 
 
 def group_id(event) -> str:
@@ -70,14 +101,25 @@ def _details(row) -> dict:
     return _from_database_event(row if isinstance(row, SimpleNamespace) else SimpleNamespace(**row))
 
 
-def record_event_change(before_row, after_row, changed_by: str | None) -> dict | None:
-    """Logs what changed between two versions of a session row. Writes
-    nothing (and returns None) when no detail actually changed."""
+def record_event_change(
+    before_row, after_row, changed_by: str | None, acknowledged_impacts: list[dict] | None = None
+) -> dict | None:
+    """Logs what changed between two versions of a session row, and
+    whether that was significant. Writes nothing (and returns None) when no
+    detail actually changed. `acknowledged_impacts` are the arrangements
+    the coordinator was shown, and accepted, before saving."""
     changes = diff(_details(before_row), _details(after_row))
     if not changes:
         return None
     after = after_row if isinstance(after_row, dict) else vars(after_row)
-    entry = {"shared_event_id": group_id(after), "changes": changes, "changed_by": changed_by}
+    entry = {
+        "shared_event_id": group_id(after),
+        "changes": changes,
+        "significance": significance(changes),
+        "changed_by": changed_by,
+    }
+    if acknowledged_impacts:
+        entry["acknowledged_impacts"] = acknowledged_impacts
     result = supabase.table("event_logs").insert(entry).execute()
     return (result.data or [entry])[0]
 
@@ -91,6 +133,7 @@ def record_requested_change(event, requested_changes: dict, previous_values: dic
         "changes": {
             field: {"from": previous_values.get(field), "to": value} for field, value in requested_changes.items()
         },
+        "significance": significance(requested_changes),
         "changed_by": requested_by,
     }
     result = supabase.table("event_logs").insert(entry).execute()
@@ -109,8 +152,9 @@ def entry_kind(entry: dict, event) -> str:
 
 def list_event_logs(event: SimpleNamespace) -> list[dict]:
     """Every log entry for this event request, newest first, with the name
-    of whoever made it (`profiles`, through changed_by) and its `kind`
-    ("requested" or "changed", see entry_kind).
+    of whoever made it (`profiles`, through changed_by), its `kind`
+    ("requested" or "changed", see entry_kind) and its `significance`
+    (worked out from the fields for entries written before it was stored).
 
     The caller has already been authorised to view `event` (EVENT_VIEW).
     Entries aren't per session, so that covers the whole request -- which
@@ -122,4 +166,11 @@ def list_event_logs(event: SimpleNamespace) -> list[dict]:
         .order("changed_at", desc=True)
         .execute()
     )
-    return [{**entry, "kind": entry_kind(entry, event)} for entry in result.data or []]
+    return [
+        {
+            **entry,
+            "kind": entry_kind(entry, event),
+            "significance": entry.get("significance") or significance(entry.get("changes") or {}),
+        }
+        for entry in result.data or []
+    ]

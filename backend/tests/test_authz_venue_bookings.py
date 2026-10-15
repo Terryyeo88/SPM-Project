@@ -20,20 +20,15 @@ from tests.factories import FakeEvent, FakeVenueBooking, make_user
 # -- venue_booking.create --------------------------------------------------
 
 
-def test_assigned_coordinator_can_create_when_event_approved():
-    user = make_user(["event_coordinator"], user_id="coord-1")
-    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="approved")
-    assert can(user, actions.VENUE_BOOKING_CREATE, event) is True
-
-
-def test_assigned_coordinator_can_create_when_event_already_planning():
+def test_assigned_coordinator_can_create_when_event_planning():
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(id="event-1", coordinator_id="coord-1", status="planning")
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is True
 
 
-@pytest.mark.parametrize("status", ["draft", "submitted", "under_review", "rejected", "confirmed"])
-def test_assigned_coordinator_cannot_create_outside_approved_or_planning(status):
+@pytest.mark.parametrize("status", ["draft", "submitted", "under_review", "approved", "rejected", "confirmed"])
+def test_assigned_coordinator_cannot_create_outside_planning(status):
+    """An approved event must be moved to planning first (Start Planning)."""
     user = make_user(["event_coordinator"], user_id="coord-1")
     event = FakeEvent(id="event-1", coordinator_id="coord-1", status=status)
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is False
@@ -46,7 +41,7 @@ def test_coordinator_not_assigned_gets_404_not_403():
     all, so this must be DENY_NOT_FOUND (404), not DENY_FORBIDDEN (403),
     same as rule_event_approve's own not-assigned case."""
     user = make_user(["event_coordinator"], user_id="someone-else")
-    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="approved")
+    event = FakeEvent(id="event-1", coordinator_id="coord-1", status="planning")
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is False
     with pytest.raises(NotFoundError):
         authorise(user, actions.VENUE_BOOKING_CREATE, event)
@@ -54,13 +49,13 @@ def test_coordinator_not_assigned_gets_404_not_403():
 
 def test_organiser_cannot_create_even_on_their_own_event():
     user = make_user(["event_organizer"], user_id="org-1")
-    event = FakeEvent(id="event-1", organizer_id="org-1", coordinator_id="coord-1", status="approved")
+    event = FakeEvent(id="event-1", organizer_id="org-1", coordinator_id="coord-1", status="planning")
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is False
 
 
 def test_venue_staff_cannot_create():
     user = make_user(["venue_staff"], user_id="staff-1")
-    event = FakeEvent(id="event-1", coordinator_id="staff-1", status="approved")
+    event = FakeEvent(id="event-1", coordinator_id="staff-1", status="planning")
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is False
 
 
@@ -144,5 +139,5 @@ def test_multi_role_union_grants_venue_booking_create():
     assigned to the event (a grant) gets access through the coordinator
     path."""
     user = make_user(["venue_staff", "event_coordinator"], user_id="both-1")
-    event = FakeEvent(id="event-1", coordinator_id="both-1", status="approved")
+    event = FakeEvent(id="event-1", coordinator_id="both-1", status="planning")
     assert can(user, actions.VENUE_BOOKING_CREATE, event) is True
