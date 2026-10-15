@@ -245,9 +245,29 @@ def rule_event_edit(user: Any, event: Any) -> Decision:
         has_relationship = True
         if not _event_status_in(event, *_COORDINATOR_EDIT_CLOSED):
             return Decision.ALLOW
-    if has_relationship:
+    # IS-9: "others can view but not edit" -- the Lead oversees (views)
+    # every submitted request, so a refusal is a 403, not a 404.
+    if has_relationship or _is_lead_over(user, event):
         return Decision.DENY_FORBIDDEN
     return Decision.DENY_NOT_FOUND
+
+
+def explain_event_edit_denial(user: Any, event: Any) -> str:
+    """The reason given with a 403 from rule_event_edit (IS-9: "update
+    attempts are refused with a given reason"). Only called once the rule
+    has said DENY_FORBIDDEN, so the caller may already see the event."""
+    if (
+        _has_role(user, "event_coordinator")
+        and _is_assigned_coordinator(user, event)
+        and _event_status_in(event, *_COORDINATOR_EDIT_CLOSED)
+    ):
+        return f"This event is {event.status}, so its details can no longer be updated."
+    if _has_role(user, "event_organizer") and _owns_event(user, event):
+        return (
+            "This event has been submitted, so only its assigned Event Coordinator can update it. "
+            "Request a change instead."
+        )
+    return "Only the Event Coordinator assigned to this event can update it. You can view it, but not edit it."
 
 
 # -- event.delete --------------------------------------------------------

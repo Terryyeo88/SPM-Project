@@ -6,11 +6,14 @@
  * coordinator's edits and approvals take effect (kind "changed").
  * Read-only; entries are written by the backend (app.events.event_log).
  * One entry per change, for the whole request (event_logs is keyed by
- * shared_event_id, not by session).
+ * shared_event_id, not by session). IS-9: each entry is labelled a
+ * significant or ordinary change, and a coordinator's update lists the
+ * arrangements they acknowledged it would affect.
  */
 import { ref, watch } from 'vue'
 import { apiGet } from '../lib/api'
 import { describeLogEntry } from '../lib/changeRequests'
+import { SIGNIFICANCE_LABELS } from '../lib/eventUpdates'
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -52,6 +55,9 @@ watch(() => [props.event.id, props.refreshKey], load, { immediate: true })
         <div class="entry-header">
           <span class="entry-title" :class="`kind-${entry.kind}`">
             {{ entry.kind === 'requested' ? 'Change requested by' : 'Changed by' }} {{ entry.profiles?.name || 'unknown user' }}
+            <span v-if="entry.significance" class="significance" :class="`significance-${entry.significance}`">
+              {{ SIGNIFICANCE_LABELS[entry.significance] ?? entry.significance }}
+            </span>
           </span>
           <span class="muted small">{{ when(entry.changed_at) }}</span>
         </div>
@@ -60,6 +66,9 @@ watch(() => [props.event.id, props.refreshKey], load, { immediate: true })
             <strong>{{ change.label }}:</strong> {{ change.from }} &rarr; {{ change.to }}
           </li>
         </ul>
+        <p v-if="entry.acknowledged_impacts?.length" class="muted small">
+          Saved knowing it affects: {{ entry.acknowledged_impacts.map((impact) => impact.title).join(', ') }}.
+        </p>
       </li>
     </ol>
   </section>
@@ -77,5 +86,7 @@ watch(() => [props.event.id, props.refreshKey], load, { immediate: true })
 .entry-title { font-size: 13px; font-weight: 600; color: #333; }
 .entry:has(.kind-requested) { border-left-color: #d9b779; }
 .kind-requested { color: #8a5a12; }
+.significance { margin-left: 8px; font-size: 11px; font-weight: 600; border-radius: 8px; padding: 1px 8px; background: #eee; color: #5a5a5a; }
+.significance-significant { background: #f7efe1; color: #8a5a12; }
 .changes { margin: 0; padding-left: 18px; font-size: 13px; color: #2a2a2a; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
 </style>

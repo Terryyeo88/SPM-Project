@@ -32,6 +32,36 @@ describe('EventLogHistory', () => {
     expect(wrapper.find('.entry-header .muted').text()).not.toBe('')
   })
 
+  it('labels each entry significant or ordinary, with what was acknowledged (IS-9)', async () => {
+    apiGet.mockResolvedValue([
+      {
+        event_log_id: 'log-2',
+        changed_at: '2026-10-09T01:00:00Z',
+        changes: { expected_attendance: { from: 100, to: 150 } },
+        profiles: { name: 'Alice Tan' },
+        kind: 'changed',
+        significance: 'significant',
+        acknowledged_impacts: [{ area: 'venue', title: 'Venue booking: Hall A (confirmed)' }],
+      },
+      {
+        event_log_id: 'log-1',
+        changed_at: '2026-10-08T01:00:00Z',
+        changes: { name: { from: 'Old', to: 'New' } },
+        profiles: { name: 'Alice Tan' },
+        kind: 'changed',
+        significance: 'ordinary',
+      },
+    ])
+    const wrapper = mount(EventLogHistory, { props: { event } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.significance').map((badge) => badge.text())).toEqual([
+      'Significant change',
+      'Ordinary change',
+    ])
+    expect(wrapper.text()).toContain('Saved knowing it affects: Venue booking: Hall A (confirmed).')
+  })
+
   it("labels the organiser's entries as requests, not changes", async () => {
     apiGet.mockResolvedValue([
       {

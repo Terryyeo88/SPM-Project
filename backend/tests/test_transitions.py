@@ -86,6 +86,7 @@ def test_edge_set_is_exactly_the_sourced_edges():
         ("approved", "planning"),
         ("planning", "confirmed"),
         ("confirmed", "completed"),
+        ("confirmed", "planning"),
         ("approved", "cancelled"),
         ("planning", "cancelled"),
         ("confirmed", "cancelled"),

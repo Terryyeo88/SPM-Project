@@ -606,17 +606,6 @@ def create_draft_request(organizer_id: str, payload: dict) -> dict:
     return _group_response(inserted)
 
 
-def edit_event_request(event_id: str, event: SimpleNamespace, payload: dict):
-    # validate_event_payload requires `name`, so a validated payload is
-    # never empty -- no separate "at least one field" check is needed.
-    payload = validate_event_payload(
-        payload, for_submission=False, current_room_layout=getattr(event, "room_layout", None)
-    )
-    database_payload = _to_database_payload(payload, _from_database_event(event))
-    result = supabase.table("events").update(database_payload).eq("id", event_id).select("*").execute()
-    return _first_row(result)
-
-
 def save_draft_request(event_id: str, event: SimpleNamespace, payload: dict) -> dict:
     """Save edits to an editable request (authz has already checked the
     caller owns it and it's "draft" or "rejected").
@@ -688,7 +677,7 @@ def delete_draft_request(event_id: str, event: SimpleNamespace) -> None:
     (rule_event_delete restricts it to the owning organizer while status
     is still "draft") -- this function only re-checks status on the
     SIBLING rows, which authz never saw, the same trust boundary
-    edit_event_request/submit_event_request rely on for their own
+    event_update.update_event/submit_event_request rely on for their own
     authz-gated preconditions.
     """
     shared_event_id = getattr(event, "shared_event_id", None)

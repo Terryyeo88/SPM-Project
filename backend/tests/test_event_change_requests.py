@@ -34,7 +34,9 @@ import app.events.change_impact as impact_module
 import app.events.change_request_service as service
 import app.events.event_log as event_log_module
 import app.events.event_service as event_service_module
+import app.events.event_update as event_update_module
 import app.events.routes as routes_module
+import app.events.transitions as transitions_module
 from app.authz import actions
 from app.authz.policy import authorise, can
 from app.authz.rules import CHANGE_REQUEST_STATUSES
@@ -100,6 +102,8 @@ def fake(monkeypatch):
     monkeypatch.setattr(impact_module, "supabase", db)
     monkeypatch.setattr(event_log_module, "supabase", db)
     monkeypatch.setattr(routes_module, "supabase", db)
+    monkeypatch.setattr(event_update_module, "supabase", db)
+    monkeypatch.setattr(transitions_module, "supabase", db)
     return db
 
 
@@ -760,7 +764,9 @@ def test_confirmed_event_changes_only_after_coordinator_approval(client, signing
     assert approved.status_code == 200
     assert approved.get_json()["event"]["room_layout"] == "banquet"
     assert fake.get("session-1")["room_layout"] == "banquet"
-    assert fake.get("session-1")["status"] == "confirmed"  # a change isn't a status change
+    # IS-9: a change made after confirmation sends the event back to planning.
+    assert fake.get("session-1")["status"] == "planning"
+    assert approved.get_json()["event"]["status"] == "planning"
 
 
 # -- impact on arrangements already made ------------------------------------

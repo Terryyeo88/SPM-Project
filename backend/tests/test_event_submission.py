@@ -708,7 +708,7 @@ def test_is31_organizer_cannot_edit_a_submitted_request_directly(client, signing
     for the organiser once the request is submitted, and nothing is changed."""
     _mock_profile(monkeypatch, ["event_organizer"])
     monkeypatch.setattr(routes_module, "load_event", lambda event_id: _submitted_event())
-    monkeypatch.setattr(routes_module, "edit_event_request", lambda *a: pytest.fail("must not edit"))
+    monkeypatch.setattr(routes_module, "update_event", lambda *a: pytest.fail("must not edit"))
 
     response = _post(client, signing_key, "/events/event-1", {"expected_attendance": 500})
 
@@ -725,56 +725,17 @@ def test_is31_assigned_coordinator_can_edit_the_request(client, signing_key, mon
     monkeypatch.setattr(routes_module, "load_event", lambda event_id: event)
     calls = []
 
-    def fake_edit(event_id, loaded_event, payload):
-        calls.append((event_id, payload))
-        return {"id": event_id, "expected_attendance": payload["expected_attendance"]}
+    def fake_update(loaded_event, fields, updated_by, acknowledged):
+        calls.append((loaded_event.id, fields, updated_by))
+        return {"id": loaded_event.id, "expected_attendance": fields["expected_attendance"]}
 
-    monkeypatch.setattr(routes_module, "edit_event_request", fake_edit)
-    logged = []
-    monkeypatch.setattr(routes_module, "record_event_change", lambda before, after, by: logged.append(by))
+    monkeypatch.setattr(routes_module, "update_event", fake_update)
 
     response = _post(client, signing_key, "/events/event-1", {"expected_attendance": 500})
 
     assert response.status_code == 200
-    assert calls == [("event-1", {"expected_attendance": 500})]
-    assert logged == ["user-1"]  # IS-21: the edit is in the event's audit trail, as this coordinator's
-
-
-def test_is31_coordinator_edit_form_payload_is_saved(fake_db):
-    """AC3: the coordinator's "Edit Details" form (CoordinatorEventReview)
-    sends the whole session in one body -- shared fields plus every session
-    field, with the registration window in UTC. edit_event_request accepts
-    exactly that shape and writes it to the event's own row, leaving the
-    status and the assigned coordinator as they were."""
-    fake_db.rows = [_session_row("a", status="under_review", coordinator_id="coord-1")]
-    form_body = {
-        "name": "Community Conference (revised)",
-        "description": "Updated by the coordinator.",
-        "purpose": "Knowledge sharing.",
-        "preferred_start_date": "2026-11-10",
-        "preferred_start_time": "10:00",
-        "preferred_end_date": "2026-11-10",
-        "preferred_end_time": "16:00",
-        "expected_attendance": 120,
-        "accessibility_needs": [{"item": "lift_access"}],
-        "room_layout": "banquet",
-        "equipment": [{"item": "screen", "quantity": 2}],
-        "registration_needs": True,
-        "registration_start_datetime": "2026-11-01T01:00:00.000Z",
-        "registration_end_datetime": "2026-11-09T10:00:00.000Z",
-        "special_requests": "",
-    }
-
-    service.edit_event_request("a", SimpleNamespace(**fake_db.get("a")), form_body)
-
-    row = fake_db.get("a")
-    assert row["name"] == "Community Conference (revised)"
-    assert row["expected_attendance"] == 120
-    assert row["room_layout"] == "banquet"
-    assert row["equipment_needed"] == {"equipment": [{"item": "screen", "quantity": 2}]}
-    assert row["registration_end_datetime"] == "2026-11-09T18:00:00+08:00"
-    assert row["status"] == "under_review"
-    assert row["coordinator_id"] == "coord-1"
+    # Attributed to this coordinator (the audit trail's "who").
+    assert calls == [("event-1", {"expected_attendance": 500}, "user-1")]
 
 
 # -- Resubmitting a rejected request ---------------------------------------------
@@ -940,10 +901,3 @@ def test_create_event_request_errors_if_the_database_returns_no_rows(fake_db, as
     assert assigned == []
 
 
-def test_edit_of_a_session_that_no_longer_exists_is_refused(fake_db):
-    """Editing a session that was deleted in the meantime updates nothing,
-    and the coordinator gets a clear error instead of an empty response."""
-    stale = SimpleNamespace(**_session_row("gone", status="under_review", coordinator_id="coord-1"))
-
-    with pytest.raises(ValidationError, match="did not return an event"):
-        service.edit_event_request("gone", stale, {"name": "Community Conference", "expected_attendance": 50})

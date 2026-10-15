@@ -420,10 +420,11 @@ decisions worth double-checking.
   coordinator's own availability for the new dates is not checked either.
   Please confirm the stance itself: a significant change WARNS and needs
   acknowledging, but isn't blocked, since a requirement change is often
-  exactly why arrangements must be redone. Direct coordinator edits don't
-  go through this check at all -- only approving a change request does.
+  exactly why arrangements must be redone. Since IS-9 the coordinator's own
+  edits go through the same check.
 
-- **Equipment and technical support can only be flagged "check manually".**
+- **Technical support can only be flagged "check manually"** (equipment
+  requests are now checked for real -- see IS-9 below).
   No equipment-allocation or technical-support-assignment tables exist, so
   `change_impact` can't tell whether anything was actually arranged -- it
   raises a "check" (never a "conflict") whenever a post-approval change
@@ -671,3 +672,43 @@ Lead-only. Judgement calls made while applying it, for confirmation:
   not deleted: its other criteria (one coordinator at a time, the new one
   takes over, the previous one is unassigned) still hold for the Lead's
   reassignment. Please confirm the backlog marks it accordingly.
+
+## Update Event Information During Planning (IS-9, 15 Oct)
+
+The calls below were made because the story didn't say. Each is written up
+in docs/design-decisions.md; please confirm or correct:
+
+- **"Venue requirements" read as the room layout.** Accessibility needs are
+  listed as their own field in the story, so changing them is recorded as
+  ordinary. They are still checked against a booked venue, and the
+  coordinator must acknowledge a conflict before saving.
+
+- **"Planning stage" read as every status before completed/cancelled**
+  (under review, approved, planning, confirmed) -- the coordinator's
+  existing edit window. Should editing be narrower, e.g. approved/planning
+  only?
+
+- **The review step appears for every significant change, even when no
+  arrangement is affected** (it then says so). Acknowledgement is only
+  required when something is affected.
+
+- **Confirmed -> planning happens on ANY change, including an ordinary one**
+  (a typo in the description), as the criterion says. It also happens when
+  an approved change request alters a confirmed event, and when a renamed
+  shared detail reaches a confirmed sibling session. Is that intended for
+  ordinary changes?
+
+- **The coordinator's name/description/purpose change now reaches every
+  open session of the request.** Previously it changed only the session it
+  was made on.
+
+- **The Lead gets a 403 with a reason instead of a 404** when trying to
+  edit, since they can view the event.
+
+- **Migration `20261015000000_event_logs_significance.sql` must be applied
+  before deploying** -- the backend writes `event_logs.significance`, and
+  PostgREST refuses inserts naming a missing column.
+
+- **No notification** to the organiser or to Venue/Technical Support Staff
+  when a significant change affects their arrangements; depends on the
+  Notification System story.
