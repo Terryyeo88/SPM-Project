@@ -15,6 +15,8 @@ covered by test_booking_service.py.
 
 from __future__ import annotations
 
+import pytest
+
 import app.auth.context as context_module
 import app.events.routes as events_routes
 import app.venues.routes as venues_routes
@@ -41,7 +43,7 @@ def _auth(signing_key, user_id="user-1"):
 
 def test_create_booking_route_for_assigned_coordinator(client, signing_key, monkeypatch):
     _mock_profile(monkeypatch, ["event_coordinator"])
-    event = FakeEvent(id="event-1", coordinator_id="user-1", status="approved")
+    event = FakeEvent(id="event-1", coordinator_id="user-1", status="planning")
     monkeypatch.setattr(events_routes, "load_event", lambda event_id: event)
     calls = []
 
@@ -75,9 +77,10 @@ def test_create_booking_route_404_for_coordinator_not_assigned(client, signing_k
     assert called == []
 
 
-def test_create_booking_route_403_when_event_not_approved_or_planning(client, signing_key, monkeypatch):
+@pytest.mark.parametrize("status", ["under_review", "approved"])
+def test_create_booking_route_403_when_event_not_planning(client, signing_key, monkeypatch, status):
     _mock_profile(monkeypatch, ["event_coordinator"])
-    event = FakeEvent(id="event-1", coordinator_id="user-1", status="under_review")
+    event = FakeEvent(id="event-1", coordinator_id="user-1", status=status)
     monkeypatch.setattr(events_routes, "load_event", lambda event_id: event)
     called = []
     monkeypatch.setattr(events_routes, "create_booking_request", lambda *a: called.append(a))

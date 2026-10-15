@@ -94,7 +94,9 @@ decisions worth double-checking.
   specific venues (which would need a new assignment table, out of scope
   for this sprint).
 
-- **The `approved → planning` transition is a side effect of requesting a
+- **Resolved 2026-10-15: the coordinator starts planning explicitly (Start
+  Planning), and venue requests require `planning`.** Original question:
+  **The `approved → planning` transition is a side effect of requesting a
   venue, not its own feature.** The Event Status Management "Planning
   Status" story implies a Coordinator explicitly moves an event to
   `planning` before searching for a venue/equipment, but nothing in this

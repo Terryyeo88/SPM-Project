@@ -308,6 +308,40 @@ def test_ac3_impacts_are_checked_through_the_route_too(client, signing_key, monk
     assert fake.get("session-1")["expected_attendance"] == 150
 
 
+
+@pytest.mark.parametrize("status", ["under_review", "approved"])
+def test_ac3_before_planning_the_coordinator_edits_freely(fake, status):
+    """Before planning the details are still being settled: a significant
+    change is saved straight away, even past an existing booking, with
+    nothing to acknowledge -- but it is still logged as significant."""
+    fake.rows[0]["status"] = status
+    _book_venue(fake, capacity=120)
+    fake.tables["registrations"] = [{"event_id": "session-1", "status": "confirmed"}]
+
+    preview = preview_event_update(_event(fake), {"expected_attendance": 150, "preferred_end_time": "20:00"})
+    update_event(_event(fake), {"expected_attendance": 150, "preferred_end_time": "20:00"}, COORDINATOR)
+
+    assert preview["impacts"] == [] and preview["impacts_checked"] is False
+    assert preview["significance"] == "significant"
+    assert fake.get("session-1")["expected_attendance"] == 150
+    [entry] = _logs(fake)
+    assert entry["significance"] == "significant"
+    assert not entry.get("acknowledged_impacts")
+
+
+@pytest.mark.parametrize("status", ["planning", "confirmed"])
+def test_ac3_from_planning_on_impacts_are_checked(fake, status):
+    fake.rows[0]["status"] = status
+    _book_venue(fake, capacity=120)
+
+    preview = preview_event_update(_event(fake), {"expected_attendance": 150})
+
+    assert preview["impacts_checked"] is True
+    assert [impact["area"] for impact in preview["impacts"]] == ["venue"]
+    with pytest.raises(ChangeImpactNotAcknowledgedError):
+        update_event(_event(fake), {"expected_attendance": 150}, COORDINATOR)
+
+
 # -- AC4: what, who, when ---------------------------------------------------------
 
 

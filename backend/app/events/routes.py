@@ -61,6 +61,7 @@ from app.events.event_service import (
     list_event_sessions,
     reject_event_request,
     save_draft_request,
+    start_planning_request,
     submit_event_request,
 )
 from app.events.event_update import preview_event_update, update_event
@@ -245,8 +246,8 @@ def _move(event, event_id: str, to_status: str) -> dict:
 @events_bp.route("/<event_id>/start-planning", methods=["POST"])
 @require(EVENT_START_PLANNING, loader=lambda event_id: load_event(event_id))
 def start_planning(event, event_id):
-    """IS-36: approved -> planning."""
-    return jsonify(_move(event, event_id, "planning")), 200
+    """IS-36: approved -> planning, every approved session of the request."""
+    return jsonify(start_planning_request(event_id, event, current_user().id)), 200
 
 
 @events_bp.route("/<event_id>/confirm", methods=["POST"])

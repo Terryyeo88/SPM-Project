@@ -37,6 +37,47 @@ beforeEach(() => {
   apiPost.mockReset()
 })
 
+describe('CoordinatorEventReview -- summary under the title', () => {
+  it('shows the description and purpose right under the event name', () => {
+    const wrapper = mount(CoordinatorEventReview, {
+      props: { event: { ...event('under_review'), description: 'A day of talks.', purpose: 'Knowledge sharing.' }, sessions: [] },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    const summary = wrapper.find('.title-row + .event-summary')
+    expect(summary.text()).toContain('A day of talks.')
+    expect(summary.text()).toContain('Knowledge sharing.')
+  })
+
+  it('says when they are missing', () => {
+    expect(mountWith('under_review').find('.event-summary').text()).toContain('Not provided')
+  })
+})
+
+describe('CoordinatorEventReview -- Start Planning', () => {
+  function startButton(wrapper) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Start Planning')
+  }
+
+  it('offers Start Planning only on an approved session', () => {
+    expect(startButton(mountWith('approved'))).toBeTruthy()
+    for (const status of ['under_review', 'planning', 'confirmed']) {
+      expect(startButton(mountWith(status))).toBeUndefined()
+    }
+  })
+
+  it('moves the session to planning and passes the updated row up', async () => {
+    apiPost.mockResolvedValue({ ...event('planning') })
+    const wrapper = mountWith('approved')
+
+    await startButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/events/session-1/start-planning', {})
+    expect(wrapper.emitted('updated')[0][0].status).toBe('planning')
+    expect(wrapper.find('[role="status"]').text()).toContain('In Planning')
+  })
+})
+
 describe('CoordinatorEventReview -- Cancel Event', () => {
   it.each(['approved', 'planning', 'confirmed'])('offers Cancel Event when the session is %s', (status) => {
     expect(cancelButton(mountWith(status))).toBeTruthy()

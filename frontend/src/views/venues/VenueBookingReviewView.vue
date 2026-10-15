@@ -132,6 +132,18 @@ onMounted(load)
           </div>
           <span class="status" :class="`status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
 
+          <section class="card" aria-labelledby="event-about-heading">
+            <h2 id="event-about-heading" class="card-title">About the Event</h2>
+            <div class="detail-row">
+              <span class="muted">Description</span>
+              <span class="value value-text">{{ event?.description || 'Not provided' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="muted">Purpose</span>
+              <span class="value value-text">{{ event?.purpose || 'Not provided' }}</span>
+            </div>
+          </section>
+
           <section class="card" aria-labelledby="booking-details-heading">
             <h2 id="booking-details-heading" class="card-title">Booking Details</h2>
             <div class="detail-row">
@@ -221,6 +233,7 @@ onMounted(load)
 .muted { color: #6b6b6b; }
 .small { font-size: 12px; margin: 4px 0 0; }
 .value { color: #2a2a2a; font-weight: 600; text-align: right; }
+.value-text { font-weight: 400; text-align: left; white-space: pre-line; overflow-wrap: anywhere; flex: 1; max-width: 75%; }
 
 .suitability-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; }
 .suitability-icon {

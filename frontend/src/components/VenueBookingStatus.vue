@@ -29,8 +29,9 @@ const latest = computed(() => bookings.value[0] ?? null)
 
 // Same status precondition as rule_venue_booking_create: a coordinator
 // may only start (or restart, after a rejection) a venue search once the
-// event is approved or already in planning.
-const canRequest = computed(() => ['approved', 'planning'].includes(props.event.status))
+// event is in planning -- an approved event is moved there first with
+// Start Planning.
+const canRequest = computed(() => props.event.status === 'planning')
 
 async function load() {
   loading.value = true
@@ -67,6 +68,9 @@ watch(() => props.event.id, load)
         Reason: {{ latest.rejection?.reason || 'No reason was recorded.' }}
       </p>
 
+      <p v-if="event.status === 'approved'" class="muted small">
+        Start planning (under Your Decision) to request a venue.
+      </p>
       <router-link
         v-if="canRequest && (!latest || latest.status === 'rejected')"
         :to="{ name: 'request-venue-booking', params: { eventId: event.id } }"

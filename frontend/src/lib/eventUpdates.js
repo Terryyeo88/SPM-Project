@@ -6,11 +6,15 @@
  * Saving is two steps. POST /events/<id>/update-preview runs every check
  * and writes nothing; it answers
  *   { changes: { field: { from, to } }, significance, significant_fields,
- *     impacts: [{ area, severity, title, issues }], reverts_to_planning }
+ *     impacts: [{ area, severity, title, issues }], impacts_checked,
+ *     reverts_to_planning }
  * (app.events.event_update.preview_event_update). If the update is
  * significant, touches arrangements already made, or would send a confirmed
  * event back to planning, the coordinator reviews that first; then
  * POST /events/<id> saves it, naming the impact areas they acknowledged.
+ * Before planning (under review, approved) impacts aren't checked
+ * (impacts_checked: false), so a significant change alone saves straight
+ * away -- the coordinator edits freely.
  */
 import { FIELD_LABELS, describeValue } from './changeRequests'
 
@@ -27,7 +31,8 @@ export function isNoChange(preview) {
 /** true if the coordinator should review the update before it's saved. */
 export function needsReview(preview) {
   if (isNoChange(preview)) return false
-  return preview.significance === 'significant' || impactsOfPreview(preview).length > 0 || Boolean(preview.reverts_to_planning)
+  const checked = preview.impacts_checked !== false
+  return (checked && preview.significance === 'significant') || impactsOfPreview(preview).length > 0 || Boolean(preview.reverts_to_planning)
 }
 
 export function impactsOfPreview(preview) {

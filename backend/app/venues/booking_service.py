@@ -22,7 +22,6 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.events.event_service import SINGAPORE_TZ
-from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
@@ -125,15 +124,9 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     """Creates a pending venue booking for one event session.
 
     authz (rule_venue_booking_create) has already checked the caller is
-    the event's assigned coordinator and its status is "approved" or
-    "planning". If it's "approved", this call ALSO moves the event to
-    "planning" -- a narrow, documented side effect of starting the venue
-    search (directly matching the Event Status Management "Planning
-    Status" story's own framing: "the Coordinator has to change the
-    status to 'planning' before... searching for a venue"), routed
-    through app.events.transitions.transition() so it gets the same
-    event_status_log audit row every other status change does. See
-    docs/design-decisions.md for the full reasoning.
+    the event's assigned coordinator and the event is in "planning" --
+    the coordinator moves it there themselves (Start Planning), so this
+    never changes the event's status.
     """
     if not isinstance(venue_id, str) or not venue_id.strip():
         raise ValidationError("venue_id is required.")
@@ -167,21 +160,6 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     if not result.data:
         raise ValidationError("The venue booking database operation did not return a booking.")
     booking = result.data[0] if isinstance(result.data, list) else result.data
-
-    # expected_from="approved" conditions the write on still being
-    # "approved", so a race (e.g. two booking requests fired for sibling
-    # sessions at once) can't both attempt this transition --
-    # TransitionConflictError when the event is already "planning" is
-    # expected and swallowed here, not an error, since the event
-    # genuinely is allowed to already be in "planning" by the time this
-    # runs (see rule_venue_booking_create's status precondition) -- most
-    # transition() callers treat that conflict as a real error, this is
-    # the one call site that doesn't.
-    if event.status == "approved":
-        try:
-            transition(event.id, "planning", requested_by, expected_from="approved")
-        except TransitionConflictError:
-            pass
 
     return booking
 

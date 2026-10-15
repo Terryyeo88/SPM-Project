@@ -9,6 +9,10 @@
  *   Reject   -> POST /events/<id>/reject    (under_review -> rejected, reason required)
  *   Both decide the whole request: every session still under review moves
  *   together, so the organiser resubmits a rejected request as one.
+ *   Start Planning -> POST /events/<id>/start-planning (approved -> planning,
+ *               every approved session of the request, like Approve). Venue requests open only from planning
+ *               (rule_venue_booking_create), so the coordinator moves the
+ *               event there themselves when they're ready to arrange it.
  *   Cancel   -> POST /events/<id>/cancel    (approved / planning / confirmed ->
  *               cancelled, reason required; IS-39's route, this button added
  *               with Release Equipment on Cancel). Cancels THIS session only.
@@ -82,6 +86,7 @@ const rejectReason = ref('')
 const cancelReason = ref('')
 
 const isUnderReview = computed(() => props.event.status === 'under_review')
+const isApproved = computed(() => props.event.status === 'approved')
 
 function sessionWhen(session) {
   const range = formatDateRange(session.preferred_start_date, session.preferred_end_date)
@@ -295,6 +300,15 @@ function approve() {
   })
 }
 
+function startPlanning() {
+  return run(async () => {
+    const updated = await apiPost(`/events/${props.event.id}/start-planning`, {})
+    openPanel.value = null
+    success.value = 'Request moved to In Planning (every approved session). You can now request a venue and equipment.'
+    emit('updated', updated)
+  })
+}
+
 function reject() {
   if (!rejectReason.value.trim()) {
     error.value = 'Please give the organiser a reason for rejecting.'
@@ -334,6 +348,76 @@ function cancelEvent() {
       <h1>{{ event.name }}</h1>
       <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
     </div>
+    <dl class="event-summary">
+      <dt>Description</dt><dd>{{ event.description || 'Not provided' }}</dd>
+      <dt>Purpose</dt><dd>{{ event.purpose || 'Not provided' }}</dd>
+    </dl>
+
+    <section class="decision" aria-labelledby="decision-heading">
+      <h2 id="decision-heading">Your Decision</h2>
+
+      <p v-if="!isUnderReview" class="muted">
+        This request is {{ statusLabel(event.status).toLowerCase() }}, so there's nothing to approve or reject.
+      </p>
+
+      <p v-if="isApproved" class="muted small">
+        Start planning when you're ready to request a venue or equipment.
+      </p>
+
+      <p v-if="editing" class="muted small">Save or cancel your edits before making a decision.</p>
+
+      <div class="buttons">
+        <template v-if="isUnderReview">
+          <button type="button" class="btn approve" :disabled="busy || editing" @click="approve">
+            {{ busy && !openPanel ? 'Approving...' : 'Approve Request' }}
+          </button>
+          <button type="button" class="btn reject" :aria-expanded="openPanel === 'reject'" :disabled="busy || editing"
+            @click="togglePanel('reject')">
+            Reject Request
+          </button>
+        </template>
+        <button v-if="isApproved" type="button" class="btn approve" :disabled="busy || editing" @click="startPlanning">
+          {{ busy && !openPanel ? 'Starting...' : 'Start Planning' }}
+        </button>
+        <button v-if="canCancel" type="button" class="btn reject" :aria-expanded="openPanel === 'cancel'"
+          :disabled="busy || editing" @click="togglePanel('cancel')">
+          Cancel Event
+        </button>
+      </div>
+
+      <form v-if="openPanel === 'reject'" class="panel panel-reject" @submit.prevent="reject">
+        <label for="reject-reason">Reason for rejecting</label>
+        <textarea id="reject-reason" v-model="rejectReason" rows="3"
+          placeholder="Tell the organiser why, so they know what to change before resubmitting." />
+        <div class="panel-actions">
+          <button type="submit" class="btn small reject-solid" :disabled="busy">
+            {{ busy ? 'Rejecting...' : 'Confirm Rejection' }}
+          </button>
+          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reject')">Cancel</button>
+        </div>
+      </form>
+
+      <form v-if="openPanel === 'cancel'" class="panel panel-reject" @submit.prevent="cancelEvent">
+        <label for="cancel-reason">Reason for cancelling</label>
+        <textarea id="cancel-reason" v-model="cancelReason" rows="3"
+          placeholder="e.g. no suitable venue for the requested date. The organiser will see this." />
+        <p class="muted small">
+          This cancels this session only. Any equipment reserved for it is released for other events.
+          It can't be undone.
+        </p>
+        <div class="panel-actions">
+          <button type="submit" class="btn small reject-solid" :disabled="busy">
+            {{ busy ? 'Cancelling...' : 'Confirm Cancellation' }}
+          </button>
+          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('cancel')">
+            Keep Event
+          </button>
+        </div>
+      </form>
+
+      <p v-if="error && !review" class="error" role="alert">{{ error }}</p>
+      <p v-if="success" class="success" role="status">{{ success }}</p>
+    </section>
 
     <section aria-labelledby="conversation-heading" class="stack">
       <div>
@@ -454,65 +538,6 @@ function cancelEvent() {
         </div>
       </template>
     </section>
-
-    <section class="decision" aria-labelledby="decision-heading">
-      <h2 id="decision-heading">Your Decision</h2>
-
-      <p v-if="!isUnderReview" class="muted">
-        This request is {{ statusLabel(event.status).toLowerCase() }}, so there's nothing to approve or reject.
-      </p>
-
-      <p v-if="editing" class="muted small">Save or cancel your edits before making a decision.</p>
-
-      <div class="buttons">
-        <template v-if="isUnderReview">
-          <button type="button" class="btn approve" :disabled="busy || editing" @click="approve">
-            {{ busy && !openPanel ? 'Approving...' : 'Approve Request' }}
-          </button>
-          <button type="button" class="btn reject" :aria-expanded="openPanel === 'reject'" :disabled="busy || editing"
-            @click="togglePanel('reject')">
-            Reject Request
-          </button>
-        </template>
-        <button v-if="canCancel" type="button" class="btn reject" :aria-expanded="openPanel === 'cancel'"
-          :disabled="busy || editing" @click="togglePanel('cancel')">
-          Cancel Event
-        </button>
-      </div>
-
-      <form v-if="openPanel === 'reject'" class="panel panel-reject" @submit.prevent="reject">
-        <label for="reject-reason">Reason for rejecting</label>
-        <textarea id="reject-reason" v-model="rejectReason" rows="3"
-          placeholder="Tell the organiser why, so they know what to change before resubmitting." />
-        <div class="panel-actions">
-          <button type="submit" class="btn small reject-solid" :disabled="busy">
-            {{ busy ? 'Rejecting...' : 'Confirm Rejection' }}
-          </button>
-          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reject')">Cancel</button>
-        </div>
-      </form>
-
-      <form v-if="openPanel === 'cancel'" class="panel panel-reject" @submit.prevent="cancelEvent">
-        <label for="cancel-reason">Reason for cancelling</label>
-        <textarea id="cancel-reason" v-model="cancelReason" rows="3"
-          placeholder="e.g. no suitable venue for the requested date. The organiser will see this." />
-        <p class="muted small">
-          This cancels this session only. Any equipment reserved for it is released for other events.
-          It can't be undone.
-        </p>
-        <div class="panel-actions">
-          <button type="submit" class="btn small reject-solid" :disabled="busy">
-            {{ busy ? 'Cancelling...' : 'Confirm Cancellation' }}
-          </button>
-          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('cancel')">
-            Keep Event
-          </button>
-        </div>
-      </form>
-
-      <p v-if="error && !review" class="error" role="alert">{{ error }}</p>
-      <p v-if="success" class="success" role="status">{{ success }}</p>
-    </section>
   </div>
 </template>
 
@@ -521,15 +546,23 @@ function cancelEvent() {
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 22px; color: #1f1f1f; }
+.event-summary { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 14px; }
+.event-summary dt { color: #6a6a6a; }
+.event-summary dd { margin: 0; color: #2a2a2a; white-space: pre-line; overflow-wrap: anywhere; }
 h2 { margin: 0 0 4px; font-size: 15px; color: #222; }
 .muted { color: #6b6b6b; }
 .small { font-size: 13px; margin: 0; }
 
 .status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; }
-.status-under_review { background: #f7efe1; color: #8a5a12; }
-.status-approved, .status-planning { background: #e7f0fb; color: #1f5fae; }
-.status-confirmed { background: #eaf5ec; color: #2f6b3f; }
-.status-cancelled, .status-rejected { background: #f5e6e6; color: #a33f3f; }
+.status-draft { color: #5f5f5f; background: #efefef; }
+.status-submitted { color: #6b3fa0; background: #f1ebf8; }
+.status-under_review { color: #8a6d00; background: #fff4c2; }
+.status-approved { color: #1f5a9e; background: #e4eefb; }
+.status-planning { color: #2f7a3f; background: #e4f5e8; }
+.status-confirmed { color: #0f6e6a; background: #ddf3f1; }
+.status-completed { color: #3f4a57; background: #e3e7ec; }
+.status-cancelled { color: #a3521b; background: #fcebdd; }
+.status-rejected { color: #b42318; background: #fde8e6; }
 
 .note {
   display: flex; align-items: center; gap: 8px; margin: 0;

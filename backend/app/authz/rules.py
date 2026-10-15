@@ -550,28 +550,18 @@ def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
 # checked here is the EVENT (the booking doesn't exist yet), reusing
 # EventLike/_is_assigned_coordinator exactly like event.edit does.
 #
-# Status precondition: "approved" or "planning". The Event Status
-# Management "Planning Status" story says a venue/equipment search
-# requires the event to already be in "planning" -- but nothing in this
-# codebase transitions an event TO "planning" (that's a separate,
-# unassigned sub-story; see app.events.event_service, which only ever
-# writes draft/submitted/under_review/approved/rejected). Rather than
-# make this feature unreachable until someone else ships that
-# transition, app.venues.booking_service.create_booking_request performs
-# the narrow approved -> planning transition itself, as a documented
-# side effect of starting the venue search -- directly matching the
-# story's own framing ("the Coordinator has to change the status to
-# 'planning' before... searching for a venue"). Allowing "planning" here
-# too covers a second booking request on an event already in planning
-# (e.g. a multi-session request's other sessions, or a second attempt
-# after a rejection). See docs/design-decisions.md for the full
-# reasoning and the sign-off this needed.
+# Status precondition: "planning" only. The Event Status Management
+# "Planning Status" story: "the Coordinator has to change the status to
+# 'planning' before... searching for a venue". The coordinator does that
+# themselves with Start Planning (event.start_planning, approved ->
+# planning); requesting a venue no longer moves an approved event there
+# as a side effect. See docs/design-decisions.md.
 
 
 def rule_venue_booking_create(user: Any, event: Any) -> Decision:
     if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
         return Decision.DENY_NOT_FOUND
-    if not _event_status_in(event, "approved", "planning"):
+    if not _event_status_in(event, "planning"):
         return Decision.DENY_FORBIDDEN
     return Decision.ALLOW
 

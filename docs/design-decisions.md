@@ -368,6 +368,15 @@ unrepresentable.
 
 ### `approved → planning` is a side effect of requesting a venue, not a separate feature
 
+> **Superseded (2026-10-15).** The coordinator now moves an event to
+> planning themselves with **Start Planning** (`POST
+> /events/<id>/start-planning`, a button under "Your Decision" on an
+> approved session). `rule_venue_booking_create` accepts `planning` only, and
+> `create_booking_request` no longer changes the event's status. This keeps
+> the "Planning Status" story's order (planning first, then search for a
+> venue) and lines up with IS-9, where arrangements are checked from
+> planning on. The reasoning below is kept for history.
+
 The written Event Status Management "Planning Status" story requires an
 event to already be in `planning` before a venue/equipment search starts —
 but nothing in this codebase transitions any event TO `planning`; that's a
@@ -942,6 +951,18 @@ organiser fixing a rejected session still changes only that session.
 event.edit it's `rules.explain_event_edit_denial`: the event is completed or
 cancelled, or only the assigned coordinator can update it. The Lead, who
 can view every submitted request, now gets that 403 instead of a 404.
+
+### Impacts are checked only from planning on
+
+The coordinator's update is checked against arrangements only while the
+event is in planning or confirmed (`event_update.IMPACT_CHECKED_STATUSES`).
+Under review or approved, the details are still being settled, so the
+coordinator edits freely: nothing to acknowledge and no review step on the
+page (the preview says `impacts_checked: false`). Significance is still
+recorded either way. Trade-off: a venue booking can already exist while the
+event is approved (`rule_venue_booking_create`), and an edit then is not
+flagged against it. IS-21 change requests keep the wider
+`change_impact.ARRANGED_STATUSES` (from approval on).
 
 ### Equipment impacts read the equipment requests
 

@@ -18,10 +18,13 @@ page can show the coordinator what the update touches before they commit.
            once), so a partial update is still checked against the fields
            it didn't send. Validation runs before anything is written: a
            refused update leaves the event exactly as it was.
-  impact   What the change disturbs among arrangements already made (venue
-           bookings, equipment requests, technical support, registrations;
+  impact   From planning on (IMPACT_CHECKED_STATUSES): what the change
+           disturbs among arrangements already made (venue bookings,
+           equipment requests, technical support, registrations;
            app.events.change_impact). Every affected area must be named in
-           `acknowledge_impacts` or nothing is written (409).
+           `acknowledge_impacts` or nothing is written (409). While the
+           event is under review or approved the coordinator edits freely:
+           nothing is checked or needs acknowledging.
   log      One event_logs entry: what changed (from -> to), who, when,
            "significant" or "ordinary" (event_log.SIGNIFICANT_FIELDS), and
            the impacts acknowledged.
@@ -62,6 +65,12 @@ from app.shared.errors import AppError, ValidationError
 # Statuses a coordinator's change can no longer reach (rule_event_edit's
 # _COORDINATOR_EDIT_CLOSED), applied to sibling sessions authz never saw.
 READ_ONLY_STATUSES = frozenset({"completed", "cancelled"})
+# Statuses in which the coordinator's update is checked against the
+# arrangements already made. Before planning (under review, approved) the
+# details are still being settled, so the coordinator edits them freely.
+# Narrower than change_impact.ARRANGED_STATUSES, which IS-21 change requests
+# still use from approval on.
+IMPACT_CHECKED_STATUSES = frozenset({"planning", "confirmed"})
 
 _FIELD_LABELS = {
     "name": "name",
@@ -123,6 +132,12 @@ def describe_fields(fields) -> str:
     return ", ".join(_FIELD_LABELS.get(field, field) for field in sorted(fields))
 
 
+def _impacts(event: SimpleNamespace, changes: dict) -> list[dict]:
+    if not changes or event.status not in IMPACT_CHECKED_STATUSES:
+        return []
+    return assess_change_impact(event, changes)
+
+
 def revert_to_planning(event_id: str, status: str, changed_fields, actor: str | None) -> dict | None:
     """IS-9: a change to a confirmed event's details sends it back to
     planning. Returns the updated row, or None if it wasn't confirmed."""
@@ -174,6 +189,7 @@ def preview_event_update(event: SimpleNamespace, payload) -> dict:
          "significance": "significant" | "ordinary" | None,
          "significant_fields": [...],
          "impacts": [...],            # see app.events.change_impact
+         "impacts_checked": bool,     # False before planning: edited freely
          "reverts_to_planning": bool}
 
     Raises ValidationError exactly as the update itself would."""
@@ -184,7 +200,8 @@ def preview_event_update(event: SimpleNamespace, payload) -> dict:
         "changes": {field: {"from": current.get(field), "to": value} for field, value in changes.items()},
         "significance": significance(changes),
         "significant_fields": sorted(set(changes) & SIGNIFICANT_FIELDS),
-        "impacts": assess_change_impact(event, changes) if changes else [],
+        "impacts": _impacts(event, changes),
+        "impacts_checked": event.status in IMPACT_CHECKED_STATUSES,
         "reverts_to_planning": bool(changes) and event.status == "confirmed",
     }
 
@@ -205,7 +222,7 @@ def update_event(event: SimpleNamespace, payload, updated_by: str, acknowledge_i
     if not changes:
         return dict(vars(event))
 
-    impacts = assess_change_impact(event, changes)
+    impacts = _impacts(event, changes)
     check_acknowledged(impacts, acknowledge_impacts)
 
     written = (

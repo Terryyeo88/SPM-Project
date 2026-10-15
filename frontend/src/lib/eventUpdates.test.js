@@ -27,6 +27,11 @@ describe('needsReview (IS-9: present arrangements before a significant change is
     expect(needsReview(preview({ significance: 'significant', significant_fields: ['expected_attendance'] }))).toBe(true)
   })
 
+  it('saves a significant change straight away before planning, when impacts are not checked', () => {
+    const early = preview({ significance: 'significant', significant_fields: ['expected_attendance'], impacts_checked: false })
+    expect(needsReview(early)).toBe(false)
+  })
+
   it('reviews any change that touches an arrangement', () => {
     expect(needsReview(preview({ impacts: [{ area: 'registration', issues: [] }] }))).toBe(true)
   })

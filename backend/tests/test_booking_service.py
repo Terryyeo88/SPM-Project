@@ -205,17 +205,9 @@ def test_create_booking_requires_a_venue_id(fake_db, venue_id):
 # -- create_booking_request: approved -> planning side effect ---------------
 
 
-def test_create_booking_moves_an_approved_event_to_planning(fake_db):
-    fake_db.tables["venues"] = [_venue()]
-    fake_db.tables["events"] = [{"id": "event-1", "status": "approved"}]
-    event = _event(status="approved")
-
-    service_module.create_booking_request(event, "venue-1", "coord-1")
-
-    assert fake_db.tables["events"][0]["status"] == "planning"
-
-
-def test_create_booking_does_not_touch_an_already_planning_event(fake_db):
+def test_create_booking_never_changes_the_event_status(fake_db):
+    """The coordinator moves the event to planning themselves (Start
+    Planning); requesting a venue writes nothing to the event."""
     fake_db.tables["venues"] = [_venue()]
     fake_db.tables["events"] = [{"id": "event-1", "status": "planning"}]
     event = _event(status="planning")
@@ -224,20 +216,6 @@ def test_create_booking_does_not_touch_an_already_planning_event(fake_db):
 
     assert fake_db.tables["events"][0]["status"] == "planning"
     assert not any(call["table"] == "events" for call in fake_db.calls)
-
-
-def test_create_booking_side_effect_is_conditioned_on_still_being_approved(fake_db):
-    """Same race-proofing idiom as event_service._decide: the UPDATE is
-    conditioned on status still being "approved", so a second, racing
-    booking_request call against an event already flipped to "planning"
-    is a no-op, not an error and not a double-write."""
-    fake_db.tables["venues"] = [_venue()]
-    fake_db.tables["events"] = [{"id": "event-1", "status": "planning"}]
-    event = _event(status="approved")  # caller's stale in-memory copy
-
-    service_module.create_booking_request(event, "venue-1", "coord-1")
-
-    assert fake_db.tables["events"][0]["status"] == "planning"
 
 
 # -- get_booking: computed conflict field -------------------------------------
