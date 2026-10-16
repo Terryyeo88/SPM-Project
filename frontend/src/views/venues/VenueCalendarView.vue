@@ -4,70 +4,36 @@
 // "Available" is never an entry fetched from the backend -- it's just
 // the absence of one over a period (see calendar_service.py's own
 // docstring) -- so a day with no entries below simply renders empty.
-import { computed, onMounted, ref, watch } from 'vue'
+//
+// The grid itself is components/AvailabilityCalendar.vue and the date
+// math is lib/calendar.js, shared with the equipment calendar; this view
+// owns the venue-specific parts: the fetch, the state colours and the
+// entry labels.
+import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiGet } from '../../lib/api'
+import { CALENDAR_VIEWS, rangeQuery, useCalendarRange } from '../../lib/calendar'
 import AppNavBar from '../../components/AppNavBar.vue'
+import AvailabilityCalendar from '../../components/AvailabilityCalendar.vue'
 
 const route = useRoute()
 const venueId = route.params.venueId
 
-const view = ref('month') // 'month' | 'week' | 'day'
-const anchor = ref(startOfDay(new Date()))
+const { view, anchor, range, label: rangeLabel, step, goToday } = useCalendarRange('month')
 
 const venue = ref(null)
 const entries = ref([])
 const loading = ref(true)
 const error = ref('')
 
-function startOfDay(d) {
-  const copy = new Date(d)
-  copy.setHours(0, 0, 0, 0)
-  return copy
-}
-function toISODate(d) {
-  return d.toISOString().slice(0, 10)
-}
-function addDays(d, n) {
-  const copy = new Date(d)
-  copy.setDate(copy.getDate() + n)
-  return copy
-}
-
-// [start, end) for the currently selected view, anchored on `anchor`.
-const range = computed(() => {
-  if (view.value === 'day') {
-    return { start: anchor.value, end: addDays(anchor.value, 1) }
-  }
-  if (view.value === 'week') {
-    const dow = anchor.value.getDay() // 0 = Sunday
-    const start = addDays(anchor.value, -dow)
-    return { start, end: addDays(start, 7) }
-  }
-  // month: first of month to first of next month
-  const start = new Date(anchor.value.getFullYear(), anchor.value.getMonth(), 1)
-  const end = new Date(anchor.value.getFullYear(), anchor.value.getMonth() + 1, 1)
-  return { start, end }
-})
-
-const rangeLabel = computed(() => {
-  const { start, end } = range.value
-  if (view.value === 'month') {
-    return start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  }
-  const lastDay = addDays(end, -1)
-  return `${start.toLocaleDateString()} – ${lastDay.toLocaleDateString()}`
-})
-
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const { start, end } = range.value
     // Backend range is inclusive of `end`'s whole day (see
-    // calendar_service.get_venue_calendar) -- pass the last included
-    // day, not the exclusive day-after boundary used internally above.
-    const data = await apiGet(`/venues/${venueId}/calendar?start=${toISODate(start)}&end=${toISODate(addDays(end, -1))}`)
+    // calendar_service.get_venue_calendar) -- rangeQuery passes the last
+    // included day, not the exclusive day-after boundary of `range`.
+    const data = await apiGet(`/venues/${venueId}/calendar?${rangeQuery(range.value)}`)
     venue.value = data.venue
     entries.value = data.entries
   } catch (requestError) {
@@ -80,19 +46,13 @@ async function load() {
 watch([view, anchor], load)
 onMounted(load)
 
-function step(delta) {
-  if (view.value === 'day') anchor.value = addDays(anchor.value, delta)
-  else if (view.value === 'week') anchor.value = addDays(anchor.value, delta * 7)
-  else anchor.value = new Date(anchor.value.getFullYear(), anchor.value.getMonth() + delta, 1)
-}
-function goToday() {
-  anchor.value = startOfDay(new Date())
-}
-
-const STATE_LABELS = {
-  tentatively_held: 'Tentatively held',
-  confirmed: 'Confirmed',
-  blocked: 'Blocked',
+// In legend order. These are the calendar's own colours, unchanged from
+// before the extraction -- see docs/open-questions.md on why they are not
+// (yet) the event-status palette.
+const STATES = {
+  tentatively_held: { label: 'Tentatively held', color: '#1f5fae', background: '#e4eefb' },
+  confirmed: { label: 'Confirmed', color: '#2f6b3f', background: '#eaf5ec' },
+  blocked: { label: 'Blocked', color: '#a33f3f', background: '#f5e6e6' },
 }
 const REASON_LABELS = {
   maintenance: 'Maintenance',
@@ -106,40 +66,6 @@ function entryLabel(entry) {
   if (entry.type === 'block') return REASON_LABELS[entry.reason] || 'Blocked'
   return entry.event_name || 'Booked'
 }
-function timeLabel(iso) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
-
-// -- month grid: one cell per day, with blanks padding to a full week --
-const monthCells = computed(() => {
-  if (view.value !== 'month') return []
-  const { start, end } = range.value
-  const blanksBefore = start.getDay()
-  const daysInMonth = Math.round((end - start) / 86400000)
-  const cellsByDay = new Map()
-  for (let i = 0; i < daysInMonth; i++) cellsByDay.set(i + 1, [])
-
-  for (const entry of entries.value) {
-    const entryStart = new Date(entry.start)
-    if (entryStart.getFullYear() === start.getFullYear() && entryStart.getMonth() === start.getMonth()) {
-      const bucket = cellsByDay.get(entryStart.getDate())
-      if (bucket) bucket.push(entry)
-    }
-  }
-
-  const cells = []
-  for (let i = 0; i < blanksBefore; i++) cells.push({ blank: true })
-  for (let day = 1; day <= daysInMonth; day++) {
-    cells.push({ blank: false, day, entries: cellsByDay.get(day) })
-  }
-  return cells
-})
-
-// -- day/week view: a flat, time-ordered list --
-const listEntries = computed(() => {
-  if (view.value === 'month') return []
-  return [...entries.value].sort((a, b) => a.start.localeCompare(b.start))
-})
 </script>
 
 <template>
@@ -153,7 +79,7 @@ const listEntries = computed(() => {
           <h1 class="title">{{ venue ? `${venue.name} — Availability` : 'Venue Availability' }}</h1>
           <div class="view-tabs" role="group" aria-label="Calendar view">
             <button
-              v-for="v in ['day', 'week', 'month']"
+              v-for="v in CALENDAR_VIEWS"
               :key="v"
               type="button"
               class="tab"
@@ -181,32 +107,14 @@ const listEntries = computed(() => {
             these hours are unavailable.
           </p>
 
-          <div v-if="view === 'month'" class="month-grid">
-            <div v-for="d in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']" :key="d" class="day-header">{{ d }}</div>
-            <div v-for="(cell, i) in monthCells" :key="i" class="day-cell" :class="{ blank: cell.blank }">
-              <template v-if="!cell.blank">
-                <span class="day-number">{{ cell.day }}</span>
-                <span v-for="(entry, j) in cell.entries" :key="j" class="entry-pill" :class="`state-${entry.state}`">
-                  {{ entryLabel(entry) }}
-                </span>
-              </template>
-            </div>
-          </div>
-
-          <div v-else class="list">
-            <p v-if="listEntries.length === 0" class="message">No bookings or blocked periods in this range.</p>
-            <div v-for="(entry, i) in listEntries" :key="i" class="list-row">
-              <span class="entry-pill" :class="`state-${entry.state}`">{{ STATE_LABELS[entry.state] }}</span>
-              <span class="list-main">{{ entryLabel(entry) }}</span>
-              <span class="list-time">{{ timeLabel(entry.start) }} – {{ timeLabel(entry.end) }}</span>
-            </div>
-          </div>
-
-          <div class="legend">
-            <span class="legend-item"><span class="dot state-tentatively_held"></span>Tentatively held</span>
-            <span class="legend-item"><span class="dot state-confirmed"></span>Confirmed</span>
-            <span class="legend-item"><span class="dot state-blocked"></span>Blocked</span>
-          </div>
+          <AvailabilityCalendar
+            :view="view"
+            :range="range"
+            :entries="entries"
+            :states="STATES"
+            :entry-label="entryLabel"
+            empty-message="No bookings or blocked periods in this range."
+          />
         </template>
       </div>
     </main>
@@ -238,33 +146,4 @@ const listEntries = computed(() => {
 .message { margin: 0; padding: 16px 0; font-size: 14px; color: #8a8a8a; }
 .error { color: #b42318; }
 
-.month-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #e6e6e6; border: 1px solid #e6e6e6;
-  border-radius: 4px; overflow: hidden;
-}
-.day-header { background: #f7f7f7; padding: 6px 8px; font-size: 10px; font-weight: 700; color: #9a9a9a; text-align: center; }
-.day-cell { background: #ffffff; min-height: 62px; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; }
-.day-cell.blank { background: #f9f9f9; }
-.day-number { font-size: 11px; color: #555555; }
-
-.entry-pill {
-  font-size: 9px; font-weight: 600; border-radius: 6px; padding: 1px 4px; display: inline-block; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-}
-.state-tentatively_held { color: #1f5fae; background: #e4eefb; }
-.state-confirmed { color: #2f6b3f; background: #eaf5ec; }
-.state-blocked { color: #a33f3f; background: #f5e6e6; }
-
-.list { background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 4px 18px; box-sizing: border-box; }
-.list-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px dashed #e2e2e2; font-size: 13px; }
-.list-row:last-child { border-bottom: none; }
-.list-main { flex: 1 1 auto; color: #2a2a2a; font-weight: 600; }
-.list-time { color: #8a8a8a; }
-
-.legend { display: flex; align-items: center; gap: 16px; font-size: 11px; color: #8a8a8a; }
-.legend-item { display: flex; align-items: center; gap: 4px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.state-tentatively_held { background: #1f5fae; }
-.dot.state-confirmed { background: #2f6b3f; }
-.dot.state-blocked { background: #a33f3f; }
 </style>

@@ -717,3 +717,22 @@ in docs/design-decisions.md; please confirm or correct:
 - **No notification** to the organiser or to Venue/Technical Support Staff
   when a significant change affects their arrangements; depends on the
   Notification System story.
+
+## Shared calendar extraction (16 Oct)
+
+- **Test gap: no venue calendar test pins the overlap boundary.** In a hand
+  mutation test, each `<` in `app.shared.calendar.spans_overlap` was flipped
+  to `<=`, one at a time. All 20 tests in `test_calendar_service.py`,
+  `test_venue_calendar_routes.py` and `test_authz_venue_calendar.py` still
+  passed: none of their entries starts or ends exactly on a range edge.
+  Only the new `test_shared_calendar.py` caught the mutants. Should the
+  IS-11 tests gain a boundary case (Nawaz's call, as they are the venue
+  calendar's specification)?
+
+- **Calendar colours vs the event-status palette.** The venue calendar's
+  state colours (tentatively held `#1f5fae`, confirmed `#2f6b3f`, blocked
+  `#a33f3f`) match none of the event-status palette IS-9 spread to the
+  dashboards (e.g. confirmed is `#0f6e6a` there). The extraction kept the
+  calendar's colours so nothing visibly changed. Should calendars adopt the
+  palette (Nawaz / Aaralyn), and should that palette become one shared file
+  instead of four copies?
