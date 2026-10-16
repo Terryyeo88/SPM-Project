@@ -261,6 +261,24 @@ reset`, CLI 2.118.0):
   only on `supabase/seed.sql`, not on anything specific to the shared
   project.
 
+### Re-verified by `supabase db reset` (2026-10-16)
+
+`npx supabase db reset` from empty succeeded on 2026-10-16 with all 17
+migrations (through `20261015000000_event_logs_significance.sql`) and
+`supabase/seed.sql`.
+
+`seed.sql` now also seeds equipment requests and reservations: three
+confirmed requests, for the Annual Tech Symposium and both Community
+Workshop sessions. Each reservation is worked out from its parent event's
+own dates and times (the Symposium's from the evening before its start
+date; each Workshop session's an hour either side of its times). They
+therefore track their event on any reset date. Because the Workshop
+sessions are dated relative to the day of the reset, the reservations may
+fall in different calendar months. This was checked with a second reset,
+with the session offsets moved 76 days forward to simulate a later reset:
+every reservation still landed on its event's day, and
+`equipment_reservations_no_unit_overlap` still held.
+
 Not verified: parity of the non-PostgREST objects (the function, triggers,
 indexes, RLS policies and constraints) *against live*. The local side was
 catalogued, but live's catalog needs a direct Postgres connection
