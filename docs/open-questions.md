@@ -266,12 +266,12 @@ decisions worth double-checking.
   open and has merge conflicts. IS-16 is not built until #18 merges, so we
   don't write a second version of Josiah's table.
 
-- **PR #18's migration timestamp is already used on main.** PR #18 adds
-  `20261004000000_venue_bookings.sql`. Main already has
-  `20261004000000_coordinator_lead_role.sql`. Supabase identifies migrations
-  by that number, so two files sharing it will clash on `db reset`. Git
-  won't flag this because the file names differ. The PR's file needs a new,
-  later timestamp before it merges.
+- **Resolved (1dc8dfb, 5 Oct): PR #18's migration timestamp was already
+  used on main.** PR #18 added `20261004000000_venue_bookings.sql`. Main
+  already had `20261004000000_coordinator_lead_role.sql`. Supabase
+  identifies migrations by that number, so two files sharing it would clash
+  on `db reset`. Git doesn't flag this because the file names differ.
+  Commit 1dc8dfb renamed the file to `20261005100000_venue_bookings.sql`.
 
 - **What IS-16 will build on once #18 merges.** PR #18 already stores the
   occupied period (`booking_start`/`booking_end`, including setup and
@@ -284,13 +284,16 @@ decisions worth double-checking.
   for now. Either way it stops blocking, because only confirmed rows are
   covered by the constraint.
 
-- **IS-47 has no data to read.** There are no `equipment` or
-  `equipment_reservations` tables in migrations or on the live database.
-  Equipment exists only as a free-form `events.equipment_needed` jsonb list.
-  Question for Justin (PO): which story creates the equipment inventory and
-  reservations, and what should the calendar show (per item or per type,
-  quantity or just booked/free, which roles can see it)? IS-47 needs those
-  answers before it can be built.
+- **IS-47's data.**
+  - **Resolved: per unit, not per type.** `20261008000000_equipment.sql`
+    (IS-18) tracks equipment at unit level, following IS-18's AC. Its
+    `equipment_reservations` table names one physical unit per row. That
+    migration also created the inventory and reservation tables this item
+    said were missing.
+  - **Still open, for Justin (PO):** which story creates the reservations
+    (nothing in the app writes them yet), and what the calendar should show
+    (quantity or just booked/free, which roles can see it). IS-47 needs
+    those answers before it can be built.
 
 ## Booking conflicts (IS-16)
 
