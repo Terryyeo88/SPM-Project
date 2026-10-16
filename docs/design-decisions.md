@@ -1057,3 +1057,16 @@ offsets.
   after Today, all with entries in every state. It is identical once
   scoped-style hashes and the new inline colour styles are ignored, and
   those inline colours equal the old CSS values.
+
+### Coverage is not a test of the boundary
+
+`spans_overlap` in `app/shared/calendar.py` reached 100% line and branch
+coverage from the IS-11 venue calendar tests alone. In a hand mutation
+test, each of its two `<` comparisons was changed to `<=`, one mutant at a
+time. All 20 IS-11 tests passed against both mutants, so the IS-11 suite
+killed 0 of 2. Only the new `test_shared_calendar.py`, which has entries
+ending exactly on a range edge, caught them. Coverage showed that every
+line ran, not that any test would notice the half-open boundary changing.
+This is why the team treats a hand mutation test as a Definition of Done
+item rather than relying on a coverage number. The gap in the IS-11 tests
+themselves is in docs/open-questions.md.
