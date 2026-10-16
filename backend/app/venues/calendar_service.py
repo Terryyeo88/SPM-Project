@@ -32,10 +32,10 @@ for the overlap guard, reused here for the same reason.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime
 
 from app.extensions import supabase
-from app.shared.errors import ValidationError
+from app.shared.calendar import calendar_envelope, parse_calendar_range
 from app.venues.venue_service import get_venue
 
 # Mirrors booking_service._BLOCKING_STATUSES -- not imported, because
@@ -44,13 +44,6 @@ from app.venues.venue_service import get_venue
 # internals, same stance booking_service's own _event_window docstring
 # already takes on duplicating coordinator_service's helper.
 _HELD_BOOKING_STATUSES = ("confirmed",)
-
-
-def _parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValidationError(f"'{value}' is not a valid date (expected YYYY-MM-DD).") from exc
 
 
 def _parse_timestamptz(value: str) -> datetime:
@@ -68,24 +61,20 @@ def get_venue_calendar(venue_id: str, start: str, end: str) -> dict:
 
     Returns the venue's profile fields (so a caller doesn't need a
     second round trip for name/operating hours), plus the entry list.
+
+    Range parsing, the overlap test and the response shape come from
+    app.shared.calendar; the queries and the state of each entry are
+    venue-specific and stay here.
     """
-    start_date = _parse_date(start)
-    end_date = _parse_date(end)
-    if end_date < start_date:
-        raise ValidationError("end must not be before start.")
+    calendar_range = parse_calendar_range(start, end)
 
     venue = get_venue(venue_id)
 
-    # Half-open [range_start, range_end) in UTC-naive terms is good
-    # enough here for the overlap filter below -- the DB round trip
-    # queries don't need to be timezone-exact, only to over-fetch
-    # slightly (a whole extra day at each edge) rather than under-fetch;
-    # the precise overlap check against each row's own timestamptz
-    # happens in Python afterwards, same two-stage pattern
+    # The DB round trips below fetch every row for the venue; the overlap
+    # check against each row's own timestamptz happens in Python
+    # afterwards (calendar_range.overlaps), same two-stage pattern
     # booking_service._confirmed_overlap_exists already uses (fetch by
     # venue_id, then filter spans in Python).
-    range_start = datetime.combine(start_date, time.min)
-    range_end = datetime.combine(end_date, time.max)
 
     entries = []
 
@@ -99,7 +88,7 @@ def get_venue_calendar(venue_id: str, start: str, end: str) -> dict:
     for row in blocks_result.data or []:
         block_start = _parse_timestamptz(row["block_start"])
         block_end = _parse_timestamptz(row["block_end"])
-        if block_start.replace(tzinfo=None) < range_end and range_start < block_end.replace(tzinfo=None):
+        if calendar_range.overlaps(block_start, block_end):
             entries.append(
                 {
                     "type": "block",
@@ -130,7 +119,7 @@ def get_venue_calendar(venue_id: str, start: str, end: str) -> dict:
     for row in bookings_result.data or []:
         booking_start = _parse_timestamptz(row["booking_start"])
         booking_end = _parse_timestamptz(row["booking_end"])
-        if not (booking_start.replace(tzinfo=None) < range_end and range_start < booking_end.replace(tzinfo=None)):
+        if not calendar_range.overlaps(booking_start, booking_end):
             continue
         event = row.get("events") or {}
         state = "confirmed" if event.get("status") == "confirmed" else "tentatively_held"
@@ -147,13 +136,14 @@ def get_venue_calendar(venue_id: str, start: str, end: str) -> dict:
 
     entries.sort(key=lambda entry: entry["start"])
 
-    return {
-        "venue": {
+    return calendar_envelope(
+        "venue",
+        {
             "id": venue["id"],
             "name": venue["name"],
             "operating_hours_start": venue.get("operating_hours_start"),
             "operating_hours_end": venue.get("operating_hours_end"),
         },
-        "range": {"start": start, "end": end},
-        "entries": entries,
-    }
+        calendar_range,
+        entries,
+    )

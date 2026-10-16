@@ -971,3 +971,89 @@ session with a pending or confirmed request is a "conflict" naming the
 request's period. Without a request it stays a "check manually", as before.
 Technical support is still "check manually" -- there are no assignment
 records yet.
+
+## Shared calendar module (refactor, 2026-10-16)
+
+Owner sign-off: Nawaz owns `backend/app/venues/calendar_service.py` and
+`frontend/src/views/venues/VenueCalendarView.vue` (IS-11) and gave explicit
+sign-off for this refactor (relayed by Terry, 2026-10-16). Not IS-47: it
+only moves the venue calendar's domain-neutral parts somewhere the equipment
+calendar can reuse them. The IS-11 tests (`test_calendar_service.py`,
+`test_venue_calendar_routes.py`, `test_authz_venue_calendar.py`) were the
+specification and pass unchanged.
+
+### What was extracted
+
+- **Backend, `backend/app/shared/calendar.py`.** `app/shared/` already held
+  the cross-domain error types, so the module sits next to them rather than
+  in a new `app/common/` package.
+  - `parse_calendar_range(start, end)`: YYYY-MM-DD parsing, the 400 on a
+    malformed date or an end before the start (same messages), and the
+    whole-day widening, `time.min` on the start day to `time.max` on the end
+    day, so `end` is an inclusive day.
+  - `spans_overlap(a_start, a_end, b_start, b_end)`: half-open overlap.
+  - `CalendarRange.overlaps(entry_start, entry_end)`: the calendar's own
+    use of it. It drops the entry's UTC offset and compares wall-clock time
+    with the naive range, exactly as the inline check in
+    `get_venue_calendar` did.
+  - `calendar_envelope(resource_key, resource, range, entries)`: the
+    `{<resource_key>: {...}, range: {start, end}, entries: [...]}` shape.
+    The key is a parameter, because the venue response's key is `venue`
+    and the tests assert it.
+- **Frontend.** `frontend/src/lib/calendar.js` holds the date math (range
+  per view, the range label, stepping, the backend query with its
+  inclusive end day, month cells, list ordering) plus a `useCalendarRange`
+  composable. `frontend/src/components/AvailabilityCalendar.vue` is the
+  month grid, day/week list and legend. The caller passes the entries, the
+  view and range, a state -> `{label, color, background}` map, and an
+  `entryLabel(entry)` function.
+
+### What deliberately was not
+
+- **Each domain's queries and states.** `calendar_service` keeps its
+  `venue_blocks` / `venue_bookings` queries, the confirmed vs
+  tentatively_held mapping, the entry sort, and its own
+  `_parse_timestamptz`.
+- **The view's header.** Title, view tabs, prev/next/today and the
+  operating-hours note stay in `VenueCalendarView.vue`, driven by
+  `useCalendarRange`. The component is only what renders entries.
+- **The equipment helpers.** `equipment_service._parse_timestamptz` and
+  `_spans_overlap` stay where they are (next section).
+- **The colours.** The calendar keeps its own three state colours, now
+  passed in by the view instead of set in CSS. The ticket asked for IS-9's
+  status palette, but that palette is the event-status set (`.status-draft`
+  ... `.status-rejected`, from `styles/event-form.css` and copied into the
+  two dashboards and `CoordinatorEventReview` by IS-9). None of its colours
+  match the calendar's, and the rendering had to stay identical, so Terry
+  chose identical rendering. The palette question is in
+  docs/open-questions.md.
+
+### Equipment helpers compared: not unified
+
+The two pairs differ, so both stay:
+
+| | venue calendar | `equipment_service` |
+|---|---|---|
+| timestamp parsing | `"Z"` -> `+00:00`; a value with no offset stays naive | same, but a value with no offset is read as UTC |
+| overlap | offsets dropped; wall-clock time compared with a naive day range | aware datetimes compared as instants |
+| boundary | strict `<` both sides (half-open) | strict `<` both sides (half-open) |
+
+The boundary rule is the same, but timezone and null-offset handling are
+not. Folding equipment onto the calendar's version would change which
+reservations count as overlapping a request that crosses an offset. The
+bare predicate `a_start < b_end and b_start < a_end` is textually the same
+in both (and in `booking_service._spans_overlap`). Merging only that line
+is left for IS-47 to decide once it knows how its calendar should treat
+offsets.
+
+### Verified identical
+
+- **Backend.** The full suite passes apart from one integration test that
+  fails identically on unmodified `origin/main` (unrelated:
+  `test_event_change_requests_integration.py`, IS-9's confirmed -> planning
+  revert).
+- **Frontend.** The venue calendar's rendered HTML was captured before and
+  after the change in month, week and day views, after next/previous, and
+  after Today, all with entries in every state. It is identical once
+  scoped-style hashes and the new inline colour styles are ignored, and
+  those inline colours equal the old CSS values.
