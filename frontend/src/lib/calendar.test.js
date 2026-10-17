@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, monthCells, rangeFor, rangeQuery, sortedByStart, stepAnchor, useCalendarRange } from './calendar'
+import {
+  addDays,
+  monthCells,
+  rangeFor,
+  rangeQuery,
+  sortedByStart,
+  stepAnchor,
+  useCalendarRange,
+  widenRange,
+} from './calendar'
 
 // Local-time dates throughout, like the calendar itself.
 const day = (y, m, d) => new Date(y, m - 1, d)
@@ -56,6 +65,37 @@ describe('monthCells', () => {
   })
 })
 
+describe('monthCells with spanDays (equipment calendar, IS-47 AC5)', () => {
+  const october = rangeFor('month', day(2026, 10, 1))
+  const at = (d, h = 0, m = 0) => new Date(2026, 9, d, h, m).toISOString()
+  const daysWith = (cells, entry) => cells.filter((cell) => !cell.blank && cell.entries.includes(entry)).map((cell) => cell.day)
+
+  it('marks every day a multi-day entry covers', () => {
+    const entry = { start: at(9, 18), end: at(11, 12) }
+    expect(daysWith(monthCells(october, [entry], { spanDays: true }), entry)).toEqual([9, 10, 11])
+  })
+
+  it('treats the end as exclusive: ending at midnight does not mark the next day', () => {
+    const entry = { start: at(9, 18), end: at(11, 0) }
+    expect(daysWith(monthCells(october, [entry], { spanDays: true }), entry)).toEqual([9, 10])
+  })
+
+  it('marks the days of this month only, for an entry that began last month or runs into the next', () => {
+    const fromSeptember = { start: new Date(2026, 8, 29, 9).toISOString(), end: at(2, 12) }
+    const intoNovember = { start: at(30, 9), end: new Date(2026, 10, 2, 12).toISOString() }
+    const cells = monthCells(october, [fromSeptember, intoNovember], { spanDays: true })
+    expect(daysWith(cells, fromSeptember)).toEqual([1, 2])
+    expect(daysWith(cells, intoNovember)).toEqual([30, 31])
+  })
+
+  it('a same-day entry is marked once, and the default (venue) still marks only the start day', () => {
+    const sameDay = { start: at(15, 9), end: at(15, 13) }
+    const multiDay = { start: at(9, 18), end: at(11, 12) }
+    expect(daysWith(monthCells(october, [sameDay], { spanDays: true }), sameDay)).toEqual([15])
+    expect(daysWith(monthCells(october, [multiDay]), multiDay)).toEqual([9])
+  })
+})
+
 describe('sortedByStart', () => {
   it('orders by start without changing the input', () => {
     const entries = [{ start: '2026-10-02T00:00:00Z' }, { start: '2026-10-01T00:00:00Z' }]
@@ -78,5 +118,13 @@ describe('useCalendarRange', () => {
 
     calendar.view.value = 'month'
     expect(calendar.label.value).toBe(day(2026, 10, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))
+  })
+})
+
+describe('widenRange', () => {
+  it('adds a day on each side without changing the input', () => {
+    const range = rangeFor('month', day(2026, 11, 1))
+    expect(widenRange(range)).toEqual({ start: day(2026, 10, 31), end: day(2026, 12, 2) })
+    expect(range).toEqual({ start: day(2026, 11, 1), end: day(2026, 12, 1) })
   })
 })

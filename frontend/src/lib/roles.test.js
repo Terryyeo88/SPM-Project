@@ -194,8 +194,14 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF]).sort()).toEqual(['equipment', 'equipment-requests'])
   })
 
-  it('the equipment routes are reachable by technical_support_staff only; the two detail pages are not nav links', () => {
-    const equipmentRoutes = ['equipment', 'equipment-requests', 'equipment-request-details', 'equipment-details']
+  it('the equipment routes are reachable by technical_support_staff only; the detail pages are not nav links', () => {
+    const equipmentRoutes = [
+      'equipment',
+      'equipment-requests',
+      'equipment-request-details',
+      'equipment-details',
+      'equipment-calendar',
+    ]
     for (const route of equipmentRoutes) {
       expect(reachableRoutes([ROLES.TECHNICAL_SUPPORT_STAFF])).toContain(route)
       for (const role of [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF, ROLES.ATTENDEE]) {
@@ -204,6 +210,13 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     }
     expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).not.toContain('equipment-request-details')
     expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).not.toContain('equipment-details')
+    expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF])).not.toContain('equipment-calendar')
+  })
+
+  it('the equipment calendar (IS-47) is technical_support_staff only -- unlike the venue calendar, not coordinators or venue_staff', () => {
+    for (const role of [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD, ROLES.VENUE_STAFF]) {
+      expect(reachableRoutes([role])).not.toContain('equipment-calendar')
+    }
   })
 
   it('a multi-role user (coordinator + venue_staff) sees the UNION, not just one role\'s links', () => {

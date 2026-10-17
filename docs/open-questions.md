@@ -290,10 +290,14 @@ decisions worth double-checking.
     `equipment_reservations` table names one physical unit per row. That
     migration also created the inventory and reservation tables this item
     said were missing.
+  - **Built anyway (IS-47, 16 Oct), on these readings -- please confirm:**
+    the calendar is per unit and shows booked/free (a reserved day names
+    the event). It is visible to Technical Support Staff only. It reads
+    reservations, which `supabase/seed.sql` provides for demos. See "View
+    Equipment Availability Calendar (IS-47)" below.
   - **Still open, for Justin (PO):** which story creates the reservations
-    (nothing in the app writes them yet), and what the calendar should show
-    (quantity or just booked/free, which roles can see it). IS-47 needs
-    those answers before it can be built.
+    (nothing in the app writes them yet), and whether coordinators should
+    see equipment calendars too.
 
 ## Booking conflicts (IS-16)
 
@@ -736,3 +740,80 @@ in docs/design-decisions.md; please confirm or correct:
   calendar's colours so nothing visibly changed. Should calendars adopt the
   palette (Nawaz / Aaralyn), and should that palette become one shared file
   instead of four copies?
+
+## View Equipment Availability Calendar (IS-47, 16 Oct)
+
+- **Should Event Coordinators see equipment calendars too?** (for Justin)
+  It is built for Technical Support Staff only, matching
+  `equipment.list` / `equipment.view`. The venue calendar also admits
+  coordinators. If yes, it is a one-line change: one more `_has_role` in
+  `rules.py::rule_equipment_calendar_view`, plus the role in
+  `ROUTE_ACCESS` `equipment-calendar`.
+
+- **No "pending" state on the calendar.** A pending `equipment_request`
+  names a type and a quantity, not a unit; a unit is allocated only when
+  its `equipment_reservations` row is created. There is nothing to place on
+  one unit's calendar. The venue calendar leaves pending bookings out for
+  the same reason. Showing pending demand would need a per-type view, a
+  different screen.
+
+- **No under-maintenance periods on the calendar.** There is no equipment
+  equivalent of `venue_blocks`: `equipment_units.status` is one current
+  value with no dates. The status is shown as a pill; maintenance windows
+  would need a new table.
+
+- **No location.** IS-47's AC2 and the wireframe show the unit's
+  location, but `equipment_units` has no location column, and the ticket
+  ruled out schema changes. AC2 is met except for location. Should units
+  get a location (free text, or a venue reference)?
+
+- **Calendar range is a day off in UTC+8 -- the venue calendar is
+  affected now.** `lib/calendar.js::toISODate` uses `toISOString()`, so
+  local midnight in Singapore becomes the previous UTC date. The venue
+  calendar's November query is `2026-10-31..2026-11-29`. The backend
+  (`CalendarRange.overlaps`) compares the UTC times PostgREST returns
+  against those days, so on the venue calendar:
+  - a booking on the last day of the month after 08:00 SGT is missing
+    from the month view;
+  - in the day view, a booking after 08:00 on the chosen day is missing,
+    and the previous day's late bookings are shown instead.
+
+  Fixing only the dates moves the gap to the first day's 00:00-08:00. The
+  equipment calendar works around it by asking for a day more on each side
+  (`widenRange`). The real fix is in the shared code: interpret calendar
+  days as Singapore days on the backend, and send local dates from the
+  frontend. That changes the venue calendar, so it needs Nawaz's sign-off.
+
+- **Mutation test result.** Each `<` in `spans_overlap` (the comparison
+  the equipment calendar filters with) was flipped to `<=` in turn, and
+  both mutants were killed by the new boundary tests. One finding: the
+  range ends at `time.max` (23:59:59.999999), not at the next midnight. A
+  reservation starting at the next midnight is excluded under both the
+  original and the mutant, so that test alone would NOT have caught
+  `a_start <= b_end`. The test that does starts at 23:59:59.999999 exactly
+  (`test_reservation_starting_at_the_ranges_last_instant_is_excluded`). No
+  gap remains for this path.
+
+- **Waiting on Nawaz: the link from the equipment detail page.** It is
+  the only change to an IS-18 file (`EquipmentDetailView.vue`), in its own
+  commit marked `[PENDING NAWAZ'S SIGN-OFF]`. Drop that commit if he says
+  no; the calendar is then reached by URL only.
+
+- **Please confirm these calls IS-47 made where the ticket was silent**
+  (reasoning in docs/design-decisions.md, "View Equipment Availability
+  Calendar (IS-47)"):
+  - **Status pill wording.** It uses the inventory's existing labels
+    ("In service" / "Under maintenance" / "Retired"), not the wireframe's
+    "Operational / Maintenance / Retired", so a status reads the same on
+    every equipment page.
+  - **Reserved days are green,** the venue calendar's "confirmed"
+    colours, and an event with no name shows as "Reserved".
+  - **A "Today" button** sits beside previous/next, as on the venue
+    calendar. The wireframe shows only previous/next.
+  - **A multi-day reservation is marked on every day it covers, with its
+    end exclusive:** one ending at midnight does not mark the next day.
+  - **The page asks for one day more than the month on each side**
+    (`widenRange`), to work around the UTC+8 range defect above.
+  - **The calendar route is its own blueprint**
+    (`app/equipment/calendar_routes.py`), so IS-18's `routes.py` is
+    untouched.

@@ -7,6 +7,7 @@ import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListView from '../views/events/EventsListView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import EquipmentCalendarView from '../views/equipment/EquipmentCalendarView.vue'
 import EquipmentDetailView from '../views/equipment/EquipmentDetailView.vue'
 import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vue'
 import EquipmentRequestDetailView from '../views/equipment/EquipmentRequestDetailView.vue'
@@ -140,6 +141,13 @@ const routes = [
     name: 'equipment-details',
     component: EquipmentDetailView,
     meta: { roles: _rolesByRouteName.get('equipment-details') },
+  },
+  // View Equipment Availability Calendar (IS-47).
+  {
+    path: '/equipment/:equipmentId/calendar',
+    name: 'equipment-calendar',
+    component: EquipmentCalendarView,
+    meta: { roles: _rolesByRouteName.get('equipment-calendar') },
   },
 ]
 

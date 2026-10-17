@@ -1088,3 +1088,93 @@ line ran, not that any test would notice the half-open boundary changing.
 This is why the team treats a hand mutation test as a Definition of Done
 item rather than relying on a coverage number. The gap in the IS-11 tests
 themselves is in docs/open-questions.md.
+
+## View Equipment Availability Calendar (IS-47, Sprint 3, 2026-10-16)
+
+Built on the shared calendar pieces from PR #32. Backend:
+`app/equipment/calendar_service.py` and `GET /equipment/<id>/calendar`.
+Frontend: `EquipmentCalendarView.vue` on `AvailabilityCalendar` and
+`lib/calendar.js`. No schema change. Built to the ticket's own
+requirements, then checked against `docs/definition-of-done.md` (added in
+the same PR) before it was committed.
+
+### Not editing IS-18's files
+
+`app/equipment/routes.py` and `EquipmentDetailView.vue` are Nawaz's (IS-18).
+The DoD asks for the owner's sign-off before a change to them lands, so:
+
+- **The route has its own blueprint**, `app/equipment/calendar_routes.py`,
+  rather than being added to `routes.py`. This is the same pattern IS-16
+  used (`app/venues/conflict_routes.py`) to avoid editing IS-14's file.
+- **The "View reservation calendar" link** on `EquipmentDetailView.vue` is
+  the one change to an IS-18 file. It is a separate commit marked
+  `[PENDING NAWAZ'S SIGN-OFF]`, the model the DoD names, so it can be
+  dropped if he says no. Without it the calendar works but is reached by
+  URL only.
+
+### Who can see it, and why everyone else gets a 404
+
+`equipment.calendar_view` is Technical Support Staff only. That is the same
+role as `equipment.list` / `equipment.view`, not the venue calendar's
+coordinator + venue staff pair. Every other role gets `DENY_NOT_FOUND`, a
+404, where `equipment.view` gives a 403:
+
+- **Why 404.** AC6 asks that anyone else get "the same response an unknown
+  unit would give". The calendar also names every event the unit is
+  reserved for and when. Per docs/authz-usage.md, a caller with no
+  relationship to the resource is not told it exists.
+- **Identical body, not just status.** The route's loader (`load_unit`)
+  re-raises a missing unit as `NotFoundError("Resource not found.")`, the
+  message `authorise()` uses. A hidden unit and an unknown one therefore
+  get byte-identical responses, and a route test compares the two.
+- **Coordinators.** Whether they should also see equipment calendars is
+  open for Justin (docs/open-questions.md); saying yes is one more
+  `_has_role` line in the rule.
+
+### Two overlap tests in the equipment package
+
+- **The calendar** (`calendar_service.py`) filters with
+  `app.shared.calendar.CalendarRange.overlaps`, the venue calendar's test.
+  It drops each timestamp's offset and compares wall-clock time with whole
+  days.
+- **The availability check** (`equipment_service.check_availability`)
+  keeps its own `_spans_overlap` over timezone-aware instants, with
+  `_parse_timestamptz` reading an offset-less value as UTC. It compares two
+  booked periods, and comparing instants is right for that.
+
+PR #32 kept these apart because their semantics differ. The calendar uses
+the shared one, so the two calendars agree with each other. Both are
+half-open with strict `<`.
+
+### Data and range
+
+- **One query.** `@require`'s loader fetches the unit once with
+  `equipment_service.get_equipment`, which already joins each reservation
+  through its request item and request to the event's name. The loaded
+  unit is passed to the calendar service, which filters its occupancy. There
+  is no second query and no second round trip.
+- **The page asks for a day more than the month on each side**
+  (`widenRange`). The shared `rangeQuery` sends UTC dates, and the backend
+  compares stored UTC times against whole days. Asking for exactly the
+  month in Singapore misses the month's last day after 08:00, and fixing
+  only the dates would instead miss the first day before 08:00. The extra
+  day each side covers both, and `monthCells` places entries by local day
+  and draws only this month's days. The venue calendar has the same defect
+  and does not use this yet (docs/open-questions.md).
+- **Multi-day reservations** are marked on every day they cover through a
+  `spanDays` option on the shared `monthCells`. It is off by default, so the
+  venue calendar renders exactly as before (re-checked against PR #32's
+  characterisation capture). The end is exclusive: a reservation ending at
+  midnight does not mark the next day.
+
+### What the calendar shows vs what the wireframe draws
+
+| Wireframe | Built |
+|---|---|
+| Title: asset tag; subtitle: type; status pill | Yes. The pill reuses the inventory's labels (`unitStatusLabel`: "In service", "Under maintenance", "Retired") and colours, rather than the wireframe's "Operational / Maintenance / Retired", so one status reads the same on every equipment page |
+| Equipment Profile: asset tag, type, notes, location | Asset tag, type, notes. **No location**: `equipment_units` has no such column |
+| Reservation Calendar: month grid, previous/next | Yes, plus a "Today" button as on the venue calendar |
+| Reserved days marked with the event's name | Yes, every day the reservation covers; "Reserved" when the event has no name |
+| Pending state | Not built: a pending request names a type and a quantity, not a unit |
+| Under-maintenance periods | Not built: no dated maintenance data. The current status is the pill |
+| Back link to the equipment list | Yes. The unit's detail page also links to the calendar |

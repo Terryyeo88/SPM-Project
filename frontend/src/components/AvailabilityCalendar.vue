@@ -9,6 +9,8 @@
 //   { confirmed: { label: 'Confirmed', color: '#…', background: '#…' }, … }
 // `entryLabel(entry)` is the text inside an entry, which is domain
 // specific (an event name, a block reason, …).
+// `spanDays` marks a multi-day entry on every day it covers in the month
+// grid, instead of only its first day (see monthCells in lib/calendar.js).
 import { computed } from 'vue'
 import { WEEKDAY_HEADERS, monthCells, sortedByStart, timeLabel } from '../lib/calendar'
 
@@ -19,9 +21,10 @@ const props = defineProps({
   states: { type: Object, required: true },
   entryLabel: { type: Function, required: true },
   emptyMessage: { type: String, default: 'Nothing in this range.' },
+  spanDays: { type: Boolean, default: false },
 })
 
-const cells = computed(() => (props.view === 'month' ? monthCells(props.range, props.entries) : []))
+const cells = computed(() => (props.view === 'month' ? monthCells(props.range, props.entries, { spanDays: props.spanDays }) : []))
 const listEntries = computed(() => (props.view === 'month' ? [] : sortedByStart(props.entries)))
 
 function pillStyle(state) {

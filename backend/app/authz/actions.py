@@ -147,6 +147,15 @@ EQUIPMENT_REQUEST_LIST = "equipment_request.list"
 EQUIPMENT_REQUEST_VIEW = "equipment_request.view"
 EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
 
+# -- equipment calendar (IS-47: View Equipment Availability Calendar) -------
+# Source: IS-47 AC1 "A technical support staff member can open an equipment
+# unit and see its reservation calendar" and AC6 "Only technical support
+# staff can view the calendar. Anyone else gets the same response an
+# unknown unit would give." A separate action from equipment.view, as
+# venue.calendar_view is from venue.view: the two answer differently to a
+# non-staff caller (404 here, 403 there -- see rule_equipment_calendar_view).
+EQUIPMENT_CALENDAR_VIEW = "equipment.calendar_view"
+
 # -- room layouts ----------------------------------------------------------
 # Source: room layout types are filled in by Venue Staff, who can add,
 # update and delete them (they used to be a fixed enum -- see
