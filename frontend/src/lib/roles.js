@@ -178,6 +178,12 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                                 app/authz/rules.py::rule_equipment_request_*.
  *   equipment / equipment-details -- the unit-level inventory and a unit's record
  *                                 (when it is occupied, and for which event).
+ *   equipment-calendar         -- View Equipment Availability Calendar (IS-47):
+ *                                 one unit's reservation calendar. Technical
+ *                                 Support Staff only, matching app/authz/rules.py::
+ *                                 rule_equipment_calendar_view (coordinators are
+ *                                 an open question -- docs/open-questions.md).
+ *                                 Not a nav link: reached from the unit's page.
  *
  * Creating, accepting or rejecting an equipment request are separate stories
  * (see docs/traceability.md, "Explicitly deferred"), so no coordinator route
@@ -245,6 +251,12 @@ export const ROUTE_ACCESS = Object.freeze(
     {
       routeName: 'equipment-details',
       label: 'Equipment details',
+      roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
+      inNav: false,
+    },
+    {
+      routeName: 'equipment-calendar',
+      label: 'Equipment reservation calendar',
       roles: [ROLES.TECHNICAL_SUPPORT_STAFF],
       inNav: false,
     },

@@ -674,6 +674,26 @@ def rule_equipment_request_check_availability(user: Any, request: Any) -> Decisi
     return Decision.DENY_NOT_FOUND
 
 
+# -- equipment.calendar_view (IS-47) ----------------------------------------
+# Technical Support Staff only -- the same role as equipment.list/view above,
+# NOT rule_venue_calendar_view's coordinator/venue_staff pair. Whether
+# Event Coordinators should also see equipment calendars is open for
+# Justin (docs/open-questions.md); widening this is one more _has_role.
+#
+# 404, not 403, for everyone else (AC6: "the same response an unknown unit
+# would give"). Unlike equipment.view's 403, the calendar names every event
+# the unit is reserved for and when, and a caller with no role in
+# equipment has no relationship to the unit at all -- so, per the
+# 403-vs-404 rule in docs/authz-usage.md, they are not told it exists.
+# Role-only: no per-unit check, so it reads nothing off the resource.
+
+
+def rule_equipment_calendar_view(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
 # Only the Event Coordinator Lead assigns and reassigns
 # (rule_event_assign_coordinator / rule_event_reassign_coordinator), so

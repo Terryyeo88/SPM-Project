@@ -58,6 +58,18 @@ export function rangeQuery(range) {
   return `start=${toISODate(range.start)}&end=${toISODate(addDays(range.end, -1))}`
 }
 
+// `range` widened by `days` on each side. rangeQuery() sends UTC dates
+// (toISOString), and the backend compares stored UTC wall-clock times
+// against whole days, so in UTC+8 the query for a local month misses the
+// last local day after 08:00 (see docs/open-questions.md, "Calendar range
+// is a day off in UTC+8"). Asking for a day more on each side and letting
+// the grid place entries by LOCAL day (monthCells) shows every entry of
+// the month. Used by the equipment calendar; the venue calendar does not
+// use it yet.
+export function widenRange(range, days = 1) {
+  return { start: addDays(range.start, -days), end: addDays(range.end, days) }
+}
+
 export function stepAnchor(view, anchor, delta) {
   if (view === 'day') return addDays(anchor, delta)
   if (view === 'week') return addDays(anchor, delta * 7)
@@ -68,9 +80,13 @@ export function timeLabel(iso) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
-// Month grid: one cell per day, with blanks padding the first week. An
-// entry goes in the cell of the day it STARTS on.
-export function monthCells(range, entries) {
+// Month grid: one cell per day, with blanks padding the first week. By
+// default an entry goes in the cell of the day it STARTS on (the venue
+// calendar). With { spanDays: true } it goes in EVERY day of this month it
+// covers -- including a period that began last month -- with its end
+// exclusive, so one ending at midnight does not mark the next day (the
+// equipment calendar, IS-47 AC5).
+export function monthCells(range, entries, { spanDays = false } = {}) {
   const { start, end } = range
   const blanksBefore = start.getDay()
   const daysInMonth = Math.round((end - start) / 86400000)
@@ -79,6 +95,15 @@ export function monthCells(range, entries) {
 
   for (const entry of entries) {
     const entryStart = new Date(entry.start)
+    if (spanDays) {
+      const lastInstant = new Date(new Date(entry.end).getTime() - 1)
+      let day = startOfDay(entryStart < start ? start : entryStart)
+      while (day < end && day <= lastInstant) {
+        cellsByDay.get(day.getDate())?.push(entry)
+        day = addDays(day, 1)
+      }
+      continue
+    }
     if (entryStart.getFullYear() === start.getFullYear() && entryStart.getMonth() === start.getMonth()) {
       const bucket = cellsByDay.get(entryStart.getDate())
       if (bucket) bucket.push(entry)
