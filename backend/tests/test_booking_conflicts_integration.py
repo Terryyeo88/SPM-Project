@@ -62,18 +62,27 @@ def _sql(statement: str) -> list[dict]:
     npx = shutil.which("npx")
     if npx is None:
         pytest.skip("npx not found; the negative control needs the Supabase CLI.")
+    # Ask for JSON explicitly: run by hand in a terminal the CLI defaults to a
+    # text table, and only auto-switches to JSON when it detects an agent or CI.
+    # Decode as UTF-8 explicitly too: Windows would otherwise use cp1252 and
+    # fail on the CLI's output.
     completed = subprocess.run(
-        [npx, "supabase", "db", "query", statement],
+        [npx, "supabase", "db", "query", "--output-format", "json", statement],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
-    out = completed.stdout
-    if "{" not in out:
+    out = completed.stdout or ""
+    starts = [i for i in (out.find("["), out.find("{")) if i != -1]
+    if not starts:
         return []  # DDL prints only a command tag, e.g. "ALTER TABLE"
-    return json.loads(out[out.index("{") :]).get("rows", [])
+    data = json.loads(out[min(starts) :])
+    # A plain list from --output-format json; {"rows": [...]} from agent mode
+    # and older CLIs.
+    return data.get("rows", []) if isinstance(data, dict) else data
 
 
 def _constraint_definition() -> str | None:
