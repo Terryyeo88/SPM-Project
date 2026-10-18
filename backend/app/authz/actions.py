@@ -169,3 +169,27 @@ EQUIPMENT_CALENDAR_VIEW = "equipment.calendar_view"
 #       permanently delete layouts, and see soft-deleted ones.
 ROOM_LAYOUT_LIST = "room_layout.list"
 ROOM_LAYOUT_MANAGE = "room_layout.manage"
+
+# -- safety reviews (Week 7 change #6: Operational Feasibility Check) --------
+# Source: "After the venue and technical arrangements have been confirmed,
+# the Safety Officer must conduct an Operational Safety Check ... The Safety
+# Officer may approve the event, reject the safety arrangement, or request
+# changes." Week 9: "It is similar to Venue and technical approval. The
+# safety officer role will pick up the event request ... and update the
+# status of approval with a comment." Same split as venue bookings: the
+# assigned coordinator submits, a Safety Officer decides.
+#
+#   safety_review.submit           -- the coordinator sends a planning
+#       session for its check (resource: the event).
+#   safety_review.list / .view     -- the Safety Officer's dashboard and one
+#       review. The coordinator sees a session's reviews through
+#       GET /events/<id>/safety-reviews, gated by event.view instead.
+#   safety_review.approve / .reject / .request_changes -- the three
+#       decisions, separate actions for the same reason approve/reject are
+#       (see rules.py, "WHY SEPARATE ACTIONS").
+SAFETY_REVIEW_SUBMIT = "safety_review.submit"
+SAFETY_REVIEW_LIST = "safety_review.list"
+SAFETY_REVIEW_VIEW = "safety_review.view"
+SAFETY_REVIEW_APPROVE = "safety_review.approve"
+SAFETY_REVIEW_REJECT = "safety_review.reject"
+SAFETY_REVIEW_REQUEST_CHANGES = "safety_review.request_changes"

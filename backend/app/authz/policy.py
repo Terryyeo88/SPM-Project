@@ -74,6 +74,12 @@ from app.authz.rules import (
     rule_registration_withdraw,
     rule_room_layout_list,
     rule_room_layout_manage,
+    rule_safety_review_approve,
+    rule_safety_review_list,
+    rule_safety_review_reject,
+    rule_safety_review_request_changes,
+    rule_safety_review_submit,
+    rule_safety_review_view,
     rule_venue_booking_approve,
     rule_venue_booking_create,
     rule_venue_booking_list,
@@ -126,6 +132,12 @@ _RULES: dict[str, RuleFunc] = {
     actions.REGISTRATION_WITHDRAW: rule_registration_withdraw,
     actions.ROOM_LAYOUT_LIST: rule_room_layout_list,
     actions.ROOM_LAYOUT_MANAGE: rule_room_layout_manage,
+    actions.SAFETY_REVIEW_SUBMIT: rule_safety_review_submit,
+    actions.SAFETY_REVIEW_LIST: rule_safety_review_list,
+    actions.SAFETY_REVIEW_VIEW: rule_safety_review_view,
+    actions.SAFETY_REVIEW_APPROVE: rule_safety_review_approve,
+    actions.SAFETY_REVIEW_REJECT: rule_safety_review_reject,
+    actions.SAFETY_REVIEW_REQUEST_CHANGES: rule_safety_review_request_changes,
 }
 
 

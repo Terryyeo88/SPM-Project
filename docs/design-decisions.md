@@ -1200,9 +1200,10 @@ more arrangement, so it sits just before `confirmed`.
 - `safety_review -> cancelled`: same "cancel after approval" rule as the
   other pre-completion statuses.
 
-**`planning -> confirmed` is kept for now.** Removing it before the Safety
-Officer actions exist would leave no way to confirm an event. The Safety
-Officer story removes it.
+**`planning -> confirmed` was kept for now** (removing it before the Safety
+Officer actions existed would have left no way to confirm an event).
+*Superseded 2026-10-19: the Safety Officer story removed it -- see "Safety
+Officer" below.*
 
 **No `preparation` status.** Registration requires `confirmed`, and
 attendees need lead time; setup happens just before the event. A
@@ -1224,3 +1225,58 @@ In Planning (still before confirmation), and both "active" lists
 (`coordinator_service.ACTIVE_STATUSES`, `leadDashboard.ACTIVE_STATUSES`)
 include it: a coordinator with an event in safety review is still busy on
 that date, and the Lead still sees it as active.
+
+## Safety Officer (Week 7 #6, Justin, 2026-10-19)
+
+**The flow, per event session.** The coordinator submits a planning session
+for its safety check (planning -> safety_review, a pending
+`safety_reviews` row). Any Safety Officer approves, rejects or requests
+changes. Reject / request changes send the session back to planning with
+the comment as the status-history reason; the coordinator fixes it and
+submits again, which is a new row (Week 4: resubmissions are new, for
+audit). Approve leaves it in safety_review, and the coordinator confirms it
+(safety_review -> confirmed), which the confirm route allows only when the
+latest review is approved. `planning -> confirmed` is gone from
+`transitions.ALLOWED`, so nothing skips the check.
+
+**A table of reviews, not fields on the event.** One row per submission
+keeps every decision and comment (the officer's "Checked" tab, the
+coordinator's history, audit), and copies the venue-booking pattern the
+team already knows: request -> pending -> decided, with who/when/why. The
+event row's status is still only ever written by `transitions.transition()`.
+
+**Per session.** Everything checked is per session: its venue (Week 9:
+"separate venue requests for each session"), capacity, layout, equipment
+and status. The dashboard groups sessions into request cards, as the
+coordinator dashboard does, so the officer still sees each request together.
+
+**Race guards.** A partial unique index allows one *pending* review per
+session, so two submits can't both create one (the service turns the
+23505 into "already waiting"). A decision updates the review only while
+it's still pending, so two decisions can't both land. If a submit's status
+change fails after the review is written, the review is deleted again. If
+a decision's status change finds the session already moved on (cancelled),
+the decision still stands. A pending review of a session that left
+safety_review is hidden from the dashboard and can't be decided. All four
+guards were mutation-tested by hand.
+
+**Authorisation.** Six actions: `safety_review.submit` (assigned
+coordinator, from planning), `.list` (role-only, Safety Officer, with the
+service re-checking the role), `.view` (any Safety Officer; anyone else
+404), and `.approve` / `.reject` / `.request_changes` (any Safety Officer,
+review still pending; anyone else 404). The coordinator reads a session's
+reviews through `GET /events/<id>/safety-reviews`, gated by `event.view`,
+so they need no access to the officer's view. Whether arrangements are
+ready, and whether the latest review is approved, are database facts, so
+they're checked in `app.safety` rather than in the pure rules.
+
+**What the officer sees.** `GET /safety-reviews/<id>` returns the session,
+its confirmed venue booking(s) with the venue record, its equipment
+requests and its earlier reviews. The page reuses `checkSuitability`
+(capacity, layout, accessibility) from the Venue Staff booking review.
+Emergency access, equipment placement, crowd movement and venue
+restrictions aren't recorded, so they're listed as the officer's own checks.
+
+**safety_review joins the status windows.** Cancel, change requests, and
+the IS-9 / IS-21 impact checks now include it: it sits between planning and
+confirmed, with arrangements already made.

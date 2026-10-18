@@ -37,6 +37,16 @@ class FakeEvent:
 
 
 @dataclass(frozen=True)
+class FakeSafetyReview:
+    """Implements app.authz.protocol.SafetyReviewLike -- what the
+    safety_review.* rules read."""
+
+    id: str = "review-1"
+    event_id: str = "event-1"
+    status: str = "pending"
+
+
+@dataclass(frozen=True)
 class FakeVenueBooking:
     """Implements app.authz.protocol.VenueBookingLike -- only the three
     attributes rule_venue_booking_view/approve/reject actually read, not

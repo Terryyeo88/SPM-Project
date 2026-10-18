@@ -44,7 +44,9 @@ REGISTRATION_WINDOW_FIELDS = frozenset({"registration_start_datetime", "registra
 # Statuses in which arrangements (venue, equipment, support) may already be
 # in place: from approval on. Venue bookings can only exist from here anyway
 # (rule_venue_booking_create).
-ARRANGED_STATUSES = frozenset({"approved", "planning", "confirmed"})
+# safety_review (Week 7 change #6) sits between planning and confirmed, with
+# the arrangements already in place.
+ARRANGED_STATUSES = frozenset({"approved", "planning", "safety_review", "confirmed"})
 _ACTIVE_BOOKING_STATUSES = ("pending", "confirmed")
 _ACTIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
 

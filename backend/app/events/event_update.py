@@ -70,7 +70,9 @@ READ_ONLY_STATUSES = frozenset({"completed", "cancelled"})
 # details are still being settled, so the coordinator edits them freely.
 # Narrower than change_impact.ARRANGED_STATUSES, which IS-21 change requests
 # still use from approval on.
-IMPACT_CHECKED_STATUSES = frozenset({"planning", "confirmed"})
+# safety_review (Week 7 change #6): arrangements are confirmed by then, so
+# edits are checked against them just as in planning and confirmed.
+IMPACT_CHECKED_STATUSES = frozenset({"planning", "safety_review", "confirmed"})
 
 _FIELD_LABELS = {
     "name": "name",

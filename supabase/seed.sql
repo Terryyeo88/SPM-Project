@@ -324,6 +324,32 @@ begin
   insert into public.user_roles (user_id, role) values (v_id, 'technical_support_staff') on conflict do nothing;
 end $$;
 
+-- ============================================================
+-- One Safety Officer account (Week 7 change #6, Operational Feasibility
+-- Check): reviews sessions the coordinator submits for a safety check.
+do $$
+declare
+  v_id uuid;
+begin
+  select id into v_id from public.profiles where email = 'safety1@example.com';
+  if v_id is null then
+    v_id := gen_random_uuid();
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at, confirmation_token, email_change,
+      email_change_token_new, recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'safety1@example.com', crypt('Password123!', gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
+      now(), now(), '', '', '', ''
+    );
+    insert into public.profiles (id, name, email) values (v_id, 'Hannah Lee', 'safety1@example.com');
+  end if;
+  insert into public.user_roles (user_id, role) values (v_id, 'safety_officer') on conflict do nothing;
+end $$;
+
 insert into public.equipment_types (name)
 values ('microphone'), ('projector'), ('screen'), ('wifi')
 on conflict (name) do nothing;

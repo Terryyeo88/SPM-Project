@@ -39,6 +39,8 @@ export const ROLES = Object.freeze({
   VENUE_STAFF: 'venue_staff',
   TECHNICAL_SUPPORT_STAFF: 'technical_support_staff',
   ATTENDEE: 'attendee',
+  // Week 7 customer change #6: reviews the operational safety of planned events.
+  SAFETY_OFFICER: 'safety_officer',
 })
 
 /** Display names for the header badge and the profile page. */
@@ -49,6 +51,7 @@ export const ROLE_LABELS = Object.freeze({
   [ROLES.VENUE_STAFF]: 'Venue Staff',
   [ROLES.TECHNICAL_SUPPORT_STAFF]: 'Technical Support Staff',
   [ROLES.ATTENDEE]: 'Attendee',
+  [ROLES.SAFETY_OFFICER]: 'Safety Officer',
 })
 
 /** "event_coordinator" -> "Event Coordinator"; unknown roles are shown as-is. */
@@ -60,13 +63,13 @@ export function roleLabel(role) {
  * The roles whose links appear in the nav bar and as dashboard cards.
  * The Event Coordinator wireframe has no nav links -- a coordinator works
  * entirely from their "My Assigned Events" dashboard -- so that role
- * contributes none. The Event Coordinator Lead and the Attendee are the
- * same: each works from their own dashboard. A user who
+ * contributes none. The Event Coordinator Lead, the Attendee and the Safety
+ * Officer are the same: each works from their own dashboard. A user who
  * ALSO holds another role still gets that role's links. (The routes
  * themselves stay reachable: this only affects which links are shown, not
  * ROUTE_ACCESS gating.)
  */
-const _DASHBOARD_ONLY_ROLES = [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD, ROLES.ATTENDEE]
+const _DASHBOARD_ONLY_ROLES = [ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD, ROLES.ATTENDEE, ROLES.SAFETY_OFFICER]
 
 export function navRoles(userRoles) {
   return (userRoles ?? []).filter((role) => !_DASHBOARD_ONLY_ROLES.includes(role))
@@ -166,6 +169,13 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           Approval AC2) and any venue_staff (to decide).
  *                           Not a nav link: reached from the queue or
  *                           from the event details page.
+ *
+ *   safety-review       -- Operational Feasibility Check (Week 7 change #6):
+ *                           one safety review, where the Safety Officer
+ *                           approves, rejects or requests changes. Safety
+ *                           Officer only, matching app/authz/rules.py::
+ *                           rule_safety_review_view. Not a nav link: reached
+ *                           from the Safety Officer's dashboard.
  *
  *   attendee-event      -- Attendee Registration: "As an Attendee, I want to
  *                           register for an event". Attendee only. Reached
@@ -291,6 +301,13 @@ export const ROUTE_ACCESS = Object.freeze(
     // rule_event_view_public / rule_event_register. Not a nav link: the
     // attendee works from their dashboard (Dashboard-Attendee wireframe),
     // which links here.
+    // Operational Feasibility Check (Week 7 change #6): one safety review.
+    {
+      routeName: 'safety-review',
+      label: 'Safety review',
+      roles: [ROLES.SAFETY_OFFICER],
+      inNav: false,
+    },
     {
       routeName: 'attendee-event',
       label: 'Event',

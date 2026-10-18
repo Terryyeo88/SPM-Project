@@ -104,7 +104,6 @@ def test_edge_set_is_exactly_the_sourced_edges():
         ("under_review", "approved"),
         ("under_review", "rejected"),
         ("approved", "planning"),
-        ("planning", "confirmed"),
         ("planning", "safety_review"),
         ("safety_review", "confirmed"),
         ("safety_review", "planning"),
@@ -145,6 +144,7 @@ def test_every_legal_edge_is_allowed(store, from_status, to_status):
         ("planning", "approved"),  # no going backwards
         ("under_review", "safety_review"),  # safety review needs arrangements first
         ("safety_review", "completed"),  # must be confirmed first
+        ("planning", "confirmed"),  # Week 7 #6: nothing skips the safety check
     ],
 )
 def test_representative_illegal_edges_are_refused(store, from_status, to_status):
@@ -224,8 +224,8 @@ def test_zero_rows_matched_is_a_conflict_not_a_silent_success(store):
     change that didn't happen."""
     s = store("cancelled")  # really cancelled...
     with pytest.raises(TransitionConflictError) as exc_info:
-        # ...but the caller authorised against a stale "planning"
-        transition("event-1", "confirmed", "coord-1", expected_from="planning")
+        # ...but the caller authorised against a stale "safety_review"
+        transition("event-1", "confirmed", "coord-1", expected_from="safety_review")
     assert exc_info.value.status_code == 409
     assert s.status == "cancelled"
     assert s.history == []

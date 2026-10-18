@@ -13,7 +13,7 @@
  *               every approved session of the request, like Approve). Venue requests open only from planning
  *               (rule_venue_booking_create), so the coordinator moves the
  *               event there themselves when they're ready to arrange it.
- *   Cancel   -> POST /events/<id>/cancel    (approved / planning / confirmed ->
+ *   Cancel   -> POST /events/<id>/cancel    (approved / planning / safety_review / confirmed ->
  *               cancelled, reason required; IS-39's route, this button added
  *               with Release Equipment on Cancel). Cancels THIS session only.
  *               The backend then releases the session's reserved equipment
@@ -95,7 +95,7 @@ function sessionWhen(session) {
 }
 // Same status window as rule_event_cancel (_CANCELLABLE_STATUSES) on the
 // backend: after approval, until the event is completed.
-const canCancel = computed(() => ['approved', 'planning', 'confirmed'].includes(props.event.status))
+const canCancel = computed(() => ['approved', 'planning', 'safety_review', 'confirmed'].includes(props.event.status))
 
 // Same status window as rule_event_edit's coordinator branch on the backend:
 // any time, until the event is completed or cancelled.
