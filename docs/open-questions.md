@@ -266,12 +266,12 @@ decisions worth double-checking.
   open and has merge conflicts. IS-16 is not built until #18 merges, so we
   don't write a second version of Josiah's table.
 
-- **PR #18's migration timestamp is already used on main.** PR #18 adds
-  `20261004000000_venue_bookings.sql`. Main already has
-  `20261004000000_coordinator_lead_role.sql`. Supabase identifies migrations
-  by that number, so two files sharing it will clash on `db reset`. Git
-  won't flag this because the file names differ. The PR's file needs a new,
-  later timestamp before it merges.
+- **Resolved (1dc8dfb, 5 Oct): PR #18's migration timestamp was already
+  used on main.** PR #18 added `20261004000000_venue_bookings.sql`. Main
+  already had `20261004000000_coordinator_lead_role.sql`. Supabase
+  identifies migrations by that number, so two files sharing it would clash
+  on `db reset`. Git doesn't flag this because the file names differ.
+  Commit 1dc8dfb renamed the file to `20261005100000_venue_bookings.sql`.
 
 - **What IS-16 will build on once #18 merges.** PR #18 already stores the
   occupied period (`booking_start`/`booking_end`, including setup and
@@ -284,13 +284,20 @@ decisions worth double-checking.
   for now. Either way it stops blocking, because only confirmed rows are
   covered by the constraint.
 
-- **IS-47 has no data to read.** There are no `equipment` or
-  `equipment_reservations` tables in migrations or on the live database.
-  Equipment exists only as a free-form `events.equipment_needed` jsonb list.
-  Question for Justin (PO): which story creates the equipment inventory and
-  reservations, and what should the calendar show (per item or per type,
-  quantity or just booked/free, which roles can see it)? IS-47 needs those
-  answers before it can be built.
+- **IS-47's data.**
+  - **Resolved: per unit, not per type.** `20261008000000_equipment.sql`
+    (IS-18) tracks equipment at unit level, following IS-18's AC. Its
+    `equipment_reservations` table names one physical unit per row. That
+    migration also created the inventory and reservation tables this item
+    said were missing.
+  - **Built anyway (IS-47, 16 Oct), on these readings -- please confirm:**
+    the calendar is per unit and shows booked/free (a reserved day names
+    the event). It is visible to Technical Support Staff only. It reads
+    reservations, which `supabase/seed.sql` provides for demos. See "View
+    Equipment Availability Calendar (IS-47)" below.
+  - **Still open, for Justin (PO):** which story creates the reservations
+    (nothing in the app writes them yet), and whether coordinators should
+    see equipment calendars too.
 
 ## Booking conflicts (IS-16)
 
@@ -714,3 +721,179 @@ in docs/design-decisions.md; please confirm or correct:
 - **No notification** to the organiser or to Venue/Technical Support Staff
   when a significant change affects their arrangements; depends on the
   Notification System story.
+
+## Shared calendar extraction (16 Oct)
+
+- **Test gap: no venue calendar test pins the overlap boundary.** In a hand
+  mutation test, each `<` in `app.shared.calendar.spans_overlap` was flipped
+  to `<=`, one at a time. All 20 tests in `test_calendar_service.py`,
+  `test_venue_calendar_routes.py` and `test_authz_venue_calendar.py` still
+  passed: none of their entries starts or ends exactly on a range edge.
+  Only the new `test_shared_calendar.py` caught the mutants. Should the
+  IS-11 tests gain a boundary case (Nawaz's call, as they are the venue
+  calendar's specification)?
+
+- **Calendar colours vs the event-status palette.** The venue calendar's
+  state colours (tentatively held `#1f5fae`, confirmed `#2f6b3f`, blocked
+  `#a33f3f`) match none of the event-status palette IS-9 spread to the
+  dashboards (e.g. confirmed is `#0f6e6a` there). The extraction kept the
+  calendar's colours so nothing visibly changed. Should calendars adopt the
+  palette (Nawaz / Aaralyn), and should that palette become one shared file
+  instead of four copies?
+
+## View Equipment Availability Calendar (IS-47, 16 Oct)
+
+- **Should Event Coordinators see equipment calendars too?** (for Justin)
+  It is built for Technical Support Staff only, matching
+  `equipment.list` / `equipment.view`. The venue calendar also admits
+  coordinators. If yes, it is a one-line change: one more `_has_role` in
+  `rules.py::rule_equipment_calendar_view`, plus the role in
+  `ROUTE_ACCESS` `equipment-calendar`.
+
+- **No "pending" state on the calendar.** A pending `equipment_request`
+  names a type and a quantity, not a unit; a unit is allocated only when
+  its `equipment_reservations` row is created. There is nothing to place on
+  one unit's calendar. The venue calendar leaves pending bookings out for
+  the same reason. Showing pending demand would need a per-type view, a
+  different screen.
+
+- **No under-maintenance periods on the calendar.** There is no equipment
+  equivalent of `venue_blocks`: `equipment_units.status` is one current
+  value with no dates. The status is shown as a pill; maintenance windows
+  would need a new table.
+
+- **No location.** IS-47's AC2 and the wireframe show the unit's
+  location, but `equipment_units` has no location column, and the ticket
+  ruled out schema changes. AC2 is met except for location. Should units
+  get a location (free text, or a venue reference)?
+
+- **Calendar range is a day off in UTC+8 -- the venue calendar is
+  affected now.** `lib/calendar.js::toISODate` uses `toISOString()`, so
+  local midnight in Singapore becomes the previous UTC date. The venue
+  calendar's November query is `2026-10-31..2026-11-29`. The backend
+  (`CalendarRange.overlaps`) compares the UTC times PostgREST returns
+  against those days, so on the venue calendar:
+  - a booking on the last day of the month after 08:00 SGT is missing
+    from the month view;
+  - in the day view, a booking after 08:00 on the chosen day is missing,
+    and the previous day's late bookings are shown instead.
+
+  Fixing only the dates moves the gap to the first day's 00:00-08:00. The
+  equipment calendar works around it by asking for a day more on each side
+  (`widenRange`). The real fix is in the shared code: interpret calendar
+  days as Singapore days on the backend, and send local dates from the
+  frontend. That changes the venue calendar, so it needs Nawaz's sign-off.
+
+- **Mutation test result.** Each `<` in `spans_overlap` (the comparison
+  the equipment calendar filters with) was flipped to `<=` in turn, and
+  both mutants were killed by the new boundary tests. One finding: the
+  range ends at `time.max` (23:59:59.999999), not at the next midnight. A
+  reservation starting at the next midnight is excluded under both the
+  original and the mutant, so that test alone would NOT have caught
+  `a_start <= b_end`. The test that does starts at 23:59:59.999999 exactly
+  (`test_reservation_starting_at_the_ranges_last_instant_is_excluded`). No
+  gap remains for this path.
+
+- **Waiting on Nawaz: the link from the equipment detail page.** It is
+  the only change to an IS-18 file (`EquipmentDetailView.vue`), in its own
+  commit marked `[PENDING NAWAZ'S SIGN-OFF]`. Drop that commit if he says
+  no; the calendar is then reached by URL only.
+
+- **Please confirm these calls IS-47 made where the ticket was silent**
+  (reasoning in docs/design-decisions.md, "View Equipment Availability
+  Calendar (IS-47)"):
+  - **Status pill wording.** It uses the inventory's existing labels
+    ("In service" / "Under maintenance" / "Retired"), not the wireframe's
+    "Operational / Maintenance / Retired", so a status reads the same on
+    every equipment page.
+  - **Reserved days are green,** the venue calendar's "confirmed"
+    colours, and an event with no name shows as "Reserved".
+  - **A "Today" button** sits beside previous/next, as on the venue
+    calendar. The wireframe shows only previous/next.
+  - **A multi-day reservation is marked on every day it covers, with its
+    end exclusive:** one ending at midnight does not mark the next day.
+  - **The page asks for one day more than the month on each side**
+    (`widenRange`), to work around the UTC+8 range defect above.
+  - **The calendar route is its own blueprint**
+    (`app/equipment/calendar_routes.py`), so IS-18's `routes.py` is
+    untouched.
+
+## Safety review status (Week 7 #6, Justin, 18 Oct)
+
+- ~~**`safety_review` exists, but nothing moves an event into it yet.**~~
+  **Resolved by the Safety Officer story (19 Oct, below):** the coordinator
+  submits a session into `safety_review`, and `planning -> confirmed` is
+  removed.
+
+- ~~**Status lists that will need `safety_review`.**~~ **Resolved by the
+  Safety Officer story:** `_CANCELLABLE_STATUSES`, `CHANGE_REQUEST_STATUSES`
+  (backend and `changeRequests.js`), `ARRANGED_STATUSES`,
+  `IMPACT_CHECKED_STATUSES` and `CoordinatorEventReview.vue::canCancel` all
+  include it now.
+
+- **Please confirm: no separate `preparation` status.** Week 7 says the
+  event "cannot proceed to preparation until the Safety Officer has
+  approved it". We read preparation as the work Venue and Technical
+  Support Staff do while the event is confirmed (Week 2: progress is
+  updated "prior to and during event delivery"), not a status of its own.
+  A status between safety review and confirmed would hold registration
+  closed until setup was finished, since registration needs `confirmed`.
+
+- **Rejected and changes requested both go back to planning.** Week 7
+  lists three outcomes (approve, reject, request changes). Week 9 says a
+  failed safety approval "will send the event back to planning phase", so
+  both non-approvals use `safety_review -> planning`, and the comment says
+  what to fix. Please confirm a rejection shouldn't end the event instead.
+
+## Safety Officer (Week 7 #6, Justin, 19 Oct)
+
+Decisions made where Week 7 and Week 9 were silent (reasoning in
+`docs/design-decisions.md`, "Safety Officer"). Please confirm:
+
+- **Every Safety Officer sees and may decide every review.** No assignment
+  or "claim" step: Week 9's "pick up the event request" is read as opening
+  it from the shared queue, the way every Venue Staff member sees every
+  booking.
+- **When a session can be submitted:** at least one confirmed venue
+  booking, and no venue booking or equipment request still pending.
+  Equipment is optional (a session may need none, and equipment requests
+  can't be created in the app yet). Rejected bookings/requests don't block.
+- **The comment is required to reject or request changes, optional to
+  approve.** Week 9 says the officer updates the status "with a comment";
+  read as "a comment where one is needed to act on".
+- **The coordinator confirms an approved session** ("Confirm Event"); safety
+  approval doesn't confirm it automatically. Week 9: "The co-ordinator will
+  decide on the subsequent action." Confirming is refused (400) unless the
+  latest safety review is approved.
+- **One review per session, not per request** (each session has its own
+  venue, capacity, layout and status). The dashboard still shows one card
+  per request, with its sessions inside.
+- **Reject and request changes behave the same** (both back to planning, the
+  comment saying what to fix) -- unchanged from the safety_review status
+  story above; still worth confirming.
+
+Known gaps, not built:
+
+- **Editing a session during its safety check doesn't reset the check.**
+  While a session is in `safety_review` (pending or approved), the
+  coordinator can still edit it (`rule_event_edit`), and the review stands.
+  Changes AFTER confirmation already send it back to planning (IS-9), which
+  then needs a new check. Options: block edits while in `safety_review`, or
+  send the session back to planning on a significant edit.
+- **A pending review of a cancelled session stays `pending` in the table.**
+  It's hidden from the dashboard and can't be decided (the service checks
+  the session is still in `safety_review`); nothing marks it closed.
+- **Notifications** (officer told of a submission, coordinator told of a
+  decision): placeholders only (`safety_service._notify_safety_review`), like
+  every other notification.
+- **Emergency access, equipment placement, crowd movement and venue
+  restrictions** aren't recorded anywhere; the review page lists them as
+  the officer's own checks (Week 9: the officer doesn't input, only
+  approves).
+- **No seeded demo session ready for a safety check.** `seed.sql`/`seed.py`
+  add the Safety Officer account (`safety1@example.com`); to demo the flow,
+  take a planning session, get its venue booking confirmed, then submit it.
+- **Submit and decide are two writes each, not one transaction** (review
+  row + status change), the same trade-off as `transitions.transition()`'s
+  history insert. Each handles a failure between the two -- see
+  `app/safety/safety_service.py`.

@@ -341,7 +341,10 @@ def rule_event_request_clarification(user: Any, event: Any) -> Decision:
 # in docs/open-questions.md for customer confirmation -- that's a request
 # to confirm a decision already made, not an open implementation gap.
 
-_CANCELLABLE_STATUSES = ("approved", "planning", "confirmed")
+# safety_review added with the Safety Officer (Week 7 change #6): a session
+# waiting for its safety check is still before confirmation, so the
+# coordinator can still cancel it.
+_CANCELLABLE_STATUSES = ("approved", "planning", "safety_review", "confirmed")
 
 
 def rule_event_cancel(user: Any, event: Any) -> Decision:
@@ -422,12 +425,20 @@ def rule_event_assign_coordinator(user: Any, event: Any) -> Decision:
 #   start_planning  approved  -> planning   IS-36. Source: "Coordinator can
 #                                           set planning only if current
 #                                           status is approved".
-#   confirm         planning  -> confirmed  Source: "Coordinator can set
-#                                           confirmed only from planning".
-#                                           Built for end-to-end testability
-#                                           of IS-38 only -- the Confirmed
-#                                           Status story's field-locking
-#                                           half is NOT implemented.
+#   confirm         safety_review         Week 7 change #6: "The event cannot
+#                   -> confirmed          proceed to preparation until the
+#                                         Safety Officer has approved it";
+#                                         Week 9: "The co-ordinator will
+#                                         decide on the subsequent action."
+#                                         (Was planning -> confirmed before
+#                                         the safety check existed.) The
+#                                         route additionally requires the
+#                                         latest safety review to be
+#                                         approved -- a database fact, so
+#                                         it lives in app.safety, not in
+#                                         this pure rule. The Confirmed
+#                                         Status story's field-locking half
+#                                         is still NOT implemented.
 #   complete        confirmed -> completed  IS-38. Source: "Coordinator can
 #                                           set completed only from
 #                                           confirmed".
@@ -446,7 +457,7 @@ def rule_event_start_planning(user: Any, event: Any) -> Decision:
 
 
 def rule_event_confirm(user: Any, event: Any) -> Decision:
-    return _assigned_coordinator_from(user, event, "planning")
+    return _assigned_coordinator_from(user, event, "safety_review")
 
 
 def rule_event_complete(user: Any, event: Any) -> Decision:
@@ -474,7 +485,9 @@ def rule_event_complete(user: Any, event: Any) -> Decision:
 # draft/rejected only. A change request is the only way in, and it only
 # reaches public.events through review_change.
 
-CHANGE_REQUEST_STATUSES = ("submitted", "under_review", "approved", "planning", "confirmed")
+# safety_review added with the Safety Officer (Week 7 change #6): it sits
+# between planning and confirmed, both of which already allow change requests.
+CHANGE_REQUEST_STATUSES = ("submitted", "under_review", "approved", "planning", "safety_review", "confirmed")
 
 
 def rule_event_request_change(user: Any, event: Any) -> Decision:
@@ -674,6 +687,26 @@ def rule_equipment_request_check_availability(user: Any, request: Any) -> Decisi
     return Decision.DENY_NOT_FOUND
 
 
+# -- equipment.calendar_view (IS-47) ----------------------------------------
+# Technical Support Staff only -- the same role as equipment.list/view above,
+# NOT rule_venue_calendar_view's coordinator/venue_staff pair. Whether
+# Event Coordinators should also see equipment calendars is open for
+# Justin (docs/open-questions.md); widening this is one more _has_role.
+#
+# 404, not 403, for everyone else (AC6: "the same response an unknown unit
+# would give"). Unlike equipment.view's 403, the calendar names every event
+# the unit is reserved for and when, and a caller with no role in
+# equipment has no relationship to the unit at all -- so, per the
+# 403-vs-404 rule in docs/authz-usage.md, they are not told it exists.
+# Role-only: no per-unit check, so it reads nothing off the resource.
+
+
+def rule_equipment_calendar_view(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
 # -- coordinator.list (role-only -- see actions.py's coordinators section) -
 # Only the Event Coordinator Lead assigns and reassigns
 # (rule_event_assign_coordinator / rule_event_reassign_coordinator), so
@@ -757,3 +790,65 @@ def rule_room_layout_manage(user: Any, resource: Any = None) -> Decision:
     if _has_role(user, "venue_staff"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
+
+
+# -- safety_review.* (Week 7 change #6: Operational Feasibility Check) -------
+# Source: "After the venue and technical arrangements have been confirmed,
+# the Safety Officer must conduct an Operational Safety Check before the
+# event can proceed to preparation. ... The Safety Officer may approve the
+# event, reject the safety arrangement, or request changes." Week 9: "It is
+# similar to Venue and technical approval. The safety officer role will pick
+# up the event request and perform the necessary checks and update the
+# status of approval with a comment. The co-ordinator will decide on the
+# subsequent action."
+#
+#   submit   the session's assigned coordinator, from planning only
+#            (resource: the EVENT, like venue_booking.create). Whether its
+#            arrangements are actually ready (a confirmed venue, nothing
+#            pending) is a database fact checked by
+#            app.safety.safety_service.submit_for_safety_check, not here.
+#   list     role-only, safety_officer. Same *** WARNING *** as
+#            rule_venue_booking_list: list_reviews does its own role check.
+#            Every Safety Officer sees every review (no assignment step --
+#            team decision, flagged in docs/open-questions.md).
+#   view     any safety_officer; anyone else 404. The coordinator reads a
+#            session's reviews via GET /events/<id>/safety-reviews (gated by
+#            event.view), so they need no access to the officer's view.
+#   approve / reject / request_changes
+#            any safety_officer, review must still be pending; same shape as
+#            rule_venue_booking_approve/reject.
+
+SAFETY_OFFICER_ROLE = "safety_officer"
+
+
+def rule_safety_review_submit(user: Any, event: Any) -> Decision:
+    return _assigned_coordinator_from(user, event, "planning")
+
+
+def rule_safety_review_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, SAFETY_OFFICER_ROLE):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_safety_review_view(user: Any, review: Any) -> Decision:
+    if _has_role(user, SAFETY_OFFICER_ROLE):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_safety_review_approve(user: Any, review: Any) -> Decision:
+    if not _has_role(user, SAFETY_OFFICER_ROLE):
+        return Decision.DENY_NOT_FOUND
+    if review.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_safety_review_reject(user: Any, review: Any) -> Decision:
+    # Same precondition as approve, kept separate per "WHY SEPARATE ACTIONS".
+    return rule_safety_review_approve(user, review)
+
+
+def rule_safety_review_request_changes(user: Any, review: Any) -> Decision:
+    return rule_safety_review_approve(user, review)

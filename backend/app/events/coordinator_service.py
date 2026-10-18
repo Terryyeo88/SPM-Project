@@ -63,7 +63,7 @@ from app.extensions import supabase
 
 # Statuses that count as "this coordinator is actively on the hook for
 # this event" -- draft/rejected/cancelled/completed don't block a slot.
-ACTIVE_STATUSES = ("under_review", "approved", "planning", "confirmed")
+ACTIVE_STATUSES = ("under_review", "approved", "planning", "safety_review", "confirmed")
 
 
 class NoCoordinatorAvailableError(Exception):

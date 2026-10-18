@@ -23,7 +23,7 @@
  *   Past       -- every session finished (completed, cancelled, rejected).
  */
 
-export const ACTIVE_STATUSES = Object.freeze(['under_review', 'approved', 'planning', 'confirmed'])
+export const ACTIVE_STATUSES = Object.freeze(['under_review', 'approved', 'planning', 'safety_review', 'confirmed'])
 export const PAST_STATUSES = Object.freeze(['completed', 'cancelled', 'rejected'])
 
 export const LEAD_TABS = Object.freeze([

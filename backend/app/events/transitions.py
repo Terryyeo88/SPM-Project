@@ -72,7 +72,24 @@ _EDGE_SOURCES: dict[tuple[str, str], str] = {
         "rejection requires a reason."
     ),
     ("approved", "planning"): "Coordinator can set planning only if current status is approved.",
-    ("planning", "confirmed"): "Coordinator can set confirmed only from planning.",
+    # Week 7 #6 Operational Feasibility Check. A session reaches confirmed
+    # only through the safety check: the coordinator submits it (planning ->
+    # safety_review), the Safety Officer decides, and the coordinator
+    # confirms an approved one. There is deliberately no planning ->
+    # confirmed edge any more, so nothing can skip the check (app.safety).
+    ("planning", "safety_review"): (
+        "Week 7 #6: After the venue and technical arrangements have been confirmed, the Safety Officer "
+        "must conduct an Operational Safety Check before the event can proceed to preparation."
+    ),
+    ("safety_review", "confirmed"): (
+        "Week 7 #6: The event cannot proceed to preparation until the Safety Officer has approved it. "
+        "Week 9: the co-ordinator will decide on the subsequent action. "
+        "(Coordinator confirms; only once the latest safety review is approved.)"
+    ),
+    ("safety_review", "planning"): (
+        "Week 7 #6: If changes are required, the event returns to the relevant earlier planning stage. "
+        "Week 9: if the safety approval failed, then it will send the event back to planning phase."
+    ),
     # Not a button: app.events.event_update takes this edge itself when
     # details change on a confirmed event.
     ("confirmed", "planning"): (
@@ -88,6 +105,7 @@ _EDGE_SOURCES: dict[tuple[str, str], str] = {
     ("approved", "cancelled"): "Coordinator can cancel after approval; cancellation requires a reason.",
     ("planning", "cancelled"): "Coordinator can cancel after approval; cancellation requires a reason.",
     ("confirmed", "cancelled"): "Coordinator can cancel after approval; cancellation requires a reason.",
+    ("safety_review", "cancelled"): "Coordinator can cancel after approval; cancellation requires a reason.",
 }
 
 ALLOWED: frozenset[tuple[str, str]] = frozenset(_EDGE_SOURCES)
@@ -104,6 +122,7 @@ _LABELS: dict[str, str] = {
     "under_review": "under review",
     "approved": "approved",
     "planning": "in planning",
+    "safety_review": "awaiting a safety review",
     "confirmed": "confirmed",
     "completed": "completed",
     "cancelled": "cancelled",

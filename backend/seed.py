@@ -52,6 +52,12 @@ TECH_STAFF = [
     {"email": "techsupport1@example.com", "name": "Ivan Goh"},
 ]
 
+# Safety Officer (Week 7 change #6, Operational Feasibility Check): reviews
+# sessions the coordinator submits for a safety check. Same as supabase/seed.sql.
+SAFETY_OFFICERS = [
+    {"email": "safety1@example.com", "name": "Hannah Lee"},
+]
+
 # Equipment inventory, unit level (IS-18): one entry per physical item.
 # Types match app.events.event_service.EQUIPMENT. PRJ-003 is under
 # maintenance on purpose, so the availability check has an out-of-service
@@ -485,6 +491,11 @@ def main():
         add_role(uid, "technical_support_staff")
         print(f"Tech staff ready:  {tech['name']} <{tech['email']}> -> {uid}")
 
+    for officer in SAFETY_OFFICERS:
+        uid = get_or_create_user(officer["email"], officer["name"])
+        add_role(uid, "safety_officer")
+        print(f"Safety officer:    {officer['name']} <{officer['email']}> -> {uid}")
+
     for attendee in ATTENDEES:
         uid = get_or_create_user(attendee["email"], attendee["name"])
         add_role(uid, "attendee")
@@ -567,7 +578,7 @@ def main():
     )
 
     print(
-        "\nDone. 3 coordinators, 1 lead, 1 tech staff, 1 organizer, 3 attendees, "
+        "\nDone. 3 coordinators, 1 lead, 1 tech staff, 1 safety officer, 1 organizer, 3 attendees, "
         "4 events, 4 venues, 11 equipment units seeded."
     )
 

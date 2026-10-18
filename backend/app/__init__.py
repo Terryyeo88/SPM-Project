@@ -46,12 +46,14 @@ def _register_error_handlers(app: Flask) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
+    from app.equipment.calendar_routes import equipment_calendar_bp
     from app.equipment.routes import equipment_bp
     from app.events.routes import events_bp
     from app.health.routes import health_bp
     from app.me.routes import me_bp
     from app.registrations.routes import registrations_bp
     from app.room_layouts.routes import room_layouts_bp
+    from app.safety.routes import safety_bp
     from app.venues.conflict_routes import booking_conflicts_bp
     from app.venues.routes import venues_bp
 
@@ -60,6 +62,8 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(events_bp)
     app.register_blueprint(venues_bp)
     app.register_blueprint(equipment_bp)
+    app.register_blueprint(equipment_calendar_bp)
     app.register_blueprint(registrations_bp)
     app.register_blueprint(booking_conflicts_bp)
     app.register_blueprint(room_layouts_bp)
+    app.register_blueprint(safety_bp)

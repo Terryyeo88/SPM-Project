@@ -70,6 +70,7 @@ describe('tabForStatus / isDashboardTab', () => {
   it('sends an event back to the tab matching its status', () => {
     expect(tabForStatus('under_review')).toBe('needsReview')
     expect(tabForStatus('planning')).toBe('inPlanning')
+    expect(tabForStatus('safety_review')).toBe('inPlanning')
     expect(tabForStatus('confirmed')).toBe('confirmed')
     expect(tabForStatus('rejected')).toBe('past')
   })

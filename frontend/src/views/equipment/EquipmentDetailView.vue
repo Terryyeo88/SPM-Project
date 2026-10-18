@@ -82,6 +82,13 @@ onMounted(load)
             </ul>
             <p class="hint">Times shown in Singapore time.</p>
           </section>
+
+          <router-link
+            :to="{ name: 'equipment-calendar', params: { equipmentId: unit.id } }"
+            class="calendar-link"
+          >
+            View reservation calendar &rarr;
+          </router-link>
         </template>
       </div>
     </main>
@@ -114,6 +121,9 @@ onMounted(load)
 .occupancy-event { font-size: 14px; font-weight: 600; color: #2a2a2a; }
 .occupancy-period { grid-column: 1; font-size: 12px; color: #6a6a6a; }
 .occupancy-link { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; color: #1f5fae; text-decoration: none; }
+
+.calendar-link { align-self: flex-start; font-size: 14px; font-weight: 700; color: #1f5fae; text-decoration: none; }
+.calendar-link:hover { text-decoration: underline; }
 
 .status { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 3px 10px; white-space: nowrap; }
 .status-available { color: #0f6e6a; background: #ddf3f1; }

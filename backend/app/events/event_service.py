@@ -32,6 +32,7 @@ EVENT_STATUSES = {
     "under_review",
     "approved",
     "planning",
+    "safety_review",
     "confirmed",
     "completed",
     "cancelled",

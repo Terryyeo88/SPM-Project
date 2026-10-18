@@ -350,6 +350,7 @@ describe('router: authentication and role-based route guarding', () => {
       ['/equipment/requests', 'equipment-requests'],
       ['/equipment/requests/req-1', 'equipment-request-details'],
       ['/equipment/unit-1', 'equipment-details'],
+      ['/equipment/unit-1/calendar', 'equipment-calendar'],
     ])('technical_support_staff reaches %s', async (path, name) => {
       mockSession(true)
       mockMe('technical_support_staff')
@@ -364,10 +365,18 @@ describe('router: authentication and role-based route guarding', () => {
       expect(router.currentRoute.value.params.requestId).toBe('req-1')
       await router.push('/equipment/unit-1')
       expect(router.currentRoute.value.params.equipmentId).toBe('unit-1')
+      await router.push('/equipment/unit-2/calendar')
+      expect(router.currentRoute.value.params.equipmentId).toBe('unit-2')
     })
 
     it.each(NON_STAFF)('%s is redirected to /dashboard from every equipment route', async (role) => {
-      for (const path of ['/equipment', '/equipment/requests', '/equipment/requests/req-1', '/equipment/unit-1']) {
+      for (const path of [
+        '/equipment',
+        '/equipment/requests',
+        '/equipment/requests/req-1',
+        '/equipment/unit-1',
+        '/equipment/unit-1/calendar',
+      ]) {
         router = createAppRouter()
         mockSession(true)
         mockMe(role)

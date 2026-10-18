@@ -299,10 +299,7 @@ end $$;
 -- under maintenance on purpose, so the availability check has an
 -- out-of-service unit to leave out of the count.
 --
--- Requests and reservations are intentionally NOT duplicated here -- they
--- need real event/profile ids and dates relative to today, which this
--- static file can't look up the way seed_equipment_demo() in
--- backend/seed.py does; run that script for the demo requests. Every
+-- Demo requests and reservations follow in the next section. Every
 -- insert here is guarded so re-running this file is safe.
 do $$
 declare
@@ -327,6 +324,32 @@ begin
   insert into public.user_roles (user_id, role) values (v_id, 'technical_support_staff') on conflict do nothing;
 end $$;
 
+-- ============================================================
+-- One Safety Officer account (Week 7 change #6, Operational Feasibility
+-- Check): reviews sessions the coordinator submits for a safety check.
+do $$
+declare
+  v_id uuid;
+begin
+  select id into v_id from public.profiles where email = 'safety1@example.com';
+  if v_id is null then
+    v_id := gen_random_uuid();
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at, confirmation_token, email_change,
+      email_change_token_new, recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'safety1@example.com', crypt('Password123!', gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
+      now(), now(), '', '', '', ''
+    );
+    insert into public.profiles (id, name, email) values (v_id, 'Hannah Lee', 'safety1@example.com');
+  end if;
+  insert into public.user_roles (user_id, role) values (v_id, 'safety_officer') on conflict do nothing;
+end $$;
+
 insert into public.equipment_types (name)
 values ('microphone'), ('projector'), ('screen'), ('wifi')
 on conflict (name) do nothing;
@@ -348,3 +371,129 @@ from (values
 ) as u(type_name, asset_tag, status, notes)
 join public.equipment_types t on t.name = u.type_name
 on conflict (asset_tag) do nothing;
+
+-- ============================================================
+-- Equipment requests and reservations (demo data)
+-- ============================================================
+-- Nothing in the app creates these rows yet (the "Record Equipment
+-- Request" and "Accept an equipment request" stories aren't built), so
+-- without them every view that reads requests or reservations is empty.
+-- backend/seed.py's seed_equipment_demo() adds its own set when that
+-- script is run; this set is what `supabase db reset` alone gives you.
+--
+-- Three CONFIRMED requests, each period worked out from its own event's
+-- dates and times (Singapore time), with the units they hold:
+--
+--   Annual Tech Symposium                        18:00 the day before its
+--     PRJ-001, MIC-001, MIC-002, SCR-001         start date - 12:00 the day
+--                                                 after (set-up the evening
+--                                                 before; spans three days)
+--   Community Workshop, session 1                an hour either side of
+--     PRJ-001, MIC-001                           the session's start/end
+--   Community Workshop, session 2                same
+--     PRJ-001, MIC-001
+--
+-- PRJ-001 and MIC-001 each carry three separate reservations, two of them
+-- from the two sessions of the same shared request. Nothing here is a
+-- fixed date, so the reservations stay on their events' days whenever this
+-- runs. The Workshop sessions are a week apart and at least 30 days out,
+-- so they never overlap each other. The Symposium keeps its fixed date
+-- (above), so a session would only overlap its window if this ran on
+-- 2026-10-04, 2026-10-05 or 2026-10-11 -- equipment_reservations_no_unit_
+-- overlap would then reject the seed rather than double-book a unit.
+--
+-- Safe to re-run: the Symposium's requests are deleted first, and the
+-- Community Workshop requests go when those events are recreated above.
+-- Its items and reservations cascade with each request.
+do $$
+declare
+  v_symposium record;
+  v_session1 record;
+  v_session2 record;
+  v_request_id uuid;
+  v_item_id uuid;
+  r record;
+  b record;
+begin
+  select id, coordinator_id, preferred_start_date, preferred_end_date into v_symposium
+  from public.events where name = 'Annual Tech Symposium';
+
+  select id, coordinator_id, preferred_start_date, preferred_end_date,
+         preferred_start_time, preferred_end_time into v_session1
+  from public.events where name = 'Registration Demo: Community Workshop'
+  order by preferred_start_date limit 1;
+
+  select id, coordinator_id, preferred_start_date, preferred_end_date,
+         preferred_start_time, preferred_end_time into v_session2
+  from public.events where name = 'Registration Demo: Community Workshop'
+  order by preferred_start_date desc limit 1;
+
+  if v_symposium.id is null or v_session1.id is null or v_session2.id is null
+     or v_session1.id = v_session2.id then
+    raise exception 'Equipment demo: expected the Annual Tech Symposium and two Community Workshop sessions to be seeded above.';
+  end if;
+
+  -- The Workshop reservations are worked out from the sessions' times.
+  if v_session1.preferred_start_time is null then
+    raise exception 'Equipment demo: Community Workshop session 1 (event %) has no preferred_start_time.', v_session1.id;
+  end if;
+  if v_session1.preferred_end_time is null then
+    raise exception 'Equipment demo: Community Workshop session 1 (event %) has no preferred_end_time.', v_session1.id;
+  end if;
+  if v_session2.preferred_start_time is null then
+    raise exception 'Equipment demo: Community Workshop session 2 (event %) has no preferred_start_time.', v_session2.id;
+  end if;
+  if v_session2.preferred_end_time is null then
+    raise exception 'Equipment demo: Community Workshop session 2 (event %) has no preferred_end_time.', v_session2.id;
+  end if;
+
+  delete from public.equipment_requests where event_id = v_symposium.id;
+
+  -- One confirmed request per row of `b`; each of its lines (`r`) becomes
+  -- an item, and the named units are reserved for the whole request period.
+
+  for b in
+    select * from (values
+      (v_symposium.id, v_symposium.coordinator_id,
+       ((v_symposium.preferred_start_date - 1) + time '18:00') at time zone 'Asia/Singapore',
+       ((coalesce(v_symposium.preferred_end_date, v_symposium.preferred_start_date) + 1) + time '12:00')
+         at time zone 'Asia/Singapore'),
+      (v_session1.id, v_session1.coordinator_id,
+       (v_session1.preferred_start_date + v_session1.preferred_start_time - interval '1 hour')
+         at time zone 'Asia/Singapore',
+       (v_session1.preferred_end_date + v_session1.preferred_end_time + interval '1 hour')
+         at time zone 'Asia/Singapore'),
+      (v_session2.id, v_session2.coordinator_id,
+       (v_session2.preferred_start_date + v_session2.preferred_start_time - interval '1 hour')
+         at time zone 'Asia/Singapore',
+       (v_session2.preferred_end_date + v_session2.preferred_end_time + interval '1 hour')
+         at time zone 'Asia/Singapore')
+    ) as t(event_id, requested_by, needed_start, needed_end)
+  loop
+    insert into public.equipment_requests (event_id, requested_by, status, needed_start, needed_end)
+    values (b.event_id, b.requested_by, 'confirmed', b.needed_start, b.needed_end)
+    returning id into v_request_id;
+
+    for r in
+      select * from (values
+        (v_symposium.id, 'projector', 1, 'HDMI and USB-C inputs', array['PRJ-001']),
+        (v_symposium.id, 'microphone', 2, 'One handheld, one lapel', array['MIC-001', 'MIC-002']),
+        (v_symposium.id, 'screen', 1, 'Pull-down, minimum 2.4 m wide', array['SCR-001']),
+        (v_session1.id, 'projector', 1, null, array['PRJ-001']),
+        (v_session1.id, 'microphone', 1, null, array['MIC-001']),
+        (v_session2.id, 'projector', 1, null, array['PRJ-001']),
+        (v_session2.id, 'microphone', 1, null, array['MIC-001'])
+      ) as l(event_id, type_name, quantity, technical_requirements, asset_tags)
+      where l.event_id = b.event_id
+    loop
+      insert into public.equipment_request_items (request_id, equipment_type_id, quantity, technical_requirements)
+      select v_request_id, t.id, r.quantity, r.technical_requirements
+      from public.equipment_types t where t.name = r.type_name
+      returning id into v_item_id;
+
+      insert into public.equipment_reservations (equipment_id, request_item_id, reserved_start, reserved_end)
+      select u.id, v_item_id, b.needed_start, b.needed_end
+      from public.equipment_units u where u.asset_tag = any (r.asset_tags);
+    end loop;
+  end loop;
+end $$;
