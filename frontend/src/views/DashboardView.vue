@@ -6,6 +6,7 @@ import AppNavBar from '../components/AppNavBar.vue'
 import CoordinatorDashboard from './dashboard/CoordinatorDashboard.vue'
 import LeadDashboard from './dashboard/LeadDashboard.vue'
 import AttendeeDashboard from './dashboard/AttendeeDashboard.vue'
+import SafetyOfficerDashboard from './dashboard/SafetyOfficerDashboard.vue'
 
 const auth = useAuthStore()
 
@@ -27,6 +28,8 @@ const isCoordinator = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDIN
 const isLead = computed(() => hasAnyRole(auth.roles, [ROLES.EVENT_COORDINATOR_LEAD]))
 // Attendee Registration: the attendee's dashboard (Dashboard-Attendee wireframe).
 const isAttendee = computed(() => hasAnyRole(auth.roles, [ROLES.ATTENDEE]))
+// Week 7 change #6: the Safety Officer's dashboard (Check Safety / Checked).
+const isSafetyOfficer = computed(() => hasAnyRole(auth.roles, [ROLES.SAFETY_OFFICER]))
 </script>
 
 <template>
@@ -60,12 +63,13 @@ const isAttendee = computed(() => hasAnyRole(auth.roles, [ROLES.ATTENDEE]))
         "nothing built for your role" once we actually KNOW the roles (a
         genuinely empty match), never while profile is still null/failed --
         that case is the message above instead. -->
-        <p v-else-if="auth.profile && !isCoordinator && !isLead && !isAttendee" class="no-sections">
+        <p v-else-if="auth.profile && !isCoordinator && !isLead && !isAttendee && !isSafetyOfficer" class="no-sections">
           Nothing's been built yet for your role(s) this sprint -- see docs/traceability.md's
           "Explicitly deferred" section.
         </p>
 
         <AttendeeDashboard v-if="isAttendee" />
+        <SafetyOfficerDashboard v-if="isSafetyOfficer" />
         <LeadDashboard v-if="isLead" />
         <CoordinatorDashboard v-if="isCoordinator" />
       </div>

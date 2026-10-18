@@ -1,7 +1,8 @@
 """
 IS-36 (approved -> planning), IS-38 (confirmed -> completed, read-only
-afterwards), IS-39 (cancel with a reason), plus the minimal confirm route
-IS-38 needs to be reachable end to end.
+afterwards), IS-39 (cancel with a reason), plus the confirm route, which
+since Week 7 change #6 goes safety_review -> confirmed and only once the
+Safety Officer has approved the session.
 
 Unit level, no database. Rule tests call can() directly. Route tests go
 through the real app, the real @require and the real transition(), with
@@ -42,7 +43,7 @@ def _event(status, coordinator_id=COORD):
 
 STEPS = [
     (actions.EVENT_START_PLANNING, "approved"),
-    (actions.EVENT_CONFIRM, "planning"),
+    (actions.EVENT_CONFIRM, "safety_review"),
     (actions.EVENT_COMPLETE, "confirmed"),
 ]
 
@@ -54,7 +55,7 @@ def test_assigned_coordinator_may_take_step_from_its_status(action, from_status)
 
 @pytest.mark.parametrize("action,from_status", STEPS)
 def test_step_refused_from_any_other_status(action, from_status):
-    for status in ["draft", "submitted", "under_review", "approved", "planning",
+    for status in ["draft", "submitted", "under_review", "approved", "planning", "safety_review",
                    "confirmed", "completed", "cancelled", "rejected"]:
         if status != from_status:
             assert not can(_coordinator(), action, _event(status)), (action, status)
@@ -109,7 +110,7 @@ def test_reassign_still_allowed_before_completion(status):
 # -- IS-39: cancel rule ----------------------------------------------------
 
 
-@pytest.mark.parametrize("status", ["approved", "planning", "confirmed"])
+@pytest.mark.parametrize("status", ["approved", "planning", "safety_review", "confirmed"])
 def test_is39_coordinator_can_cancel_after_approval(status):
     assert can(_coordinator(), actions.EVENT_CANCEL, _event(status))
 
@@ -126,6 +127,7 @@ class _Store:
     def __init__(self, status):
         self.status, self.history = status, []
         self.released = []  # event ids release_event_equipment was called for
+        self.approved = True  # what safety_service.is_approved reports (confirm's gate)
 
     def release_equipment(self, event_id):
         self.released.append(event_id)
@@ -161,6 +163,7 @@ def world(monkeypatch):
         monkeypatch.setattr(transitions, "_db_insert_history", store.insert_history)
         monkeypatch.setattr(transitions, "_db_list_history", store.list_history)
         monkeypatch.setattr(routes_module, "release_event_equipment", store.release_equipment)
+        monkeypatch.setattr(routes_module, "is_approved", lambda event_id: store.approved)
         monkeypatch.setattr(
             routes_module,
             "load_event",
@@ -186,7 +189,7 @@ def _auth(signing_key, user_id=COORD):
 
 @pytest.mark.parametrize(
     "path,from_status,to_status",
-    [("start-planning", "approved", "planning"), ("confirm", "planning", "confirmed"),
+    [("start-planning", "approved", "planning"), ("confirm", "safety_review", "confirmed"),
      ("complete", "confirmed", "completed")],
 )
 def test_lifecycle_route_moves_event_and_records_actor(client, signing_key, world, path, from_status, to_status):
@@ -198,6 +201,29 @@ def test_lifecycle_route_moves_event_and_records_actor(client, signing_key, worl
     assert store.history[0]["from_status"] == from_status
     assert store.history[0]["to_status"] == to_status
     assert store.history[0]["changed_by"] == COORD
+
+
+def test_confirm_refused_until_the_safety_officer_approves(client, signing_key, world):
+    """Week 7 change #6: \"The event cannot proceed to preparation until the
+    Safety Officer has approved it.\" In safety_review but not yet approved
+    (pending, or no review at all): 400, and the status doesn't move."""
+    store = world(["event_coordinator"], "safety_review")
+    store.approved = False
+    response = client.post("/events/event-1/confirm", headers=_auth(signing_key), json={})
+
+    assert response.status_code == 400
+    assert "Safety Officer" in response.get_json()["error"]["message"]
+    assert store.status == "safety_review"
+    assert store.history == []
+
+
+def test_confirm_from_planning_is_refused(client, signing_key, world):
+    """Nothing skips the safety check: a planning session can't be confirmed."""
+    store = world(["event_coordinator"], "planning")
+    response = client.post("/events/event-1/confirm", headers=_auth(signing_key), json={})
+
+    assert response.status_code == 403
+    assert store.status == "planning"
 
 
 def test_is36_start_planning_refused_unless_approved(client, signing_key, world):
@@ -324,7 +350,7 @@ def test_a_cancel_that_lost_a_race_releases_nothing(client, signing_key, world):
     assert store.released == []
 
 
-@pytest.mark.parametrize("path,from_status", [("start-planning", "approved"), ("confirm", "planning"),
+@pytest.mark.parametrize("path,from_status", [("start-planning", "approved"), ("confirm", "safety_review"),
                                               ("complete", "confirmed")])
 def test_other_lifecycle_moves_do_not_release_equipment(client, signing_key, world, path, from_status):
     store = world(["event_coordinator"], from_status)

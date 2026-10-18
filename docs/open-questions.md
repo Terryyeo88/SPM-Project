@@ -820,28 +820,16 @@ in docs/design-decisions.md; please confirm or correct:
 
 ## Safety review status (Week 7 #6, Justin, 18 Oct)
 
-- **`safety_review` exists, but nothing moves an event into it yet.** This
-  change adds only the status, its four transition edges, labels and
-  badge styles. The Safety Officer role and its actions (pick up the
-  event, approve / reject / request changes with a comment) are a
-  separate story and still need an owner. Until then **`planning ->
-  confirmed` is kept on purpose,** so events can still be confirmed. When
-  the Safety Officer story lands it should remove that edge, so nothing
-  can skip the safety check.
+- ~~**`safety_review` exists, but nothing moves an event into it yet.**~~
+  **Resolved by the Safety Officer story (19 Oct, below):** the coordinator
+  submits a session into `safety_review`, and `planning -> confirmed` is
+  removed.
 
-- **For the Safety Officer story: status lists that will need
-  `safety_review`.** Left alone here because they change behaviour and
-  belong to other stories:
-  - `rules.py::_CANCELLABLE_STATUSES`: the coordinator should be able to
-    cancel during safety review (the `safety_review -> cancelled` edge
-    already exists).
-  - `rules.py::CHANGE_REQUEST_STATUSES` and
-    `frontend/src/lib/changeRequests.js`: organisers can request changes
-    up to confirmed, so presumably during safety review too.
-  - `change_impact.py::ARRANGED_STATUSES` and
-    `event_update.py::IMPACT_CHECKED_STATUSES`: arrangements exist by
-    then, so edits should still show their impacts.
-  - `CoordinatorEventReview.vue::canCancel`.
+- ~~**Status lists that will need `safety_review`.**~~ **Resolved by the
+  Safety Officer story:** `_CANCELLABLE_STATUSES`, `CHANGE_REQUEST_STATUSES`
+  (backend and `changeRequests.js`), `ARRANGED_STATUSES`,
+  `IMPACT_CHECKED_STATUSES` and `CoordinatorEventReview.vue::canCancel` all
+  include it now.
 
 - **Please confirm: no separate `preparation` status.** Week 7 says the
   event "cannot proceed to preparation until the Safety Officer has
@@ -856,3 +844,56 @@ in docs/design-decisions.md; please confirm or correct:
   failed safety approval "will send the event back to planning phase", so
   both non-approvals use `safety_review -> planning`, and the comment says
   what to fix. Please confirm a rejection shouldn't end the event instead.
+
+## Safety Officer (Week 7 #6, Justin, 19 Oct)
+
+Decisions made where Week 7 and Week 9 were silent (reasoning in
+`docs/design-decisions.md`, "Safety Officer"). Please confirm:
+
+- **Every Safety Officer sees and may decide every review.** No assignment
+  or "claim" step: Week 9's "pick up the event request" is read as opening
+  it from the shared queue, the way every Venue Staff member sees every
+  booking.
+- **When a session can be submitted:** at least one confirmed venue
+  booking, and no venue booking or equipment request still pending.
+  Equipment is optional (a session may need none, and equipment requests
+  can't be created in the app yet). Rejected bookings/requests don't block.
+- **The comment is required to reject or request changes, optional to
+  approve.** Week 9 says the officer updates the status "with a comment";
+  read as "a comment where one is needed to act on".
+- **The coordinator confirms an approved session** ("Confirm Event"); safety
+  approval doesn't confirm it automatically. Week 9: "The co-ordinator will
+  decide on the subsequent action." Confirming is refused (400) unless the
+  latest safety review is approved.
+- **One review per session, not per request** (each session has its own
+  venue, capacity, layout and status). The dashboard still shows one card
+  per request, with its sessions inside.
+- **Reject and request changes behave the same** (both back to planning, the
+  comment saying what to fix) -- unchanged from the safety_review status
+  story above; still worth confirming.
+
+Known gaps, not built:
+
+- **Editing a session during its safety check doesn't reset the check.**
+  While a session is in `safety_review` (pending or approved), the
+  coordinator can still edit it (`rule_event_edit`), and the review stands.
+  Changes AFTER confirmation already send it back to planning (IS-9), which
+  then needs a new check. Options: block edits while in `safety_review`, or
+  send the session back to planning on a significant edit.
+- **A pending review of a cancelled session stays `pending` in the table.**
+  It's hidden from the dashboard and can't be decided (the service checks
+  the session is still in `safety_review`); nothing marks it closed.
+- **Notifications** (officer told of a submission, coordinator told of a
+  decision): placeholders only (`safety_service._notify_safety_review`), like
+  every other notification.
+- **Emergency access, equipment placement, crowd movement and venue
+  restrictions** aren't recorded anywhere; the review page lists them as
+  the officer's own checks (Week 9: the officer doesn't input, only
+  approves).
+- **No seeded demo session ready for a safety check.** `seed.sql`/`seed.py`
+  add the Safety Officer account (`safety1@example.com`); to demo the flow,
+  take a planning session, get its venue booking confirmed, then submit it.
+- **Submit and decide are two writes each, not one transaction** (review
+  row + status change), the same trade-off as `transitions.transition()`'s
+  history insert. Each handles a failure between the two -- see
+  `app/safety/safety_service.py`.

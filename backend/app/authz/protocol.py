@@ -33,3 +33,9 @@ class EquipmentRequestLike(Protocol):
     id: str
     requested_by: str
     status: str
+
+
+class SafetyReviewLike(Protocol):
+    id: str
+    event_id: str
+    status: str

@@ -72,18 +72,19 @@ _EDGE_SOURCES: dict[tuple[str, str], str] = {
         "rejection requires a reason."
     ),
     ("approved", "planning"): "Coordinator can set planning only if current status is approved.",
-    ("planning", "confirmed"): "Coordinator can set confirmed only from planning.",
-    # Week 7 #6 Operational Feasibility Check. These edges are legal but no
-    # route takes them yet: the Safety Officer role and its actions are a
-    # separate story (docs/open-questions.md). planning -> confirmed above
-    # stays until that story lands, so confirming an event still works.
+    # Week 7 #6 Operational Feasibility Check. A session reaches confirmed
+    # only through the safety check: the coordinator submits it (planning ->
+    # safety_review), the Safety Officer decides, and the coordinator
+    # confirms an approved one. There is deliberately no planning ->
+    # confirmed edge any more, so nothing can skip the check (app.safety).
     ("planning", "safety_review"): (
         "Week 7 #6: After the venue and technical arrangements have been confirmed, the Safety Officer "
         "must conduct an Operational Safety Check before the event can proceed to preparation."
     ),
     ("safety_review", "confirmed"): (
         "Week 7 #6: The event cannot proceed to preparation until the Safety Officer has approved it. "
-        "Week 9: the co-ordinator will decide on the subsequent action."
+        "Week 9: the co-ordinator will decide on the subsequent action. "
+        "(Coordinator confirms; only once the latest safety review is approved.)"
     ),
     ("safety_review", "planning"): (
         "Week 7 #6: If changes are required, the event returns to the relevant earlier planning stage. "

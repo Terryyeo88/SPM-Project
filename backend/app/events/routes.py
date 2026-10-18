@@ -34,6 +34,7 @@ from app.authz.actions import (
     EVENT_START_PLANNING,
     EVENT_SUBMIT,
     EVENT_VIEW,
+    SAFETY_REVIEW_SUBMIT,
     VENUE_BOOKING_CREATE,
 )
 from app.authz.decorators import require
@@ -67,6 +68,7 @@ from app.events.event_service import (
 from app.events.event_update import preview_event_update, update_event
 from app.events.transitions import status_history, transition
 from app.extensions import supabase
+from app.safety.safety_service import is_approved, list_reviews_for_event, submit_for_safety_check
 from app.shared.errors import NotFoundError, ValidationError
 from app.venues.booking_service import create_booking_request, list_bookings_for_event
 
@@ -253,10 +255,38 @@ def start_planning(event, event_id):
 @events_bp.route("/<event_id>/confirm", methods=["POST"])
 @require(EVENT_CONFIRM, loader=lambda event_id: load_event(event_id))
 def confirm_event(event, event_id):
-    """planning -> confirmed. Status change only, for end-to-end testability.
-    The Confirmed Status story's "fields should not be changed once
-    confirmed" half is NOT implemented here (see docs/open-questions.md)."""
+    """safety_review -> confirmed, once the Safety Officer has approved the
+    session (Week 7 change #6: "The event cannot proceed to preparation
+    until the Safety Officer has approved it"; Week 9: "The co-ordinator
+    will decide on the subsequent action"). rule_event_confirm checks the
+    status; whether the latest review is approved is a database fact, so
+    it's checked here. The Confirmed Status story's "fields should not be
+    changed once confirmed" half is NOT implemented (docs/open-questions.md)."""
+    if not is_approved(event_id):
+        raise ValidationError(
+            "The Safety Officer hasn't approved this session yet -- it can be confirmed once they do."
+        )
     return jsonify(_move(event, event_id, "confirmed")), 200
+
+
+# -- Operational Feasibility Check (Week 7 change #6), coordinator side ------
+# Submit one planning session for its safety check, and read a session's
+# safety-check history. The Safety Officer's side is app/safety/routes.py.
+
+
+@events_bp.route("/<event_id>/safety-review", methods=["POST"])
+@require(SAFETY_REVIEW_SUBMIT, loader=lambda event_id: load_event(event_id))
+def submit_safety_review(event, event_id):
+    return jsonify(submit_for_safety_check(event, current_user().id)), 201
+
+
+# Gated on EVENT_VIEW: this session's own history, for whoever can already
+# see the session (its coordinator, organiser, the Lead) -- same split as
+# GET /events/<id>/venue-bookings.
+@events_bp.route("/<event_id>/safety-reviews", methods=["GET"])
+@require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
+def get_safety_reviews_for_event(event, event_id):
+    return jsonify(list_reviews_for_event(event_id)), 200
 
 
 @events_bp.route("/<event_id>/complete", methods=["POST"])

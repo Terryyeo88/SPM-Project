@@ -190,6 +190,16 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(roleLabel(ROLES.EVENT_COORDINATOR_LEAD)).toBe('Event Coordinator Lead')
   })
 
+  it('safety_officer has no nav links, works from their dashboard, and alone reaches a safety review (Week 7 change #6)', () => {
+    expect(navRoles([ROLES.SAFETY_OFFICER])).toEqual([])
+    expect(visibleLinks([ROLES.SAFETY_OFFICER])).toEqual([])
+    expect(roleLabel(ROLES.SAFETY_OFFICER)).toBe('Safety Officer')
+    expect(reachableRoutes([ROLES.SAFETY_OFFICER])).toContain('safety-review')
+    for (const role of Object.values(ROLES).filter((r) => r !== ROLES.SAFETY_OFFICER)) {
+      expect(reachableRoutes([role])).not.toContain('safety-review')
+    }
+  })
+
   it('technical_support_staff sees exactly the two equipment nav links (Check Equipment Availability, IS-18)', () => {
     expect(visibleLinks([ROLES.TECHNICAL_SUPPORT_STAFF]).sort()).toEqual(['equipment', 'equipment-requests'])
   })

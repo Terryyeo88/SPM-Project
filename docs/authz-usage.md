@@ -34,11 +34,11 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_DELETE` | organiser (own event) | status must be `draft` |
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
-| `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, confirmed` |
+| `EVENT_CANCEL` | coordinator (assigned) | status in `approved, planning, safety_review, confirmed` |
 | `EVENT_REASSIGN_COORDINATOR` | Event Coordinator Lead only (Week 9 clarification; the event's own coordinator and organiser get 403) | event has a coordinator, any status **except `completed`** (IS-38) |
 | `EVENT_ASSIGN_COORDINATOR` | Event Coordinator Lead | status `submitted` and no coordinator yet (the unassigned queue) — Week 7 change #5 |
 | `EVENT_START_PLANNING` | coordinator (assigned) | status must be `approved` (IS-36) |
-| `EVENT_CONFIRM` | coordinator (assigned) | status must be `planning` |
+| `EVENT_CONFIRM` | coordinator (assigned) | status must be `safety_review`; the route also requires the latest safety review to be approved (Week 7 change #6) |
 | `EVENT_COMPLETE` | coordinator (assigned) | status must be `confirmed` (IS-38) |
 | `COORDINATOR_LIST` | coordinator or Event Coordinator Lead | role only |
 | `EVENT_REGISTER` | attendee | session is `confirmed` with `registration_needs` true (otherwise 404 to attendees); the registration window is checked by the database function |
@@ -48,6 +48,10 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
 | `ROOM_LAYOUT_LIST` | organiser, coordinator, Event Coordinator Lead or venue staff | role only (the active layouts) |
 | `ROOM_LAYOUT_MANAGE` | venue staff | role only (add, rename, soft-delete, restore, permanently delete; see soft-deleted layouts) |
+| `SAFETY_REVIEW_SUBMIT` | coordinator (assigned) | status must be `planning`; the service also requires a confirmed venue and nothing pending (Week 7 change #6) |
+| `SAFETY_REVIEW_LIST` | safety officer | role only (every officer sees every review) |
+| `SAFETY_REVIEW_VIEW` | safety officer | role only; anyone else 404 |
+| `SAFETY_REVIEW_APPROVE` / `SAFETY_REVIEW_REJECT` / `SAFETY_REVIEW_REQUEST_CHANGES` | safety officer | review must be `pending`; anyone else 404 |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`
 (the logic, with the source story quoted for every precondition).

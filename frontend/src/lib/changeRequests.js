@@ -15,7 +15,7 @@ import { ACCESSIBILITY_OPTIONS, EQUIPMENT_OPTIONS, sessionFromEvent, sessionPayl
 
 // Same window as CHANGE_REQUEST_STATUSES in app/authz/rules.py: submitted
 // up to confirmed. Draft and rejected are edited directly instead.
-export const CHANGE_REQUEST_STATUSES = Object.freeze(['submitted', 'under_review', 'approved', 'planning', 'confirmed'])
+export const CHANGE_REQUEST_STATUSES = Object.freeze(['submitted', 'under_review', 'approved', 'planning', 'safety_review', 'confirmed'])
 
 export const SHARED_FIELDS = Object.freeze(['name', 'description', 'purpose'])
 
