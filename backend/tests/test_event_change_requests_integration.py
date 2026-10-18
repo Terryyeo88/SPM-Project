@@ -89,9 +89,10 @@ def confirmed_event():
 
 def test_change_request_round_trips_and_approval_writes_the_event(confirmed_event):
     """Against a real database: a request is saved with its before/after
-    values; approving it updates the event (still confirmed), and the event
-    log gets two entries -- the organiser's request and the coordinator's
-    applied change -- with exactly the live table's columns."""
+    values; approving it updates the event and, since it was confirmed,
+    sends it back to planning (IS-9 AC10), and the event log gets two
+    entries -- the organiser's request and the coordinator's applied
+    change -- with exactly the live table's columns."""
     event, organizer, coordinator = confirmed_event
 
     change = request_event_change(event, organizer, {"changes": {"expected_attendance": 75}, "reason": "More RSVPs."})
@@ -104,7 +105,10 @@ def test_change_request_round_trips_and_approval_writes_the_event(confirmed_even
 
     assert result["change_request"]["status"] == "approved"
     stored = supabase.table("events").select("expected_attendance, status").eq("id", event.id).execute().data[0]
-    assert stored == {"expected_attendance": 75, "status": "confirmed"}
+    # IS-9 AC10: "Any changes to the event details made after the status of the
+    # event is confirmed will result in the status of the event reverting to
+    # planning again."
+    assert stored == {"expected_attendance": 75, "status": "planning"}
 
     entries = supabase.table("event_logs").select("*").eq("shared_event_id", event.shared_event_id).execute().data
     # The organiser's request, then the coordinator's applied change.
@@ -115,7 +119,20 @@ def test_change_request_round_trips_and_approval_writes_the_event(confirmed_even
     assert entry["changes"] == {"expected_attendance": {"from": 50, "to": 75}}
     assert entry["changed_by"] == coordinator
     assert entry["changed_at"]
-    assert set(entry) == {"event_log_id", "shared_event_id", "changes", "changed_by", "changed_at"}
+    # IS-9 added significance and acknowledged_impacts to event_logs
+    # (20261015000000_event_logs_significance.sql). Attendance is a significant
+    # field; approve_change_request records no acknowledged impacts on the log.
+    assert entry["significance"] == "significant"
+    assert entry["acknowledged_impacts"] is None
+    assert set(entry) == {
+        "event_log_id",
+        "shared_event_id",
+        "changes",
+        "changed_by",
+        "changed_at",
+        "significance",
+        "acknowledged_impacts",
+    }
     assert result["change_request"]["reviewed_at"]
 
 
