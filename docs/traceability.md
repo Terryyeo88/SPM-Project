@@ -386,3 +386,16 @@ Unit tests: `test_equipment_calendar_service.py` (service, including the boundar
 | Range edges (not an AC; DoD boundary tests) | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded`, `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_starting_at_the_ranges_last_instant_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
 
 Not built, so not tested: a "pending" state and dated maintenance periods on the calendar, and the unit's location (see `docs/open-questions.md`).
+
+## Event statuses: a defined set (Event Status Management), plus `safety_review` (Week 7 #6)
+
+Story: "As an Event Coordinator, I want the system to support a defined set of event statuses, so that everyone uses a consistent, shared vocabulary for where an event stands." AC2 reworded from "each event request" to "each event session": every session of a multi-session request is its own `events` row and moves through the statuses on its own (see `docs/design-decisions.md`).
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| AC1 The system supports exactly these statuses: draft, submitted, under review, approved, planning, safety review, confirmed, completed, cancelled, rejected | `test_transitions.py::test_status_vocabulary_is_exactly_the_defined_set`, `::test_every_edge_uses_only_defined_statuses` | `public.event_status` (`20260911120000_init_users_events.sql`, plus `safety_review` in `20261018000000_event_status_safety_review.sql`); `transitions.py::_LABELS`; `event_service.py::EVENT_STATUSES` |
+| AC2 Each event session has exactly one status at a time | `test_transitions_integration.py::test_concurrent_transitions_from_same_status_exactly_one_wins`, `::test_many_identical_concurrent_transitions_exactly_one_wins` | `events.status` is a single `not null` column of type `event_status`; every change goes through `transitions.transition` (conditional update) |
+| AC3 The status is visible wherever the event request is displayed | Manual check (no component tests for these views, per the frontend convention); `coordinatorDashboard.test.js` (`tabForStatus`, including `safety_review`) | status badge in `EventsListView.vue`, `EventDetailsView.vue`, `CoordinatorEventReview.vue`, `CoordinatorDashboard.vue`, `LeadDashboard.vue`, `SessionSummaryCard.vue`, `EventSessionFields.vue`; `.status-safety_review` style in each place that has a status palette |
+| Week 7 #6: safety_review sits between planning and confirmed; rejected or changes requested go back to planning | `test_transitions.py::test_edge_set_is_exactly_the_sourced_edges`, `::test_every_legal_edge_is_allowed[*safety_review*]`, `::test_representative_illegal_edges_are_refused` (`under_review -> safety_review`, `safety_review -> completed`) | `transitions.py` edges `planning -> safety_review`, `safety_review -> confirmed`, `safety_review -> planning`, `safety_review -> cancelled` |
+
+Not built, so not tested: anything that moves an event into or out of `safety_review` (the Safety Officer role, its queue, and approve / reject / request-changes with a comment). See `docs/open-questions.md`.

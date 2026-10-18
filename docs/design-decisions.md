@@ -1178,3 +1178,49 @@ half-open with strict `<`.
 | Pending state | Not built: a pending request names a type and a quantity, not a unit |
 | Under-maintenance periods | Not built: no dated maintenance data. The current status is the pill |
 | Back link to the equipment list | Yes. The unit's detail page also links to the calendar |
+
+## Safety review status (Week 7 #6, Justin, 2026-10-18)
+
+**One new status, `safety_review`, between `planning` and `confirmed`.**
+Week 7 #6: "After the venue and technical arrangements have been
+confirmed, the Safety Officer must conduct an Operational Safety Check
+before the event can proceed to preparation." Week 4 already said every
+arrangement must be approved before confirmation; the safety check is one
+more arrangement, so it sits just before `confirmed`.
+
+**Edges, each sourced in `transitions._EDGE_SOURCES`:**
+
+- `planning -> safety_review`: arrangements approved, sent for the check.
+- `safety_review -> confirmed`: approved. Week 9: the Safety Officer
+  records the decision with a comment and "the co-ordinator will decide on
+  the subsequent action", so the coordinator confirms.
+- `safety_review -> planning`: rejected or changes requested. Week 9: "if
+  the safety approval failed, then it will send the event back to planning
+  phase."
+- `safety_review -> cancelled`: same "cancel after approval" rule as the
+  other pre-completion statuses.
+
+**`planning -> confirmed` is kept for now.** Removing it before the Safety
+Officer actions exist would leave no way to confirm an event. The Safety
+Officer story removes it.
+
+**No `preparation` status.** Registration requires `confirmed`, and
+attendees need lead time; setup happens just before the event. A
+`preparation` status before `confirmed` would keep registration closed
+until setup was done. Preparation is what staff do while the event is
+confirmed (Week 2, "prior to and during event delivery").
+
+**AC2 of the status story says "event session", not "event request".**
+Each session of a multi-session request is its own `events` row with its
+own status: a coordinator can approve one session and reject another, and
+Week 9 gives each session its own venue request. One request can
+therefore show several statuses at once ("2 approved, 1 rejected"), which
+is intended.
+
+**Where it's shown:** `statusLabel` already turns `safety_review` into
+"Safety Review", so only the status palettes got a new
+`.status-safety_review` colour. The coordinator dashboard files it under
+In Planning (still before confirmation), and both "active" lists
+(`coordinator_service.ACTIVE_STATUSES`, `leadDashboard.ACTIVE_STATUSES`)
+include it: a coordinator with an event in safety review is still busy on
+that date, and the Lead still sees it as active.

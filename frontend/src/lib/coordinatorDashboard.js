@@ -9,7 +9,8 @@
  *                   waiting on an approve / reject / clarify decision.
  *                   (Assignment is what moves `submitted` -> `under_review`,
  *                   see backend coordinator_service.assign_initial_coordinator.)
- *   In Planning  -- approved, planning: approved, arrangements in progress.
+ *   In Planning  -- approved, planning, safety_review: approved, arrangements in
+ *                   progress or awaiting the Safety Officer (Week 7 #6).
  *   Confirmed    -- confirmed.
  *   Past         -- completed, cancelled, rejected: nothing left to act on.
  * `draft` and `submitted` never reach a coordinator (no coordinator is
@@ -18,7 +19,7 @@
 
 export const DASHBOARD_TABS = Object.freeze([
   Object.freeze({ key: 'needsReview', label: 'Needs Review', statuses: Object.freeze(['under_review']) }),
-  Object.freeze({ key: 'inPlanning', label: 'In Planning', statuses: Object.freeze(['approved', 'planning']) }),
+  Object.freeze({ key: 'inPlanning', label: 'In Planning', statuses: Object.freeze(['approved', 'planning', 'safety_review']) }),
   Object.freeze({ key: 'confirmed', label: 'Confirmed', statuses: Object.freeze(['confirmed']) }),
   Object.freeze({
     key: 'past',
