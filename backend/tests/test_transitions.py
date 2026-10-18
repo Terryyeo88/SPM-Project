@@ -28,7 +28,7 @@ from app.shared.errors import NotFoundError, ValidationError
 
 ALL_STATUSES = [
     "draft", "submitted", "under_review", "approved", "planning",
-    "confirmed", "completed", "cancelled", "rejected",
+    "safety_review", "confirmed", "completed", "cancelled", "rejected",
 ]
 
 
@@ -73,6 +73,26 @@ def _reason_for(to_status):
     return "a reason" if to_status in REASON_REQUIRED else None
 
 
+# -- the status vocabulary ---------------------------------------------------
+
+
+def test_status_vocabulary_is_exactly_the_defined_set():
+    """Event Status Management: the system supports exactly these statuses.
+    Week 7 #6 added safety_review. Both places that list every status must
+    agree with the story, so adding or dropping one is a deliberate change."""
+    from app.events.event_service import EVENT_STATUSES
+
+    expected = set(ALL_STATUSES)
+    assert len(expected) == 10
+    assert set(transitions._LABELS) == expected
+    assert EVENT_STATUSES == expected
+
+
+def test_every_edge_uses_only_defined_statuses():
+    for from_status, to_status in ALLOWED:
+        assert from_status in ALL_STATUSES and to_status in ALL_STATUSES
+
+
 # -- every legal edge is allowed -------------------------------------------
 
 
@@ -85,6 +105,10 @@ def test_edge_set_is_exactly_the_sourced_edges():
         ("under_review", "rejected"),
         ("approved", "planning"),
         ("planning", "confirmed"),
+        ("planning", "safety_review"),
+        ("safety_review", "confirmed"),
+        ("safety_review", "planning"),
+        ("safety_review", "cancelled"),
         ("confirmed", "completed"),
         ("confirmed", "planning"),
         ("approved", "cancelled"),
@@ -119,6 +143,8 @@ def test_every_legal_edge_is_allowed(store, from_status, to_status):
         ("cancelled", "approved"),
         ("rejected", "approved"),
         ("planning", "approved"),  # no going backwards
+        ("under_review", "safety_review"),  # safety review needs arrangements first
+        ("safety_review", "completed"),  # must be confirmed first
     ],
 )
 def test_representative_illegal_edges_are_refused(store, from_status, to_status):

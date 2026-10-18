@@ -17,6 +17,7 @@ const STATUSES = [
   'under_review',
   'approved',
   'planning',
+  'safety_review',
   'confirmed',
   'completed',
   'cancelled',
@@ -415,6 +416,10 @@ function statusSummary(request) {
 .status-planning {
   color: #2f7a3f;
   background: #e4f5e8;
+}
+.status-safety_review {
+  color: #3d4fa8;
+  background: #e8ebfa;
 }
 .status-confirmed {
   color: #0f6e6a;

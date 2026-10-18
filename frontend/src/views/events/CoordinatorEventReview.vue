@@ -559,6 +559,7 @@ h2 { margin: 0 0 4px; font-size: 15px; color: #222; }
 .status-under_review { color: #8a6d00; background: #fff4c2; }
 .status-approved { color: #1f5a9e; background: #e4eefb; }
 .status-planning { color: #2f7a3f; background: #e4f5e8; }
+.status-safety_review { color: #3d4fa8; background: #e8ebfa; }
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-completed { color: #3f4a57; background: #e3e7ec; }
 .status-cancelled { color: #a3521b; background: #fcebdd; }

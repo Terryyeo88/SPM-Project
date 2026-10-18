@@ -817,3 +817,42 @@ in docs/design-decisions.md; please confirm or correct:
   - **The calendar route is its own blueprint**
     (`app/equipment/calendar_routes.py`), so IS-18's `routes.py` is
     untouched.
+
+## Safety review status (Week 7 #6, Justin, 18 Oct)
+
+- **`safety_review` exists, but nothing moves an event into it yet.** This
+  change adds only the status, its four transition edges, labels and
+  badge styles. The Safety Officer role and its actions (pick up the
+  event, approve / reject / request changes with a comment) are a
+  separate story and still need an owner. Until then **`planning ->
+  confirmed` is kept on purpose,** so events can still be confirmed. When
+  the Safety Officer story lands it should remove that edge, so nothing
+  can skip the safety check.
+
+- **For the Safety Officer story: status lists that will need
+  `safety_review`.** Left alone here because they change behaviour and
+  belong to other stories:
+  - `rules.py::_CANCELLABLE_STATUSES`: the coordinator should be able to
+    cancel during safety review (the `safety_review -> cancelled` edge
+    already exists).
+  - `rules.py::CHANGE_REQUEST_STATUSES` and
+    `frontend/src/lib/changeRequests.js`: organisers can request changes
+    up to confirmed, so presumably during safety review too.
+  - `change_impact.py::ARRANGED_STATUSES` and
+    `event_update.py::IMPACT_CHECKED_STATUSES`: arrangements exist by
+    then, so edits should still show their impacts.
+  - `CoordinatorEventReview.vue::canCancel`.
+
+- **Please confirm: no separate `preparation` status.** Week 7 says the
+  event "cannot proceed to preparation until the Safety Officer has
+  approved it". We read preparation as the work Venue and Technical
+  Support Staff do while the event is confirmed (Week 2: progress is
+  updated "prior to and during event delivery"), not a status of its own.
+  A status between safety review and confirmed would hold registration
+  closed until setup was finished, since registration needs `confirmed`.
+
+- **Rejected and changes requested both go back to planning.** Week 7
+  lists three outcomes (approve, reject, request changes). Week 9 says a
+  failed safety approval "will send the event back to planning phase", so
+  both non-approvals use `safety_review -> planning`, and the comment says
+  what to fix. Please confirm a rejection shouldn't end the event instead.
