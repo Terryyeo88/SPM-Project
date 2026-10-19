@@ -88,6 +88,9 @@ watch(() => [props.event.id, props.event.status], load)
                 <span class="status" :class="`status-${eventRequestStatus(request, event.status).key}`">
                   {{ eventRequestStatus(request, event.status).label }}
                 </span>
+                <p v-if="request.status === 'rejected'" class="rejection">
+                  Reason: {{ request.rejection_reason ?? 'No reason was recorded.' }}
+                </p>
               </td>
             </tr>
           </tbody>
@@ -142,6 +145,7 @@ tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 
 .status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; white-space: nowrap; }
+.rejection { margin: 6px 0 0; font-size: 12px; color: #a33f3f; white-space: pre-wrap; }
 .status-pending { background: #f7efe1; color: #8a5a12; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }

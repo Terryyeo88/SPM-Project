@@ -7,6 +7,7 @@ All read-only.
   GET /equipment/requests/<id>                -- one request, with its lines
   GET /equipment/requests/<id>/availability   -- the availability check
   POST /equipment/requests/<id>/accept        -- accept and reserve stock (IS-19)
+  POST /equipment/requests/<id>/reject        -- reject with a reason (IS-41)
   GET /equipment/<id>                         -- one unit plus its occupancy
 
 The static "/requests" paths are declared BEFORE the dynamic "/<id>" one,
@@ -24,6 +25,7 @@ from app.authz.actions import (
     EQUIPMENT_REQUEST_ACCEPT,
     EQUIPMENT_REQUEST_CHECK_AVAILABILITY,
     EQUIPMENT_REQUEST_LIST,
+    EQUIPMENT_REQUEST_REJECT,
     EQUIPMENT_REQUEST_VIEW,
     EQUIPMENT_TYPE_LIST,
     EQUIPMENT_VIEW,
@@ -37,6 +39,7 @@ from app.equipment.equipment_service import (
     list_equipment_types,
     list_requests,
     load_request_resource,
+    reject_request,
 )
 
 equipment_bp = Blueprint("equipment", __name__, url_prefix="/equipment")
@@ -81,6 +84,14 @@ def check_equipment_request_availability_route(equipment_request, request_id):
 @require(EQUIPMENT_REQUEST_ACCEPT, loader=lambda request_id: load_request(request_id))
 def accept_equipment_request_route(equipment_request, request_id):
     return jsonify(accept_request(request_id)), 200
+
+
+# Static path -- must come before GET /equipment/<equipment_id> below.
+@equipment_bp.route("/requests/<request_id>/reject", methods=["POST"])
+@require(EQUIPMENT_REQUEST_REJECT, loader=lambda request_id: load_request(request_id))
+def reject_equipment_request_route(equipment_request, request_id):
+    body = request.get_json(silent=True) or {}
+    return jsonify(reject_request(request_id, body.get("reason"), current_user().id)), 200
 
 
 @equipment_bp.route("/<equipment_id>", methods=["GET"])

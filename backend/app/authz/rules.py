@@ -704,6 +704,20 @@ def rule_equipment_request_accept(user: Any, request: Any) -> Decision:
     return Decision.ALLOW
 
 
+def rule_equipment_request_reject(user: Any, request: Any) -> Decision:
+    """Reject an equipment request with a reason (IS-41). Technical Support
+    Staff only (anyone else gets the same 404 as accept), and only a
+    pending request. Unlike accept, the event's status is NOT checked: a
+    pending request left behind on a cancelled or moved-on event must
+    still be clearable from Technical Support's queue -- rejecting takes
+    no stock, so there is nothing to protect."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 def rule_equipment_type_list(user: Any, resource: Any = None) -> Decision:
     """The equipment catalogue (kinds, not units) is what a coordinator
     picks from on the request form; Technical Support Staff see it too.

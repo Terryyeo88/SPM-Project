@@ -468,3 +468,24 @@ real database.
 | (design) Accepted whole or not at all; says what is short | `test_equipment_accept.py::test_refuses_when_there_is_not_enough_and_says_what_is_short`, `::test_one_short_line_means_nothing_is_reserved_for_any_line` (guard) | `accept_request` checks every line before writing |
 | (design) Two requests cannot take the same unit | `test_equipment_accept.py::test_the_exclusion_constraint_refusing_a_unit_is_a_clear_error`, `::test_a_failure_flipping_the_status_also_releases_the_units` | exclusion constraint `equipment_reservations_no_unit_overlap`; clean-up in `accept_request` |
 | Technical Support can accept from the request page and sees what was reserved | `EquipmentRequestDetailView.test.js` ("accepting the request": enabled/disabled button, no decision once decided, accepts and lists units, shows the server error) | `EquipmentRequestDetailView.vue` "Your decision" and "Reserved for this event" |
+
+## Sprint 3 — Get Warned and Reject When Requested Quantity Exceeds Availability (IS-41, Nawaz)
+
+Source: the Reservation story's second sub-story. Unit tests:
+`test_equipment_reject.py` (service), `test_authz_equipment_reject.py`
+(rule), `test_equipment_reject_routes.py` (route). Frontend:
+`EquipmentRequestDetailView.test.js` ("rejecting the request"),
+`EquipmentBookingStatus.test.js`. Needs migration
+`20261019100000_equipment_request_rejection.sql`. Not tested against a real
+database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "The system shows the actual available quantity when a request exceeds it" | `EquipmentRequestDetailView.test.js::suggests rejecting and shows the available quantity when stock is short` (the numbers themselves are IS-18's check) | per-line "Requested n · available m" on the request page |
+| "Technical Staff is suggested to reject the request" | `EquipmentRequestDetailView.test.js::suggests rejecting ...`, `::does not suggest rejecting when everything is covered` | `shortOnStock` hint in "Your decision" |
+| "Rejecting requires an explanation" | `test_equipment_reject.py::test_a_reason_is_required`, `::test_a_very_long_reason_is_refused`, `EquipmentRequestDetailView.test.js::keeps Reject disabled until a reason is typed`, `test_equipment_reject_routes.py::test_a_missing_reason_is_a_400` | `reject_request` validation; Reject button disabled until the reason has text |
+| "...that's sent to the Event Coordinator" | `test_equipment_reject.py::test_reject_marks_the_request_rejected_with_the_reason_and_who_decided`, `::test_reject_notifies_the_coordinator_of_the_decision`, `EquipmentBookingStatus.test.js::shows why a request was rejected` | reason stored on `equipment_requests`, shown in the coordinator's Equipment Booking section; `_notify_request_decision` is still a placeholder |
+| (design) Only a pending request, Technical Support only | `test_authz_equipment_reject.py` (all), `test_equipment_reject_routes.py::test_an_already_decided_request_is_403`, `::test_a_coordinator_cannot_reject` | `rule_equipment_request_reject` |
+| (design) Rejecting works on a cancelled event's pending request | `test_authz_equipment_reject.py::test_rejecting_does_not_depend_on_the_event_status`, `test_equipment_reject_routes.py::test_a_cancelled_events_pending_request_can_still_be_rejected` | no event-status check in the rule |
+| (design) Never overwrites an accepted request | `test_equipment_reject.py::test_the_update_is_conditional_on_the_request_still_being_pending` | update conditioned on `status = 'pending'` |
+| (design) Rejecting reserves/releases nothing | `test_equipment_reject.py::test_reject_reserves_nothing` | pending requests hold no stock |

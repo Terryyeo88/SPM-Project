@@ -154,18 +154,26 @@ describe('EquipmentRequestDetailView', () => {
       const wrapper = mountView()
       await flushPromises()
       expect(wrapper.find('.btn-accept').attributes('disabled')).toBeDefined()
-      expect(wrapper.text()).toContain("can't be accepted yet")
+      expect(wrapper.text()).toContain('We suggest rejecting this request')
     })
 
     it.each([
       ['an already confirmed request', { ...PENDING, status: 'confirmed' }],
       ['a rejected request', { ...PENDING, status: 'rejected' }],
-      ['a request on a cancelled event', { ...PENDING, event_status: 'cancelled' }],
     ])('offers no decision for %s', async (_label, request) => {
       serve(request, ENOUGH)
       const wrapper = mountView()
       await flushPromises()
       expect(wrapper.find('.btn-accept').exists()).toBe(false)
+      expect(wrapper.find('.btn-reject').exists()).toBe(false)
+    })
+
+    it('offers only Reject (Accept disabled) for a pending request on a cancelled event', async () => {
+      serve({ ...PENDING, event_status: 'cancelled' }, ENOUGH)
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.btn-accept').attributes('disabled')).toBeDefined()
+      expect(wrapper.find('#reject-reason').exists()).toBe(true)
     })
 
     it('accepts, lists the reserved units and reloads the request', async () => {
@@ -199,6 +207,78 @@ describe('EquipmentRequestDetailView', () => {
       expect(wrapper.find('[role="alert"]').text()).toContain('just reserved for another event')
       expect(wrapper.find('.btn-accept').exists()).toBe(true)
       expect(wrapper.find('.reserved').exists()).toBe(false)
+    })
+  })
+  // Get warned and reject when requested quantity exceeds availability (IS-41)
+  describe('rejecting the request', () => {
+    const PENDING = { ...REQUEST, status: 'pending', event_status: 'planning' }
+
+    function serve(request, check) {
+      apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/availability') ? check : request))
+    }
+
+    it('suggests rejecting and shows the available quantity when stock is short', async () => {
+      serve(PENDING, CHECK)
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.suggest').text()).toContain('We suggest rejecting this request')
+      expect(wrapper.text()).toContain('Requested 2')
+      expect(wrapper.text()).toContain('available 1')
+    })
+
+    it('does not suggest rejecting when everything is covered', async () => {
+      serve(PENDING, { ...CHECK, all_sufficient: true })
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.suggest').exists()).toBe(false)
+    })
+
+    it('keeps Reject disabled until a reason is typed', async () => {
+      serve(PENDING, CHECK)
+      const wrapper = mountView()
+      await flushPromises()
+      const button = wrapper.find('.btn-reject')
+      expect(button.attributes('disabled')).toBeDefined()
+      await wrapper.find('#reject-reason').setValue('   ')
+      expect(button.attributes('disabled')).toBeDefined()
+      await wrapper.find('#reject-reason').setValue('Only 1 projector free')
+      expect(button.attributes('disabled')).toBeUndefined()
+    })
+
+    it('posts the trimmed reason and reloads the request', async () => {
+      serve(PENDING, CHECK)
+      apiPost.mockResolvedValue({ id: 'req-1', status: 'rejected' })
+      const wrapper = mountView()
+      await flushPromises()
+      const loadsBefore = apiGet.mock.calls.length
+
+      await wrapper.find('#reject-reason').setValue('  Only 1 projector free  ')
+      await wrapper.find('.btn-reject').trigger('click')
+      await flushPromises()
+
+      expect(apiPost).toHaveBeenCalledWith('/equipment/requests/req-1/reject', { reason: 'Only 1 projector free' })
+      expect(apiGet.mock.calls.length).toBeGreaterThan(loadsBefore)
+    })
+
+    it('shows the server error and keeps the form when rejecting fails', async () => {
+      serve(PENDING, CHECK)
+      apiPost.mockRejectedValue(new Error('This request is no longer pending'))
+      const wrapper = mountView()
+      await flushPromises()
+      await wrapper.find('#reject-reason').setValue('Not enough stock')
+      await wrapper.find('.btn-reject').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[role="alert"]').text()).toContain('no longer pending')
+      expect(wrapper.find('.btn-reject').exists()).toBe(true)
+    })
+
+    it('shows the recorded reason on a rejected request and no decision controls', async () => {
+      serve({ ...PENDING, status: 'rejected', rejection_reason: 'Only 1 projector free' }, CHECK)
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.rejection-reason').text()).toBe('Only 1 projector free')
+      expect(wrapper.find('.btn-reject').exists()).toBe(false)
+      expect(wrapper.find('.btn-accept').exists()).toBe(false)
     })
   })
 })

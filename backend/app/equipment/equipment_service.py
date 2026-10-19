@@ -635,6 +635,57 @@ def accept_request(request_id: str) -> dict:
     return {**get_request(request_id), "allocated": allocated}
 
 
+MAX_REJECTION_REASON_LENGTH = 1000
+
+
+def reject_request(request_id: str, reason, decided_by: str) -> dict:
+    """Reject an equipment request with an explanation (IS-41): the request
+    becomes "rejected" and the coordinator can read why.
+
+    authz (rule_equipment_request_reject) has already checked the caller is
+    Technical Support Staff and the request is "pending".
+
+    AC: "Rejecting requires an explanation that's sent to the Event
+    Coordinator". The reason is required (blank or whitespace-only is
+    refused) and stored on the request (see the migration), where the
+    coordinator's Equipment Booking section reads it. "Sent" is the
+    notification placeholder below plus that visibility: no notification
+    system exists yet.
+
+    Nothing is reserved while a request is pending, so there is nothing to
+    release. The update is conditioned on the request still being
+    "pending", same race-proofing as accept_request: if someone accepted it
+    a moment ago this matches no row and says so, instead of overwriting a
+    confirmed request (and its reservations) with a rejection.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to reject an equipment request.")
+    reason = reason.strip()
+    if len(reason) > MAX_REJECTION_REASON_LENGTH:
+        raise ValidationError(f"The reason is too long (limit {MAX_REJECTION_REASON_LENGTH} characters).")
+
+    updated = (
+        supabase.table("equipment_requests")
+        .update(
+            {
+                "status": "rejected",
+                "rejection_reason": reason,
+                "decided_by": decided_by,
+                "decided_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        .eq("id", request_id)
+        .eq("status", "pending")
+        .select("*")
+        .execute()
+    )
+    if not updated.data:
+        raise ValidationError("This request is no longer pending -- refresh to see its current status.")
+
+    _notify_request_decision(request_id, "rejected")
+    return get_request(request_id)
+
+
 def _notify_request_decision(request_id: str, decision: str) -> None:
     """Hook for the Notification System story. No-op placeholder, same
     shape as booking_service._notify_booking_decision -- no notification
