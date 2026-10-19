@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   REQUEST_TABS,
   allocatedEquipment,
+  buildRequestPayload,
   describeAvailability,
   equipmentTypeLabel,
   eventRequestStatus,
   formatPeriod,
   groupRequestsByTab,
   isRequestTab,
+  newRequestLine,
   summariseCheck,
   summariseItems,
   unitStatusLabel,
+  validateRequestLines,
 } from './equipment'
 
 describe('groupRequestsByTab', () => {
@@ -189,5 +192,71 @@ describe('equipmentTypeLabel', () => {
   it('capitalises the stored lower-case type name', () => {
     expect(equipmentTypeLabel('projector')).toBe('Projector')
     expect(equipmentTypeLabel(undefined)).toBe('')
+  })
+})
+
+describe('newRequestLine', () => {
+  it('gives each blank line its own key', () => {
+    const a = newRequestLine()
+    const b = newRequestLine()
+    expect(a.key).not.toBe(b.key)
+    expect(a).toMatchObject({ equipment_type_id: '', quantity: '', technical_requirements: '' })
+  })
+})
+
+describe('validateRequestLines', () => {
+  const line = (type, quantity, requirements = '') => ({
+    key: 1,
+    equipment_type_id: type,
+    quantity,
+    technical_requirements: requirements,
+  })
+
+  it('accepts lines with a type and a whole quantity of at least 1', () => {
+    const result = validateRequestLines([line('t1', 2), line('t2', '3')])
+    expect(result.valid).toBe(true)
+    expect(result.lineErrors).toEqual([{}, {}])
+  })
+
+  it('needs at least one line', () => {
+    expect(validateRequestLines([])).toMatchObject({ valid: false, formError: 'Add at least one equipment item.' })
+    expect(validateRequestLines(null).valid).toBe(false)
+  })
+
+  it.each([['', 'missing'], [0, 'zero'], ['0', 'zero as text'], [-1, 'negative'], [2.5, 'fractional'], ['abc', 'not a number']])(
+    'rejects quantity %j (%s)',
+    (quantity) => {
+      const result = validateRequestLines([line('t1', quantity)])
+      expect(result.valid).toBe(false)
+      expect(result.lineErrors[0].quantity).toBeTruthy()
+    },
+  )
+
+  it('rejects a line with no type', () => {
+    const result = validateRequestLines([line('', 1)])
+    expect(result.valid).toBe(false)
+    expect(result.lineErrors[0].type).toBe('Choose an equipment type.')
+  })
+
+  it('flags the second line when a type is repeated', () => {
+    const result = validateRequestLines([line('t1', 1), line('t1', 2)])
+    expect(result.valid).toBe(false)
+    expect(result.lineErrors[0].type).toBeUndefined()
+    expect(result.lineErrors[1].type).toBe('This type is already on the request.')
+  })
+})
+
+describe('buildRequestPayload', () => {
+  it('turns quantities into numbers, trims requirements and nulls blank ones', () => {
+    const payload = buildRequestPayload([
+      { key: 1, equipment_type_id: 't1', quantity: '2', technical_requirements: '  HDMI  ' },
+      { key: 2, equipment_type_id: 't2', quantity: 1, technical_requirements: '   ' },
+    ])
+    expect(payload).toEqual({
+      items: [
+        { equipment_type_id: 't1', quantity: 2, technical_requirements: 'HDMI' },
+        { equipment_type_id: 't2', quantity: 1, technical_requirements: null },
+      ],
+    })
   })
 })

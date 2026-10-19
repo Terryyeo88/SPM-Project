@@ -34,6 +34,11 @@ const loading = ref(true)
 const error = ref('')
 
 const allocated = computed(() => allocatedEquipment(requests.value, props.event.status))
+// Same status precondition as rule_equipment_request_create: a request
+// can only be raised once the event is in planning -- an approved event is
+// moved there first with Start Planning (Record Equipment Request, IS-17).
+const canRequest = computed(() => props.event.status === 'planning')
+
 const isReleased = computed(
   () => props.event.status === 'cancelled' && requests.value.some((request) => request.status === 'confirmed'),
 )
@@ -106,6 +111,17 @@ watch(() => [props.event.id, props.event.status], load)
       <p v-else-if="isReleased" class="muted small">
         This event was cancelled, so its reserved equipment has been released.
       </p>
+
+      <p v-if="event.status === 'approved'" class="muted small">
+        Start planning (under Your Decision) to request equipment.
+      </p>
+      <router-link
+        v-if="canRequest"
+        :to="{ name: 'request-equipment', params: { eventId: event.id } }"
+        class="btn small primary"
+      >
+        {{ requests.length ? 'Request more equipment' : 'Request Equipment' }}
+      </router-link>
     </template>
   </section>
 </template>
@@ -130,6 +146,12 @@ tbody tr:last-child td { border-bottom: none; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }
 .status-released { background: #eeeeee; color: #5a5a5a; }
+
+.btn.small.primary {
+  align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;
+  background: #2568e8; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  text-decoration: none; display: inline-flex; align-items: center;
+}
 
 .allocated { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #dcdcdc; border-radius: 6px; padding: 14px 16px; }
 .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

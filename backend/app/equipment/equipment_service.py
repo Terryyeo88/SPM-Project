@@ -36,6 +36,12 @@ from types import SimpleNamespace
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
+# The event's own [start, end) window, reused rather than re-derived so an
+# equipment request and a venue booking for the same session can never
+# disagree about when "the session" is (Singapore time, missing end time =
+# end of day). Private to booking_service by name only.
+from app.venues.booking_service import _event_window
+
 EQUIPMENT_STATUSES = {"available", "maintenance", "retired"}
 REQUEST_STATUSES = {"pending", "confirmed", "rejected"}
 
@@ -283,6 +289,115 @@ def list_requests(user, status: str | None = None) -> list[dict]:
 def load_request_resource(request_id: str) -> SimpleNamespace:
     """The shape @require's loader hands to the policy rules."""
     return SimpleNamespace(**get_request(request_id))
+
+
+# -- record a request (IS-17) -------------------------------------------------
+
+MAX_REQUIREMENTS_LENGTH = 2000
+
+
+def list_equipment_types() -> list[dict]:
+    """The kinds of equipment a request can name, A-Z. Feeds the request
+    form's picker; a type exists whether or not any unit of it does."""
+    result = supabase.table("equipment_types").select("id, name").order("name").execute()
+    return list(result.data or [])
+
+
+def _validate_request_items(raw_items) -> list[dict]:
+    """The lines of a new request, checked and normalised -- BEFORE
+    anything is written, so a bad line leaves nothing half-created.
+
+    AC: "System prevents submitting a request if quantity is missing or
+    zero for a selected equipment item". Stricter than that, deliberately:
+    quantity must be a whole number (not "3", not 2.5, not true), because
+    equipment_request_items.quantity is an integer with check (> 0) and a
+    sloppy value would otherwise surface as a database error. One line per
+    type (the table's unique(request_id, equipment_type_id)) -- a duplicate
+    is rejected, not silently merged, so the coordinator sees the ambiguity.
+    """
+    if not isinstance(raw_items, list) or not raw_items:
+        raise ValidationError("Add at least one equipment item to the request.")
+    items = []
+    seen = set()
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            raise ValidationError(f"Item {index} is not valid.")
+        type_id = raw.get("equipment_type_id")
+        if not isinstance(type_id, str) or not type_id.strip():
+            raise ValidationError(f"Item {index}: choose an equipment type.")
+        type_id = type_id.strip()
+        if type_id in seen:
+            raise ValidationError("Each equipment type can only appear once; combine the quantities instead.")
+        seen.add(type_id)
+        quantity = raw.get("quantity")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            raise ValidationError(f"Item {index}: quantity must be a whole number of at least 1.")
+        requirements = raw.get("technical_requirements")
+        if requirements is not None and not isinstance(requirements, str):
+            raise ValidationError(f"Item {index}: technical requirements must be text.")
+        requirements = (requirements or "").strip() or None
+        if requirements and len(requirements) > MAX_REQUIREMENTS_LENGTH:
+            raise ValidationError(
+                f"Item {index}: technical requirements are too long (limit {MAX_REQUIREMENTS_LENGTH} characters)."
+            )
+        items.append({"equipment_type_id": type_id, "quantity": quantity, "technical_requirements": requirements})
+    return items
+
+
+def create_request(event: SimpleNamespace, raw_items, requested_by: str) -> dict:
+    """Record Equipment Request for Event (IS-17): a new "pending" request
+    for one event session, with one line per kind of equipment.
+
+    authz (rule_equipment_request_create) has already checked the caller is
+    the event's assigned coordinator and the event is in "planning".
+
+    The needed period is the session's own window, snapshotted onto the
+    request (see the migration's comment on needed_start/needed_end) --
+    the coordinator does not type dates, because the request is for THIS
+    session and its date and time are already on the event.
+
+    Two inserts (the request, then its lines) with no transaction available
+    through the REST client, so if the lines fail the request row is
+    deleted again: a request with no lines would sit in Technical Support's
+    queue asking for nothing. Nothing here reserves a unit -- accepting is
+    the separate Reservation story -- so there is nothing else to undo.
+    """
+    items = _validate_request_items(raw_items)
+
+    wanted = [item["equipment_type_id"] for item in items]
+    found = supabase.table("equipment_types").select("id").in_("id", wanted).execute()
+    known = {row["id"] for row in (found.data or [])}
+    if any(type_id not in known for type_id in wanted):
+        raise ValidationError("One of the equipment types does not exist.")
+
+    needed_start, needed_end = _event_window(event)
+    created = (
+        supabase.table("equipment_requests")
+        .insert(
+            {
+                "event_id": event.id,
+                "requested_by": requested_by,
+                "status": "pending",
+                "needed_start": needed_start.isoformat(),
+                "needed_end": needed_end.isoformat(),
+            }
+        )
+        .select("*")
+        .execute()
+    )
+    if not created.data:
+        raise ValidationError("The equipment request database operation did not return a request.")
+    request_row = created.data[0] if isinstance(created.data, list) else created.data
+
+    try:
+        supabase.table("equipment_request_items").insert(
+            [{**item, "request_id": request_row["id"]} for item in items]
+        ).execute()
+    except Exception:
+        supabase.table("equipment_requests").delete().eq("id", request_row["id"]).execute()
+        raise
+
+    return get_request(request_row["id"])
 
 
 # -- availability check (the story) -----------------------------------------

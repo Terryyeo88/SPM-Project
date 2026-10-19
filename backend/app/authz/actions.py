@@ -147,6 +147,16 @@ EQUIPMENT_REQUEST_LIST = "equipment_request.list"
 EQUIPMENT_REQUEST_VIEW = "equipment_request.view"
 EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
 
+# -- record equipment request (IS-17: Record Equipment Request for Event) ---
+#   equipment_request.create -- the assigned coordinator, while the event is
+#       in "planning" (same gate as venue_booking.create; Aaralyn's IS-9
+#       note asks whoever builds this to require planning).
+#   equipment_type.list -- the catalogue of kinds of equipment a request can
+#       name, which the request form needs and equipment.list (Technical
+#       Support only) does not give a coordinator.
+EQUIPMENT_REQUEST_CREATE = "equipment_request.create"
+EQUIPMENT_TYPE_LIST = "equipment_type.list"
+
 # -- equipment calendar (IS-47: View Equipment Availability Calendar) -------
 # Source: IS-47 AC1 "A technical support staff member can open an equipment
 # unit and see its reservation calendar" and AC6 "Only technical support

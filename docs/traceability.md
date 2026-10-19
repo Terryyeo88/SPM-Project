@@ -426,3 +426,26 @@ marked (guard) were mutation-tested by hand (broken, caught, restored).
 Not built, so not tested: notifications for submissions and decisions, and
 resetting a check when a session is edited during it (see
 `docs/open-questions.md`, "Safety Officer").
+
+## Sprint 3 — Record Equipment Request for Event (IS-17, Nawaz)
+
+Source: IS-17's AC, plus Aaralyn's IS-9 note that equipment requests need
+planning. Unit tests: `test_equipment_create_request.py` (service),
+`test_authz_equipment_create.py` (rules), `test_equipment_create_routes.py`
+(routes). Frontend: `lib/equipment.test.js`,
+`views/equipment/RequestEquipmentView.test.js`,
+`components/EquipmentBookingStatus.test.js`, `lib/roles.test.js`,
+`router/index.test.js`. Not tested against a real database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Can specify an event and specify one or more equipment items required for it" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines`, `::test_needs_at_least_one_item`, `RequestEquipmentView.test.js` ("submits every line and returns to the event page", "can remove an added line but never the last one") | `POST /events/<id>/equipment-requests`, `equipment_service.create_request`, `RequestEquipmentView.vue` |
+| "Can specify the quantity needed for each equipment item" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines`, `test_equipment_create_request.py::test_a_type_can_only_appear_once` | `_validate_request_items`, one `equipment_request_items` row per type |
+| "Can enter free-text technical requirements for each equipment item" | `test_equipment_create_request.py::test_blank_requirements_are_stored_as_null_and_text_is_trimmed`, `::test_requirements_must_be_text_and_within_the_limit` | `technical_requirements` on each line, 2000 character cap |
+| "System prevents submitting a request if quantity is missing or zero for a selected equipment item" | `test_equipment_create_request.py::test_quantity_must_be_a_whole_number_of_at_least_one`, `::test_missing_quantity_key_is_rejected`, `equipment.test.js` (validateRequestLines), `RequestEquipmentView.test.js::blocks submit and shows the error when quantity is missing or zero` | `validateRequestLines` (client) and `_validate_request_items` (server) |
+| "Submitted equipment request is viewable later" | `EquipmentBookingStatus.test.js` ("shows each request with its items, total quantity and status"), existing `test_equipment_service.py` list/get tests | Equipment Booking section (Justin, `GET /events/<id>/equipment-requests`), Technical Support queue (IS-18) |
+| "When it's created, its status is set to Pending and is visible to relevant Technical Staff" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines` | status `pending` on insert; queue is IS-18's `GET /equipment/requests` |
+| (design) Only the assigned coordinator, only while planning | `test_authz_equipment_create.py` (all), `test_equipment_create_routes.py` (403 outside planning, 404 for a stranger), `EquipmentBookingStatus.test.js` ("requesting equipment") | `rule_equipment_request_create`, `canRequest` in `EquipmentBookingStatus.vue` |
+| (design) A request is for the session's own window | `test_equipment_create_request.py::test_needed_period_is_the_sessions_own_window_in_singapore_time`, `::test_session_with_no_times_needs_equipment_all_day` | `booking_service._event_window` |
+| (design) No half-created request | `test_equipment_create_request.py::test_request_row_is_deleted_if_its_lines_cannot_be_saved` | compensating delete in `create_request` |
+| (design) Coordinators can read the type catalogue | `test_authz_equipment_create.py` (type list), `test_equipment_create_routes.py` (types) | `GET /equipment/types`, `rule_equipment_type_list` |

@@ -673,6 +673,30 @@ def rule_equipment_request_list(user: Any, resource: Any = None) -> Decision:
     return Decision.DENY_FORBIDDEN
 
 
+def rule_equipment_request_create(user: Any, event: Any) -> Decision:
+    """Record Equipment Request for Event (IS-17). Resource is the EVENT
+    (session) the equipment is for, not a request. Exact mirror of
+    rule_venue_booking_create: only that event's assigned coordinator (a
+    stranger gets the same 404 as a missing event), and only while it is
+    in "planning" -- a coordinator starts planning themselves, and a
+    request raised before then, or after the event has moved on, would be
+    committing equipment to an arrangement that is not being made."""
+    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "planning"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_type_list(user: Any, resource: Any = None) -> Decision:
+    """The equipment catalogue (kinds, not units) is what a coordinator
+    picks from on the request form; Technical Support Staff see it too.
+    Role-only, nothing per-row: a type name is not sensitive."""
+    if _has_role(user, "technical_support_staff") or _has_role(user, "event_coordinator"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
 def rule_equipment_request_view(user: Any, request: Any) -> Decision:
     if _has_role(user, "technical_support_staff"):
         return Decision.ALLOW

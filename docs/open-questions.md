@@ -897,3 +897,49 @@ Known gaps, not built:
   row + status change), the same trade-off as `transitions.transition()`'s
   history insert. Each handles a failure between the two -- see
   `app/safety/safety_service.py`.
+
+## Record Equipment Request for Event (IS-17, Nawaz, 19 Oct)
+
+Source: IS-17's AC (specify an event and one or more items; quantity per
+item; free-text technical requirements per item; blocked when a quantity is
+missing or zero; viewable later; created as Pending and visible to Technical
+Support), plus Aaralyn's IS-9 note ("whoever builds that feature should
+require planning too"). No new migration: `equipment_requests` and
+`equipment_request_items` already exist (IS-18).
+
+- **Planning only.** `rule_equipment_request_create` is a mirror of
+  `rule_venue_booking_create`: the event's assigned coordinator, and the
+  event must be in `planning`. A stranger gets the same 404 as a missing
+  event. This is our reading of Aaralyn's note, not something a story
+  states; relaxing it is one line in the rule.
+- **The coordinator does not enter dates.** The request is for one session
+  (the `events` row), so `needed_start`/`needed_end` are that session's own
+  window, snapshotted the same way a venue booking snapshots its period
+  (`booking_service._event_window`: Singapore time, missing end time = end
+  of day). The form shows them but does not ask for them. If a coordinator
+  later needs equipment for only part of a session, the request would need
+  its own period fields.
+- **No setup/turnaround buffer.** A venue booking pads the session with the
+  venue's setup and turnaround minutes. Equipment has no such per-type
+  figure in the schema, so the request is exactly the session's window.
+- **One line per type.** Matches `unique(request_id, equipment_type_id)`. A
+  repeated type is rejected with a message rather than merged, so the
+  coordinator sees it. Quantity must be a whole number of at least 1;
+  technical requirements are optional and capped at 2000 characters (our
+  limit, the column is unbounded `text`).
+- **Several requests per session are allowed.** "Request more equipment"
+  adds another request rather than editing the first. Editing or cancelling
+  a pending request is not in this story and is not built.
+- **Writes are two inserts, not a transaction.** The request row, then its
+  lines. If the lines fail, the request row is deleted again so Technical
+  Support is not left a request that asks for nothing. Not tested against a
+  real database (the project's integration tests need a local Supabase,
+  which was not available when this was written).
+- **Coordinators can now read the equipment catalogue** (`GET
+  /equipment/types`, kinds only, not units) because the form needs it and
+  `equipment.list` is Technical Support only. Types are not sensitive.
+- **Nothing is reserved.** A new request is Pending with no reservation rows
+  (IS-19, Accept, writes those). Technical Support already sees it in their
+  queue (IS-18); no notification is sent (no notification system exists yet).
+- **The create-event form's `equipment_needed` list is unchanged** and does
+  not create a request. Still open: whether it should.

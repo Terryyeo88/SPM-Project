@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../lib/api', () => ({ apiGet: vi.fn() }))
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 async function render(event, requests) {
   apiGet.mockResolvedValue(requests)
-  const wrapper = mount(EquipmentBookingStatus, { props: { event } })
+  const wrapper = mount(EquipmentBookingStatus, { props: { event }, global: { stubs: { RouterLink: RouterLinkStub } } })
   await flushPromises()
   return wrapper
 }
@@ -94,8 +94,41 @@ describe('EquipmentBookingStatus', () => {
 
   it('shows an error if the requests cannot be loaded', async () => {
     apiGet.mockRejectedValue(new Error('Network down'))
-    const wrapper = mount(EquipmentBookingStatus, { props: { event: { id: 'session-1', status: 'planning' } } })
+    const wrapper = mount(EquipmentBookingStatus, {
+      props: { event: { id: 'session-1', status: 'planning' } },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toContain('Network down')
+  })
+
+  // Record Equipment Request for Event (IS-17)
+  describe('requesting equipment', () => {
+    it('offers Request Equipment while the event is in planning', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [])
+      const link = wrapper.findComponent(RouterLinkStub)
+      expect(link.exists()).toBe(true)
+      expect(link.text()).toBe('Request Equipment')
+      expect(link.props('to')).toEqual({ name: 'request-equipment', params: { eventId: 'session-1' } })
+    })
+
+    it('says Request more equipment once something has already been requested', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
+      expect(wrapper.findComponent(RouterLinkStub).text()).toBe('Request more equipment')
+    })
+
+    it('tells an approved event to start planning first, with no request link', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'approved' }, [])
+      expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
+      expect(wrapper.text()).toContain('Start planning')
+    })
+
+    it.each(['draft', 'under_review', 'safety_review', 'confirmed', 'cancelled'])(
+      'offers no request link when the event is %s',
+      async (status) => {
+        const wrapper = await render({ id: 'session-1', status }, [])
+        expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
+      },
+    )
   })
 })

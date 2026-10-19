@@ -267,6 +267,15 @@ describe('visible links per role (integration of hasAnyRole + NAV_LINKS, mirrori
     expect(visibleLinks([ROLES.EVENT_COORDINATOR])).not.toContain('request-venue-booking')
   })
 
+  it('request-equipment is reachable by event_coordinator only and is hidden from the nav', () => {
+    const others = Object.values(ROLES).filter((r) => r !== ROLES.EVENT_COORDINATOR)
+    expect(reachableRoutes([ROLES.EVENT_COORDINATOR])).toContain('request-equipment')
+    for (const role of others) {
+      expect(reachableRoutes([role])).not.toContain('request-equipment')
+    }
+    expect(visibleLinks([ROLES.EVENT_COORDINATOR])).not.toContain('request-equipment')
+  })
+
   it('room-layouts is reachable by venue_staff only, and IS a nav link (they manage the layouts)', () => {
     expect(reachableRoutes([ROLES.VENUE_STAFF])).toContain('room-layouts')
     for (const role of [ROLES.EVENT_ORGANIZER, ROLES.EVENT_COORDINATOR, ROLES.EVENT_COORDINATOR_LEAD, ROLES.TECHNICAL_SUPPORT_STAFF, ROLES.ATTENDEE]) {
