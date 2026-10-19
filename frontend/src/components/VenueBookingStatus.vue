@@ -28,10 +28,12 @@ const error = ref('')
 const latest = computed(() => bookings.value[0] ?? null)
 
 // Same status precondition as rule_venue_booking_create: a coordinator
-// may only start (or restart, after a rejection) a venue search once the
-// event is in planning -- an approved event is moved there first with
-// Start Planning.
+// may only start (or restart, after a rejection OR a release -- Sprint
+// 3: the event was cancelled, the hold expired, or the venue was
+// blocked) a venue search once the event is in planning -- an approved
+// event is moved there first with Start Planning.
 const canRequest = computed(() => props.event.status === 'planning')
+const canRequestAgain = computed(() => !latest.value || ['rejected', 'released'].includes(latest.value.status))
 
 async function load() {
   loading.value = true
@@ -67,12 +69,16 @@ watch(() => props.event.id, load)
       <p v-if="latest?.status === 'rejected'" class="rejection-reason">
         Reason: {{ latest.rejection?.reason || 'No reason was recorded.' }}
       </p>
+      <p v-else-if="latest?.status === 'released'" class="rejection-reason">
+        Reason: {{ latest.release?.reason || 'No reason was recorded.' }}
+        <span v-if="!latest.release?.released_by" class="muted">(done automatically)</span>
+      </p>
 
       <p v-if="event.status === 'approved'" class="muted small">
         Start planning (under Your Decision) to request a venue.
       </p>
       <router-link
-        v-if="canRequest && (!latest || latest.status === 'rejected')"
+        v-if="canRequest && canRequestAgain"
         :to="{ name: 'request-venue-booking', params: { eventId: event.id } }"
         class="btn small primary"
       >
@@ -96,6 +102,7 @@ h2 { margin: 0; font-size: 15px; color: #222; }
 .status-pending { background: #f7efe1; color: #8a5a12; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }
+.status-released { background: #eeeeee; color: #6a6a6a; }
 
 .btn.small.primary {
   align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;

@@ -552,6 +552,11 @@ passes it, so a NULL row means a caller outside that path. So in practice there
 are no NULL rows. If one ever appears, it is either a deliberate
 system transition or a bug. The schema is left exactly as Justin wrote it.
 
+*Realized 2026-10-19: `booking_release.py`'s lazy-expiry and block-triggered
+releases are exactly the system-initiated case this paragraph anticipated --
+see "Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry" below.
+`venue_booking_status_log.changed_by` follows the same NULL convention.*
+
 ## Attendee Registration: one database call decides confirmed or waitlisted
 
 Registering is "count the session's confirmed registrations, then insert as
@@ -1280,3 +1285,172 @@ restrictions aren't recorded, so they're listed as the officer's own checks.
 **safety_review joins the status windows.** Cancel, change requests, and
 the IS-9 / IS-21 impact checks now include it: it sits between planning and
 confirmed, with arrangements already made.
+
+## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, Sprint 3, 2026-10-19)
+
+Three stories, one shared mechanism underneath. Source: Week 7 Customer
+Changes #1 ("Request Venue Booking with Setup and Turnaround Time" --
+IS-58), #2 ("Venue Becomes Unavailable After Booking"), #4 ("Tentative
+Venue Holds Expire"). Aaralyn's tentative-hold flow (coordinator requests
+-> venue staff approves -> tentatively held -> coordinator confirms the
+event) was treated as settled team truth, not re-derived: it is exactly
+what `calendar_service.py` and `booking_service.confirm_booking` already
+implemented in IS-11/IS-16, so nothing about the flow itself changed --
+only what happens when the coordinator does NOT confirm in time, or the
+venue becomes unavailable underneath the hold.
+
+**One new `venue_booking_status` value, `released`, not reused `rejected`.**
+`rejected` means specifically "Venue Staff declined this request" and
+every existing reader (`_attach_rejection_reasons`, the frontend's
+rejection-reason line) assumes that. A booking that is released because the
+event was cancelled, the hold expired, or the venue was blocked was never
+declined by anyone -- conflating the two would make "Venue Staff rejected
+this" an untrue statement for the other three cases. `released` gets its
+own `venue_booking_status_log` reason text and its own API field
+(`booking["release"]`, not overloaded onto `rejection`) and its own frontend
+tab/pill, mirroring how `rejected` is surfaced rather than inventing a new
+shape.
+
+**One shared release mechanism, `app/venues/booking_release.py`, for all
+three triggers** (cancel, expire, block) -- not three ad-hoc patches. Same
+precedent as `app.equipment.reservation_release`'s own module (a release
+side-effect gets its own home once it has more than one caller), except
+this one has three call sites instead of equipment's one, which made a
+shared module a stronger case, not a weaker one. Unlike equipment's
+release (which deletes the reservation row -- equipment's own domain
+choice), a released venue booking is NOT deleted: `venue_bookings` is also
+the record a coordinator and Venue Staff read back later ("why is this
+booking released?"), so the row and its history must persist.
+
+**Every release function is plural-safe**: "every confirmed booking for
+this event/venue", never "the" one. No story this sprint needs it (one
+event still has one venue), but the unassigned "Multiple Venues for One
+Event" story (Week 7 #3, confirmed out of scope this sprint -- no Jira
+card exists for it) would silently break a singular implementation later,
+and writing it plural-safe now costs nothing extra.
+
+**`release_booking` is idempotent and silent on a lost race, deliberately
+different from `_decide_booking`'s strict-and-loud pattern.** `_decide_booking`
+guards a human decision -- a double-submitted approve/reject must be
+surfaced as a conflict, because the second click is a real user action that
+didn't do what the user expected. `release_booking` guards a SYSTEM repair:
+two different readers (say, `get_booking` and `list_bookings_for_event` in
+the same request) may race to lazily expire the same stale row, and both
+must succeed quietly -- there is no "user" whose second click needs
+surfacing. `changed_by=None` for every system-initiated release, the same
+NULL convention `event_status_log.changed_by` already established (see
+above).
+
+**IS-58's "existing bookings become problematic" AC is satisfied by
+construction, not by new detection code.** Every reader of
+`venues.setup_minutes` / `turnaround_minutes` / (new) `tentative_hold_minutes`
+was traced: only `create_booking_request` (setup/turnaround, once, at
+request time) and `confirm_booking` (hold, once, at confirm time) ever read
+them from the venue row. Neither is ever re-read afterward -- a booking
+snapshots the venue's settings at the moment it needed them
+(`venue_bookings.hold_minutes`, mirroring the existing
+`setup_minutes`/`turnaround_minutes` columns IS-14 already added to
+`venue_bookings`). Editing a venue's settings therefore cannot retroactively
+invalidate an existing booking, because nothing about an existing booking
+is ever recomputed from the venue's current settings. This is proven, not
+just asserted: `test_venue_settings_blocking_hold_integration.py` edits a
+venue's settings after a booking exists and asserts the booking's own
+snapshotted values are unchanged. "Identified rather than silently removed"
+is therefore trivially true -- there is nothing that could silently remove
+it.
+
+**Venue blocking releases only already-CONFIRMED bookings at
+block-creation time; a PENDING request overlapping a new block is left
+alone.** Deciding a pending request that now overlaps a block is Venue
+Staff's own call when they get to reviewing it (they'll see the block
+either way, since `_blocked_period_exists` is also checked at confirm
+time) -- auto-releasing a request nobody has looked at yet would be a
+second, silent decision layered on top of the one Venue Staff is about to
+make. The confirm-time guard is the backstop: a pending request can never
+be confirmed INTO an already-blocked period, regardless of when the block
+was created relative to the request.
+
+**Hold expiry is lazy (read-triggered), not a background job.** No
+scheduler/cron infrastructure exists anywhere in this codebase or its
+deployment (no APScheduler/Celery, no pg_cron, no scheduled GitHub Actions
+workflow -- confirmed by reading every workflow file and every
+`requirements.txt`; Flask's dev server is the only thing that runs this
+app). Introducing one for a single feature would be a new category of
+infrastructure the team has no other use for yet. Instead, every call site
+that currently trusts `venue_bookings.status == "confirmed"` as "this is
+genuinely holding the venue" now runs the booking through
+`release_expired_hold` / `touch_expired_holds` first (full list: the
+confirm-time overlap check, `get_booking`, `list_bookings` /
+`list_bookings_for_event`, the venue calendar, `change_impact._venue_impacts`,
+`safety_service.arrangement_problems` / `review_detail`, and the new
+`confirm_event` gate below). This is an explicit, documented trade-off:
+the system is eventually-consistent on hold expiry (a venue only actually
+frees up the next time someone reads it), not point-in-time consistent (a
+hold does not expire itself the instant its clock runs out, the way a
+cron job polling every minute might). Nothing in any of the four customer
+stories asked for second-granularity expiry, and the codebase's own
+`docs/design-decisions.md` (see `event_status_log.changed_by`, above) had
+already anticipated exactly this shape of problem.
+
+**The expiry predicate is "elapsed AND the event has not already reached
+`confirmed`/`completed`", not just elapsed time.** A booking whose event
+reached `confirmed` long ago (Aaralyn's flow's own happy path) must never
+be re-expired just because `touch_expired_holds` runs again later -- the
+hold graduated into a real booking the moment the event confirmed, and the
+clock on "coordinator didn't act in time" stopped meaningfully applying.
+Without this guard, a long-confirmed event's venue booking would
+incorrectly flip to `released` the next time anything touched it, which
+would be a severe regression, not a fix. This was mutation-tested by hand
+(the guard removed, caught independently by three tests across three call
+sites) specifically because it is easy to get backwards.
+
+**Critical gap closed: `confirm_event` never checked venue-booking state
+at all before this sprint.** `events/routes.py::confirm_event` previously
+checked only that the Safety Officer approved (Week 7 #6) before moving
+the event to `confirmed`. Nothing stopped an event from reaching
+`confirmed` with a `released` (expired or blocked-away) venue booking,
+directly violating "an expired hold should not be treated as a confirmed
+booking" -- the story's own central AC. `has_live_confirmed_booking(event_id)`
+closes this: it touches the event's confirmed bookings for expiry and
+refuses the confirm (400) if none genuinely remain. This is the single
+most load-bearing fix in this sprint's work, found during planning rather
+than already known, and was mutation-tested by hand.
+
+**Venue blocking vs. a confirm racing at the same instant is an app-level
+check only, not a database-level guard.** IS-16's exclusion constraint
+guards two routine, customer-facing confirms colliding -- a common,
+expected race. A block-creation racing a confirm is two different staff
+actions (Venue Staff blocking a venue, Venue Staff confirming a booking)
+landing at the same instant -- much rarer, and closing it at the database
+level would need its own SQLSTATE plus a Flask-side translation, a pattern
+this codebase uses for exactly one other case (IS-16's own `23P01`/`40P01`
+handling). We chose not to add a second one for a narrower race, and
+documented this as an accepted trade-off rather than a settled non-issue:
+a Venue Staff member confirming a booking in the exact instant another
+Venue Staff member blocks the same venue could, in principle, still let
+both writes land. `_blocked_period_exists` is checked at confirm time, so
+the window is the single query-to-write gap in `confirm_booking`, not
+anything wider.
+
+**`confirmed_at` is backfilled for existing confirmed rows from
+`venue_booking_status_log`'s latest `to_status='confirmed'` entry --
+genuinely recoverable, so it is.** Rows that predate this migration have no
+historical `hold_minutes`, since no such setting existed when they were
+confirmed; those get the migration's transient default (then the column's
+default is dropped, so every booking confirmed from now on must supply its
+own snapshot explicitly). This is a one-time migration exception, not a
+precedent for leaving `hold_minutes` sometimes-optional going forward.
+
+**`ALTER TYPE ... ADD VALUE` for `released` is its own migration file.**
+Postgres does not allow a new enum value to be read in the same
+transaction that added it; isolating it in
+`20261019020000_venue_booking_released_status.sql` avoids "unsafe use of
+new value of enum type" on `supabase db reset`, where every migration runs
+in sequence.
+
+**Cross-file edits, narrow and additive, flagged for sign-off before
+merge.** `change_impact.py` (Aaralyn's) and `safety_service.py` (Justin's)
+each gained only a `touch_expired_holds` / `release_expired_hold` call
+ahead of their own existing logic -- no changes to either teammate's own
+decisions. Flagged in the PR for their explicit sign-off, same discipline
+already used for Terry's cross-file commit earlier this sprint.

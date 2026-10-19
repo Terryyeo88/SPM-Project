@@ -80,6 +80,7 @@ from app.authz.rules import (
     rule_safety_review_request_changes,
     rule_safety_review_submit,
     rule_safety_review_view,
+    rule_venue_block,
     rule_venue_booking_approve,
     rule_venue_booking_create,
     rule_venue_booking_list,
@@ -87,6 +88,7 @@ from app.authz.rules import (
     rule_venue_booking_view,
     rule_venue_calendar_view,
     rule_venue_list,
+    rule_venue_manage,
     rule_venue_view,
 )
 from app.shared.errors import AuthorisationError, NotFoundError
@@ -114,6 +116,8 @@ _RULES: dict[str, RuleFunc] = {
     actions.VENUE_VIEW: rule_venue_view,
     actions.VENUE_LIST: rule_venue_list,
     actions.VENUE_CALENDAR_VIEW: rule_venue_calendar_view,
+    actions.VENUE_MANAGE: rule_venue_manage,
+    actions.VENUE_BLOCK: rule_venue_block,
     actions.VENUE_BOOKING_CREATE: rule_venue_booking_create,
     actions.VENUE_BOOKING_VIEW: rule_venue_booking_view,
     actions.VENUE_BOOKING_LIST: rule_venue_booking_list,

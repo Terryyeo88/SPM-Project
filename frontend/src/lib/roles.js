@@ -237,6 +237,15 @@ export const ROUTE_ACCESS = Object.freeze(
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },
+    // Venue Becomes Unavailable After Booking (Week 7 change #2):
+    // app/authz/rules.py::rule_venue_block is venue_staff-only. Not a nav
+    // link: reached from a button on the venue detail page.
+    {
+      routeName: 'block-venue',
+      label: 'Block venue',
+      roles: [ROLES.VENUE_STAFF],
+      inNav: false,
+    },
     // Check Equipment Availability (Nawaz, IS-18). Technical Support Staff
     // only; the two list pages are nav links, the two detail pages are
     // reached from them.

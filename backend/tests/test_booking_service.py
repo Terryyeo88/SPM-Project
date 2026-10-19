@@ -13,11 +13,13 @@ rather than extending another module's test double.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 import app.events.transitions as transitions_module
+import app.venues.booking_release as booking_release_module
 import app.venues.booking_service as service_module
 from app.shared.errors import NotFoundError, ValidationError
 from tests.factories import make_user
@@ -118,11 +120,23 @@ def fake_db(monkeypatch):
     # fake, so the planning write and its event_status_log audit row
     # land in the same in-memory tables these tests assert against.
     monkeypatch.setattr(transitions_module, "supabase", db)
+    # confirm_booking's hold-expiry touches (_confirmed_overlap_exists,
+    # get_booking, list_bookings*) go through
+    # app.venues.booking_release.release_expired_hold/touch_expired_holds,
+    # which hold their own module-level `supabase` reference -- same fake,
+    # for the same reason transitions_module needs it patched above.
+    monkeypatch.setattr(booking_release_module, "supabase", db)
     return db
 
 
-def _venue(venue_id="venue-1", setup=30, turnaround=30, **overrides):
-    row = {"id": venue_id, "name": "Test Venue", "setup_minutes": setup, "turnaround_minutes": turnaround}
+def _venue(venue_id="venue-1", setup=30, turnaround=30, hold=1440, **overrides):
+    row = {
+        "id": venue_id,
+        "name": "Test Venue",
+        "setup_minutes": setup,
+        "turnaround_minutes": turnaround,
+        "tentative_hold_minutes": hold,
+    }
     row.update(overrides)
     return row
 
@@ -355,6 +369,40 @@ def test_list_bookings_for_event_newest_first(fake_db):
     assert [b["id"] for b in bookings] == ["new", "old"]
 
 
+# -- has_live_confirmed_booking (confirm_event's gate, Sprint 3) -------------
+
+
+def test_has_live_confirmed_booking_false_with_no_booking_at_all(fake_db):
+    assert service_module.has_live_confirmed_booking("event-1") is False
+
+
+def test_has_live_confirmed_booking_true_within_the_hold_window(fake_db):
+    recent = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    fake_db.tables["venue_bookings"] = [_booking(status="confirmed", confirmed_at=recent, hold_minutes=60)]
+
+    assert service_module.has_live_confirmed_booking("event-1") is True
+
+
+def test_has_live_confirmed_booking_false_once_the_hold_has_expired(fake_db):
+    old = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    fake_db.tables["venue_bookings"] = [_booking(status="confirmed", confirmed_at=old, hold_minutes=60)]
+    fake_db.tables["events"] = [{"id": "event-1", "status": "planning"}]
+
+    assert service_module.has_live_confirmed_booking("event-1") is False
+    assert fake_db.tables["venue_bookings"][0]["status"] == "released"
+
+
+def test_has_live_confirmed_booking_true_for_a_graduated_event_however_old(fake_db):
+    """The guard behind the guard: once the event itself is confirmed,
+    elapsed hold time never matters again."""
+    ancient = "2020-01-01T00:00:00+00:00"
+    fake_db.tables["venue_bookings"] = [_booking(status="confirmed", confirmed_at=ancient, hold_minutes=60)]
+    fake_db.tables["events"] = [{"id": "event-1", "status": "confirmed"}]
+
+    assert service_module.has_live_confirmed_booking("event-1") is True
+    assert fake_db.tables["venue_bookings"][0]["status"] == "confirmed"
+
+
 # -- list_bookings: role scoping ----------------------------------------------
 
 
@@ -424,22 +472,36 @@ def test_list_bookings_for_a_user_without_a_listing_role_is_empty_and_never_quer
 
 
 def test_confirm_booking_sets_status_and_logs_the_decision(fake_db):
+    fake_db.tables["venues"] = [_venue()]
     fake_db.tables["venue_bookings"] = [_booking(status="pending")]
     booking = SimpleNamespace(**_booking(status="pending"))
 
     result = service_module.confirm_booking("booking-1", booking, "staff-1")
 
     assert result["status"] == "confirmed"
-    assert len(fake_db.inserts) == 1
-    log_table, log_row = fake_db.inserts[0]
-    assert log_table == "venue_booking_status_log"
-    assert {k: v for k, v in log_row.items() if k != "id"} == {
+    log_inserts = [row for table, row in fake_db.inserts if table == "venue_booking_status_log"]
+    assert len(log_inserts) == 1
+    assert {k: v for k, v in log_inserts[0].items() if k != "id"} == {
         "booking_id": "booking-1",
         "from_status": "pending",
         "to_status": "confirmed",
         "changed_by": "staff-1",
         "reason": None,
     }
+
+
+def test_confirm_booking_snapshots_hold_minutes_and_confirmed_at(fake_db):
+    """The hold-expiry anchor -- see docs/design-decisions.md: snapshotted
+    from the venue's CURRENT tentative_hold_minutes at confirm time, same
+    immutability stance setup/turnaround already took at request time."""
+    fake_db.tables["venues"] = [_venue(hold=90)]
+    fake_db.tables["venue_bookings"] = [_booking(status="pending")]
+    booking = SimpleNamespace(**_booking(status="pending"))
+
+    result = service_module.confirm_booking("booking-1", booking, "staff-1")
+
+    assert result["hold_minutes"] == 90
+    assert result["confirmed_at"] is not None
 
 
 def test_confirm_booking_blocked_by_an_overlapping_confirmed_booking(fake_db):
@@ -462,6 +524,7 @@ def test_confirm_booking_blocked_by_an_overlapping_confirmed_booking(fake_db):
 
 
 def test_confirm_booking_not_blocked_by_a_non_overlapping_confirmed_booking(fake_db):
+    fake_db.tables["venues"] = [_venue()]
     fake_db.tables["venue_bookings"] = [
         _booking("booking-1", status="pending"),
         _booking(
@@ -478,11 +541,53 @@ def test_confirm_booking_not_blocked_by_a_non_overlapping_confirmed_booking(fake
     assert result["status"] == "confirmed"
 
 
+def test_confirm_booking_blocked_by_an_overlapping_venue_block(fake_db):
+    """Venue Becomes Unavailable After Booking: a pending request can
+    never be CONFIRMED into an already-blocked period."""
+    fake_db.tables["venues"] = [_venue()]
+    fake_db.tables["venue_bookings"] = [_booking("booking-1", status="pending")]
+    fake_db.tables["venue_blocks"] = [
+        {
+            "id": "block-1",
+            "venue_id": "venue-1",
+            "reason": "maintenance",
+            "block_start": "2026-11-01T10:00:00+08:00",
+            "block_end": "2026-11-01T20:00:00+08:00",
+        }
+    ]
+    booking = SimpleNamespace(**_booking("booking-1", status="pending"))
+
+    with pytest.raises(ValidationError):
+        service_module.confirm_booking("booking-1", booking, "staff-1")
+
+    assert fake_db.tables["venue_bookings"][0]["status"] == "pending"
+
+
+def test_confirm_booking_not_blocked_by_a_non_overlapping_venue_block(fake_db):
+    fake_db.tables["venues"] = [_venue()]
+    fake_db.tables["venue_bookings"] = [_booking("booking-1", status="pending")]
+    fake_db.tables["venue_blocks"] = [
+        {
+            "id": "block-1",
+            "venue_id": "venue-1",
+            "reason": "maintenance",
+            "block_start": "2026-11-02T10:00:00+08:00",
+            "block_end": "2026-11-02T20:00:00+08:00",
+        }
+    ]
+    booking = SimpleNamespace(**_booking("booking-1", status="pending"))
+
+    result = service_module.confirm_booking("booking-1", booking, "staff-1")
+
+    assert result["status"] == "confirmed"
+
+
 def test_second_decision_is_refused_once_no_longer_pending(fake_db):
     """Pending-only race guard, same idiom as
     event_service's own double-decision test: a second decision call
     against a booking that's already been decided finds no matching row
     and is refused."""
+    fake_db.tables["venues"] = [_venue()]
     fake_db.tables["venue_bookings"] = [_booking(status="pending")]
     booking = SimpleNamespace(**_booking(status="pending"))
     service_module.confirm_booking("booking-1", booking, "staff-1")
@@ -491,7 +596,8 @@ def test_second_decision_is_refused_once_no_longer_pending(fake_db):
         service_module.reject_booking("booking-1", booking, "staff-1", "changed my mind")
 
     assert fake_db.tables["venue_bookings"][0]["status"] == "confirmed"
-    assert len(fake_db.inserts) == 1
+    log_inserts = [row for table, row in fake_db.inserts if table == "venue_booking_status_log"]
+    assert len(log_inserts) == 1
 
 
 # -- reject_booking -------------------------------------------------------------

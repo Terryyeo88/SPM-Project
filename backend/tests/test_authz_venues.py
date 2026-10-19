@@ -66,3 +66,29 @@ def test_multi_role_union_grants_venue_list():
     special case needed for holding an unrelated extra role."""
     user = make_user(["event_organizer", "event_coordinator"], user_id="both-1")
     assert can(user, actions.VENUE_LIST) is True
+
+
+# -- venue.manage / venue.block (Josiah, Sprint 3) --------------------------
+# Role-only, venue_staff-only -- exact shape of ROOM_LAYOUT_MANAGE's own
+# tests (test_room_layouts.py), the closest existing precedent.
+
+
+@pytest.mark.parametrize("action", [actions.VENUE_MANAGE, actions.VENUE_BLOCK])
+def test_venue_staff_allowed_manage_and_block(action):
+    user = make_user(["venue_staff"], user_id="staff-1")
+    assert can(user, action) is True
+
+
+@pytest.mark.parametrize("action", [actions.VENUE_MANAGE, actions.VENUE_BLOCK])
+@pytest.mark.parametrize("role", ["event_organizer", "event_coordinator", "attendee", "technical_support_staff"])
+def test_every_other_role_denied_manage_and_block(action, role):
+    user = make_user([role], user_id="user-1")
+    assert can(user, action) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, action)
+
+
+def test_multi_role_union_grants_venue_manage():
+    user = make_user(["event_coordinator", "venue_staff"], user_id="both-1")
+    assert can(user, actions.VENUE_MANAGE) is True
+    assert can(user, actions.VENUE_BLOCK) is True

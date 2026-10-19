@@ -112,6 +112,21 @@ VENUE_LIST = "venue.list"
 
 VENUE_CALENDAR_VIEW = "venue.calendar_view"
 
+# -- venue management (Josiah, Sprint 3) ---------------------------------
+# Source: "Request Venue Booking with Setup and Turnaround Time" (Week 7
+# #1) -- Venue Staff edit a venue's setup_minutes/turnaround_minutes/
+# tentative_hold_minutes, the first write path VENUE_VIEW's own 2024
+# comment above anticipated ("whoever builds venue management later
+# should add those actions the same way"). "Venue Becomes Unavailable
+# After Booking" (Week 7 #2) -- Venue Staff create/list blocks on a
+# venue. Two separate actions, not one, even though both are venue_staff-
+# only today -- venues and venue_blocks are different resource types,
+# same reasoning ROOM_LAYOUT_LIST/ROOM_LAYOUT_MANAGE's own split from
+# VENUE_VIEW/VENUE_LIST already established for a similar audience.
+
+VENUE_MANAGE = "venue.manage"
+VENUE_BLOCK = "venue.block"
+
 # -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
 # Source: "As an Event Coordinator, I want to submit a request to book a
 # venue for an event" (create) and "As a Venue Staff member, I want to

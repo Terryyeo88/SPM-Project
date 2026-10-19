@@ -37,6 +37,7 @@ from types import SimpleNamespace
 from app.events.event_service import SINGAPORE_TZ, _from_database_event
 from app.extensions import supabase
 from app.shared.errors import AppError, ValidationError
+from app.venues.booking_release import release_expired_hold
 from app.venues.booking_service import _event_window, _parse_timestamptz
 
 TIMING_FIELDS = frozenset({"preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time"})
@@ -93,6 +94,16 @@ def _venue_impacts(event: SimpleNamespace, after: dict, changed: set[str]) -> li
     )
     impacts = []
     for booking in result.data or []:
+        # Sprint 3: a confirmed booking whose tentative hold has expired
+        # is touched here before being assessed -- its arrangement is no
+        # longer actually in place, so there's nothing left to protect.
+        # event.status is already loaded by the caller, so this is the
+        # same "no second round trip" shape calendar_service's own touch
+        # point uses. Pending bookings are untouched by this call (only
+        # status="confirmed" rows can expire).
+        booking = release_expired_hold(booking, event_status=event.status)
+        if booking["status"] not in _ACTIVE_BOOKING_STATUSES:
+            continue
         venue = booking.get("venues") or {}
         issues = []
 

@@ -557,6 +557,25 @@ def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue.manage / venue.block (Josiah, Sprint 3) -------------------------
+# Source: see VENUE_MANAGE/VENUE_BLOCK in actions.py. Role-only, exact
+# shape of rule_room_layout_manage below -- a venue, like a room layout,
+# has no owner relationship to check, so "does this role get to do this
+# at all" is the whole question.
+
+
+def rule_venue_manage(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_venue_block(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
 # -- venue_booking.create -------------------------------------------------
 # Source: Venue Booking Request story -- the assigned Event Coordinator
 # submits a request against an event they're coordinating. The resource

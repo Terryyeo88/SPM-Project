@@ -2,11 +2,17 @@
 
 Implements "Request Venue Booking" (Venue Booking Request, Josiah, Sprint
 2) and "Approve Venue Bookings" (Venue Booking Approval, Josiah, Sprint
-2). NOT implemented here (separate, unassigned stories -- see
-docs/design-decisions.md): the full Booking Conflict Detection story
-(flagging pending-vs-pending conflicts, recalculating availability on
-cancel), the Venue Availability Calendar, and Venue Becomes Unavailable
-(blocking a venue for maintenance etc.).
+2), plus (Sprint 3) the confirm-time half of "Venue Becomes Unavailable
+After Booking" (app.venues.block_service owns the write side -- creating
+a block; this module only guards against confirming a pending request
+INTO an already-blocked period, see _blocked_period_exists) and the
+booking side of "Venue Availability Calendar Tentative Hold" (a confirmed
+booking's hold expiry -- see app.venues.booking_release, touched at
+every call site in this module that treats status="confirmed" as
+"genuinely holding the venue"). NOT implemented here (separate,
+unassigned stories -- see docs/design-decisions.md): the full Booking
+Conflict Detection story (flagging pending-vs-pending conflicts), and the
+calendar display itself (app.venues.calendar_service).
 
 One booking is keyed to one EVENT ROW (session), not to shared_event_id
 (the whole multi-session request) -- see
@@ -16,7 +22,7 @@ why.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
 
 from postgrest.exceptions import APIError
@@ -24,8 +30,9 @@ from postgrest.exceptions import APIError
 from app.events.event_service import SINGAPORE_TZ
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+from app.venues.booking_release import release_expired_hold, touch_expired_holds
 
-BOOKING_STATUSES = {"pending", "confirmed", "rejected"}
+BOOKING_STATUSES = {"pending", "confirmed", "rejected", "released"}
 
 # Statuses that count as "this booking is actively holding the venue" for
 # overlap purposes. Deliberately CONFIRMED ONLY -- not pending -- this is
@@ -102,20 +109,53 @@ def _confirmed_overlap_exists(
     venue_id: str, booking_start: datetime, booking_end: datetime, exclude_booking_id: str | None = None
 ) -> bool:
     """True if `venue_id` already has another CONFIRMED booking whose
-    padded span overlaps [booking_start, booking_end)."""
+    padded span overlaps [booking_start, booking_end).
+
+    Every fetched row is touched through release_expired_hold FIRST, so a
+    stale "confirmed" row whose tentative hold has actually expired never
+    counts as blocking -- this is the one place every confirm attempt
+    flows through (directly here, or via confirm_booking's own call
+    below), so it's where lazy expiry gets enforced for free, before the
+    UPDATE that would otherwise hit IS-16's exclusion constraint. See
+    app.venues.booking_release and docs/design-decisions.md."""
     result = (
         supabase.table("venue_bookings")
-        .select("id, booking_start, booking_end")
+        .select("*")
         .eq("venue_id", venue_id)
         .in_("status", _BLOCKING_STATUSES)
         .execute()
     )
-    for row in result.data or []:
+    rows = touch_expired_holds(result.data or [])
+    for row in rows:
+        if row.get("status") != "confirmed":
+            continue  # touched and released above -- no longer holding the venue
         if exclude_booking_id and row["id"] == exclude_booking_id:
             continue
         other_start = _parse_timestamptz(row["booking_start"])
         other_end = _parse_timestamptz(row["booking_end"])
         if _spans_overlap(booking_start, booking_end, other_start, other_end):
+            return True
+    return False
+
+
+def _blocked_period_exists(venue_id: str, booking_start: datetime, booking_end: datetime) -> bool:
+    """True if `venue_id` has a venue_blocks row overlapping
+    [booking_start, booking_end) -- the confirm-time half of "Venue
+    Becomes Unavailable After Booking": a pending request is left alone
+    when a block is first created (Venue Staff's own call when they get
+    to reviewing it -- see block_service.create_venue_block's own
+    docstring), but it must never be CONFIRMED into an already-blocked
+    period. Checked by confirm_booking alongside _confirmed_overlap_exists."""
+    result = (
+        supabase.table("venue_blocks")
+        .select("block_start, block_end")
+        .eq("venue_id", venue_id)
+        .execute()
+    )
+    for row in result.data or []:
+        block_start = _parse_timestamptz(row["block_start"])
+        block_end = _parse_timestamptz(row["block_end"])
+        if _spans_overlap(booking_start, booking_end, block_start, block_end):
             return True
     return False
 
@@ -197,23 +237,61 @@ def _attach_rejection_reasons(rows: list[dict]) -> list[dict]:
     return rows
 
 
+def _attach_release_reasons(rows: list[dict]) -> list[dict]:
+    """Adds `release` ({"reason", "released_at", "released_by"}) to each
+    released booking -- exact mirror of _attach_rejection_reasons, joined
+    from the same venue_booking_status_log, but its OWN field (not
+    overloading `rejection`): `rejected` must keep meaning only "Venue
+    Staff declined it", never a system-initiated release. released_by is
+    None for a system-initiated release (expiry, a cancelled event) --
+    present only when a Venue Staff action (block creation) supplied a
+    real changed_by."""
+    released_ids = [row["id"] for row in rows if row.get("status") == "released"]
+    if not released_ids:
+        return rows
+    result = (
+        supabase.table("venue_booking_status_log")
+        .select("booking_id, reason, changed_at, profiles(name)")
+        .in_("booking_id", released_ids)
+        .eq("to_status", "released")
+        .execute()
+    )
+    latest = {}
+    for entry in sorted(result.data or [], key=lambda entry: entry.get("changed_at") or ""):
+        latest[entry["booking_id"]] = entry
+    for row in rows:
+        entry = latest.get(row["id"])
+        if row.get("status") == "released" and entry:
+            row["release"] = {
+                "reason": entry.get("reason"),
+                "released_at": entry.get("changed_at"),
+                "released_by": (entry.get("profiles") or {}).get("name"),
+            }
+    return rows
+
+
 def get_booking(booking_id: str) -> dict:
     result = supabase.table("venue_bookings").select("*").eq("id", booking_id).maybe_single().execute()
     if result is None or not result.data:
         raise NotFoundError("Venue booking not found.")
-    booking = result.data
-    # Read-only conflict flag, surfaced BEFORE a decision is made (not
-    # just enforced when confirm_booking is actually called), so Venue
-    # Staff see the same conflict a confirm attempt would hit -- the
-    # wireframe's "Suitability Check" turnaround-conflict warning reads
-    # this field.
+    booking = release_expired_hold(result.data)
+    # Read-only conflict/blocked flags, surfaced BEFORE a decision is
+    # made (not just enforced when confirm_booking is actually called),
+    # so Venue Staff see the same conflicts a confirm attempt would hit --
+    # the wireframe's "Suitability Check" panel reads these fields.
     booking["conflict"] = _confirmed_overlap_exists(
         booking["venue_id"],
         _parse_timestamptz(booking["booking_start"]),
         _parse_timestamptz(booking["booking_end"]),
         exclude_booking_id=booking["id"],
     )
-    return _attach_rejection_reasons([booking])[0]
+    booking["blocked"] = _blocked_period_exists(
+        booking["venue_id"],
+        _parse_timestamptz(booking["booking_start"]),
+        _parse_timestamptz(booking["booking_end"]),
+    )
+    booking = _attach_rejection_reasons([booking])[0]
+    return _attach_release_reasons([booking])[0]
 
 
 def list_bookings_for_event(event_id: str) -> list[dict]:
@@ -224,7 +302,24 @@ def list_bookings_for_event(event_id: str) -> list[dict]:
         .order("created_at", desc=True)
         .execute()
     )
-    return _attach_rejection_reasons(result.data or [])
+    rows = touch_expired_holds(result.data or [])
+    rows = _attach_rejection_reasons(rows)
+    return _attach_release_reasons(rows)
+
+
+def has_live_confirmed_booking(event_id: str) -> bool:
+    """True if `event_id` has at least one CONFIRMED venue booking that
+    genuinely still holds a venue, after touching away any expired
+    tentative holds. The gate behind events/routes.py::confirm_event
+    (Sprint 3): without this, an event could reach "confirmed" status
+    with a venue booking that already expired, directly violating the
+    Tentative Hold AC ("an expired hold should not be treated as a
+    confirmed booking") -- see docs/design-decisions.md for how this gap
+    was found. PLURAL-SAFE: true if ANY confirmed booking remains, not
+    tied to exactly one."""
+    result = supabase.table("venue_bookings").select("*").eq("event_id", event_id).eq("status", "confirmed").execute()
+    touched = touch_expired_holds(result.data or [])
+    return any(row.get("status") == "confirmed" for row in touched)
 
 
 def list_bookings(user, status: str | None = None) -> list[dict]:
@@ -261,10 +356,19 @@ def list_bookings(user, status: str | None = None) -> list[dict]:
         # event_coordinator) sees everything, per the union above --
         # unfiltered is the wider of the two, so it's correct for both.
         query = query.eq("requested_by", user.id)
-    if status is not None:
-        query = query.eq("status", status)
+    # The status filter is NOT pushed into the query -- it's applied
+    # below, AFTER touch_expired_holds. Filtering at the database layer
+    # first would use each row's possibly-stale DB status: a booking
+    # whose hold just expired would still read "confirmed" in Postgres
+    # until something touches it, so a caller asking for status="released"
+    # could miss it, and a caller asking for status="confirmed" could get
+    # a row that's actually expired. Touching the whole scoped set first
+    # means the filter always sees current, not stale, state.
     result = query.order("created_at", desc=True).execute()
-    return result.data or []
+    rows = touch_expired_holds(result.data or [])
+    if status is not None:
+        rows = [row for row in rows if row.get("status") == status]
+    return rows
 
 
 def _record_booking_status_change(
@@ -293,7 +397,9 @@ def _notify_booking_decision(booking: dict, decision: str) -> None:
     print(f"[notify] venue booking {booking['id']} {decision}")
 
 
-def _decide_booking(booking_id: str, booking: SimpleNamespace, to_status: str, decided_by: str, reason):
+def _decide_booking(
+    booking_id: str, booking: SimpleNamespace, to_status: str, decided_by: str, reason, extra_fields: dict | None = None
+):
     """Moves a pending booking to `to_status`. The authz rule
     (rule_venue_booking_approve/reject) has already checked the caller is
     venue_staff and the booking is pending. The update is ALSO
@@ -302,11 +408,16 @@ def _decide_booking(booking_id: str, booking: SimpleNamespace, to_status: str, d
     (a double click, or approve and reject from two tabs) can't both
     land -- the second matches no row and gets a clear error instead of
     silently winning.
+
+    extra_fields is merged into the same UPDATE -- confirm_booking uses
+    it to snapshot hold_minutes/confirmed_at atomically with the status
+    change, not as a second write, so there is never a window where a
+    row reads status="confirmed" with a still-null confirmed_at.
     """
     try:
         result = (
             supabase.table("venue_bookings")
-            .update({"status": to_status})
+            .update({"status": to_status, **(extra_fields or {})})
             .eq("id", booking_id)
             .eq("status", "pending")
             .select("*")
@@ -336,6 +447,14 @@ def confirm_booking(booking_id: str, booking: SimpleNamespace, decided_by: str) 
     approval ("once venue AND equipment requests are approved"), a
     different, unbuilt story's call to make. See
     docs/design-decisions.md.
+
+    Snapshots the venue's CURRENT tentative_hold_minutes onto the
+    booking, and confirmed_at = now(), together with the status change
+    (same "snapshot once, never re-read" stance setup_minutes/
+    turnaround_minutes already take at request time) -- this is what the
+    hold-expiry tracking in app.venues.booking_release reads. A later
+    edit to the venue's own tentative_hold_minutes never changes an
+    already-confirmed booking's deadline.
     """
     if _confirmed_overlap_exists(
         booking.venue_id,
@@ -346,7 +465,20 @@ def confirm_booking(booking_id: str, booking: SimpleNamespace, decided_by: str) 
         raise ValidationError(
             "This venue already has a confirmed booking overlapping this period -- it cannot be confirmed."
         )
-    decided = _decide_booking(booking_id, booking, "confirmed", decided_by, None)
+    if _blocked_period_exists(
+        booking.venue_id,
+        _parse_timestamptz(booking.booking_start),
+        _parse_timestamptz(booking.booking_end),
+    ):
+        raise ValidationError(
+            "This venue has been blocked for part of this period -- it cannot be confirmed."
+        )
+    venue = _get_venue(booking.venue_id)
+    extra_fields = {
+        "hold_minutes": venue["tentative_hold_minutes"],
+        "confirmed_at": datetime.now(UTC).isoformat(),
+    }
+    decided = _decide_booking(booking_id, booking, "confirmed", decided_by, None, extra_fields=extra_fields)
     _notify_booking_decision(decided, "confirmed")
     return decided
 

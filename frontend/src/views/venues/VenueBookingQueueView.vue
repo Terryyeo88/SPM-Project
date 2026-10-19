@@ -62,6 +62,7 @@ const EMPTY_MESSAGES = {
   pending: 'Nothing waiting for a decision.',
   confirmed: 'No confirmed bookings yet.',
   rejected: 'No rejected bookings.',
+  released: 'No released bookings.',
 }
 
 onMounted(loadBookings)
@@ -151,6 +152,7 @@ onMounted(loadBookings)
 .status-pending { color: #8a6d00; background: #fff4c2; }
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-rejected { color: #b42318; background: #fde8e6; }
+.status-released { color: #6a6a6a; background: #eeeeee; }
 
 @media (max-width: 600px) {
   .row { flex-direction: column; align-items: flex-start; }

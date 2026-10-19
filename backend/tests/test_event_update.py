@@ -24,6 +24,7 @@ import app.events.event_service as event_service
 import app.events.event_update as event_update
 import app.events.routes as routes_module
 import app.events.transitions as transitions
+import app.venues.booking_release as booking_release_module
 from app.events.change_impact import ChangeImpactNotAcknowledgedError
 from app.events.event_update import EventUpdateConflictError, preview_event_update, update_event
 from app.shared.errors import ValidationError
@@ -66,7 +67,9 @@ def _session(**overrides) -> dict:
 @pytest.fixture
 def fake(monkeypatch):
     db = FakeSupabase([_session(), _session(id="session-2", preferred_start_date=LATER, preferred_end_date=LATER)])
-    for module in (impact_module, event_log, event_service, event_update, transitions, routes_module):
+    for module in (
+        impact_module, event_log, event_service, event_update, transitions, routes_module, booking_release_module,
+    ):
         monkeypatch.setattr(module, "supabase", db)
     return db
 
@@ -99,7 +102,10 @@ def _auth(signing_key, user_id):
     return {"Authorization": f"Bearer {signing_key.make_token(sub=user_id)}"}
 
 
-def _book_venue(fake, booking_id="booking-1", *, status="confirmed", capacity=200, start="08:30", end="17:30"):
+def _book_venue(
+    fake, booking_id="booking-1", *, status="confirmed", capacity=200, start="08:30", end="17:30",
+    confirmed_at=None, hold_minutes=None,
+):
     fake.tables.setdefault("venue_bookings", []).append(
         {
             "id": booking_id,
@@ -109,6 +115,8 @@ def _book_venue(fake, booking_id="booking-1", *, status="confirmed", capacity=20
             "turnaround_minutes": 30,
             "booking_start": f"{FUTURE}T{start}:00+08:00",
             "booking_end": f"{FUTURE}T{end}:00+08:00",
+            "confirmed_at": confirmed_at,
+            "hold_minutes": hold_minutes,
             "venues": {
                 "name": f"Hall {booking_id}",
                 "capacity": capacity,
@@ -526,6 +534,38 @@ def test_ac9_a_change_affecting_one_venue_booking_leaves_every_booking_in_place(
     assert [impact["booking_id"] for impact in impacts] == ["booking-small"]
     assert fake.tables["venue_bookings"] == bookings_before
     assert _writes(fake, "venue_bookings") == []
+
+
+# -- Sprint 3: an expired tentative hold is never protected as an impact ----------
+
+
+def test_an_expired_booking_produces_no_impact_and_is_released(fake):
+    """A confirmed booking whose tentative hold has already expired isn't
+    a real arrangement any more -- it's touched (released) before impacts
+    are assessed, and produces no impact entry to acknowledge, even for a
+    change that would otherwise conflict with it."""
+    old_confirmed_at = "2020-01-01T00:00:00+00:00"  # far enough in the past to always be expired
+    _book_venue(fake, "booking-1", capacity=120, confirmed_at=old_confirmed_at, hold_minutes=60)
+
+    impacts = preview_event_update(_event(fake), {"expected_attendance": 150})["impacts"]
+
+    assert impacts == []
+    assert next(row for row in fake.tables["venue_bookings"] if row["id"] == "booking-1")["status"] == "released"
+
+
+def test_a_long_confirmed_event_s_booking_is_never_re_expired_in_impacts(fake):
+    """Once the EVENT itself has reached confirmed, elapsed hold time is
+    meaningless and must never flip the booking to released, however
+    long ago it was confirmed -- it's still a real arrangement to warn
+    the coordinator about."""
+    fake.rows[0]["status"] = "confirmed"
+    ancient_confirmed_at = "2020-01-01T00:00:00+00:00"
+    _book_venue(fake, "booking-1", capacity=120, confirmed_at=ancient_confirmed_at, hold_minutes=60)
+
+    impacts = preview_event_update(_event(fake), {"expected_attendance": 150})["impacts"]
+
+    assert [impact["booking_id"] for impact in impacts] == ["booking-1"]
+    assert next(row for row in fake.tables["venue_bookings"] if row["id"] == "booking-1")["status"] == "confirmed"
 
 
 # -- shared details stay one version across sessions ------------------------------
