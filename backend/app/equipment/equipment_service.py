@@ -33,8 +33,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from postgrest.exceptions import APIError
+
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+
+# The event's own [start, end) window, reused rather than re-derived so an
+# equipment request and a venue booking for the same session can never
+# disagree about when "the session" is (Singapore time, missing end time =
+# end of day). Private to booking_service by name only.
+from app.venues.booking_service import _event_window
 
 EQUIPMENT_STATUSES = {"available", "maintenance", "retired"}
 REQUEST_STATUSES = {"pending", "confirmed", "rejected"}
@@ -165,7 +173,7 @@ def get_request(request_id: str) -> dict:
     result = (
         supabase.table("equipment_requests")
         .select(
-            "*, events(name), "
+            "*, events(name, status), "
             "equipment_request_items(id, equipment_type_id, quantity, technical_requirements, equipment_types(name))"
         )
         .eq("id", request_id)
@@ -175,7 +183,9 @@ def get_request(request_id: str) -> dict:
     if result is None or not result.data:
         raise NotFoundError("Equipment request not found.")
     row = dict(result.data)
-    row["event_name"] = _one(row.pop("events", None)).get("name")
+    event = _one(row.pop("events", None))
+    row["event_name"] = event.get("name")
+    row["event_status"] = event.get("status")
     row["items"] = [_flatten_item(item) for item in row.pop("equipment_request_items", None) or []]
     return row
 
@@ -285,11 +295,131 @@ def load_request_resource(request_id: str) -> SimpleNamespace:
     return SimpleNamespace(**get_request(request_id))
 
 
+# -- record a request (IS-17) -------------------------------------------------
+
+MAX_REQUIREMENTS_LENGTH = 2000
+
+
+def list_equipment_types() -> list[dict]:
+    """The kinds of equipment a request can name, A-Z. Feeds the request
+    form's picker; a type exists whether or not any unit of it does."""
+    result = supabase.table("equipment_types").select("id, name").order("name").execute()
+    return list(result.data or [])
+
+
+def _validate_request_items(raw_items) -> list[dict]:
+    """The lines of a new request, checked and normalised -- BEFORE
+    anything is written, so a bad line leaves nothing half-created.
+
+    AC: "System prevents submitting a request if quantity is missing or
+    zero for a selected equipment item". Stricter than that, deliberately:
+    quantity must be a whole number (not "3", not 2.5, not true), because
+    equipment_request_items.quantity is an integer with check (> 0) and a
+    sloppy value would otherwise surface as a database error. One line per
+    type (the table's unique(request_id, equipment_type_id)) -- a duplicate
+    is rejected, not silently merged, so the coordinator sees the ambiguity.
+    """
+    if not isinstance(raw_items, list) or not raw_items:
+        raise ValidationError("Add at least one equipment item to the request.")
+    items = []
+    seen = set()
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            raise ValidationError(f"Item {index} is not valid.")
+        type_id = raw.get("equipment_type_id")
+        if not isinstance(type_id, str) or not type_id.strip():
+            raise ValidationError(f"Item {index}: choose an equipment type.")
+        type_id = type_id.strip()
+        if type_id in seen:
+            raise ValidationError("Each equipment type can only appear once; combine the quantities instead.")
+        seen.add(type_id)
+        quantity = raw.get("quantity")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            raise ValidationError(f"Item {index}: quantity must be a whole number of at least 1.")
+        requirements = raw.get("technical_requirements")
+        if requirements is not None and not isinstance(requirements, str):
+            raise ValidationError(f"Item {index}: technical requirements must be text.")
+        requirements = (requirements or "").strip() or None
+        if requirements and len(requirements) > MAX_REQUIREMENTS_LENGTH:
+            raise ValidationError(
+                f"Item {index}: technical requirements are too long (limit {MAX_REQUIREMENTS_LENGTH} characters)."
+            )
+        items.append({"equipment_type_id": type_id, "quantity": quantity, "technical_requirements": requirements})
+    return items
+
+
+def create_request(event: SimpleNamespace, raw_items, requested_by: str) -> dict:
+    """Record Equipment Request for Event (IS-17): a new "pending" request
+    for one event session, with one line per kind of equipment.
+
+    authz (rule_equipment_request_create) has already checked the caller is
+    the event's assigned coordinator and the event is in "planning".
+
+    The needed period is the session's own window, snapshotted onto the
+    request (see the migration's comment on needed_start/needed_end) --
+    the coordinator does not type dates, because the request is for THIS
+    session and its date and time are already on the event.
+
+    Two inserts (the request, then its lines) with no transaction available
+    through the REST client, so if the lines fail the request row is
+    deleted again: a request with no lines would sit in Technical Support's
+    queue asking for nothing. Nothing here reserves a unit -- accepting is
+    the separate Reservation story -- so there is nothing else to undo.
+    """
+    items = _validate_request_items(raw_items)
+
+    wanted = [item["equipment_type_id"] for item in items]
+    found = supabase.table("equipment_types").select("id").in_("id", wanted).execute()
+    known = {row["id"] for row in (found.data or [])}
+    if any(type_id not in known for type_id in wanted):
+        raise ValidationError("One of the equipment types does not exist.")
+
+    needed_start, needed_end = _event_window(event)
+    created = (
+        supabase.table("equipment_requests")
+        .insert(
+            {
+                "event_id": event.id,
+                "requested_by": requested_by,
+                "status": "pending",
+                "needed_start": needed_start.isoformat(),
+                "needed_end": needed_end.isoformat(),
+            }
+        )
+        .select("*")
+        .execute()
+    )
+    if not created.data:
+        raise ValidationError("The equipment request database operation did not return a request.")
+    request_row = created.data[0] if isinstance(created.data, list) else created.data
+
+    try:
+        supabase.table("equipment_request_items").insert(
+            [{**item, "request_id": request_row["id"]} for item in items]
+        ).execute()
+    except Exception:
+        supabase.table("equipment_requests").delete().eq("id", request_row["id"]).execute()
+        raise
+
+    return get_request(request_row["id"])
+
+
 # -- availability check (the story) -----------------------------------------
 
 
 def check_availability(request_id: str) -> dict:
-    """For each equipment type on the request: how many are requested, how
+    """The availability check as the API returns it; see
+    _compute_availability for what is in each item."""
+    return _compute_availability(request_id)[0]
+
+
+def _compute_availability(request_id: str) -> tuple[dict, dict[str, list[dict]], dict]:
+    """Returns (the check result, the free units per equipment type, the
+    request). The free units carry their ids, which accepting a request
+    needs to reserve them and which the API result deliberately leaves
+    out (it lists asset tags).
+
+    For each equipment type on the request: how many are requested, how
     many units are available for the request's date/time, and whether that
     is enough (AC2, AC3, AC4).
 
@@ -364,6 +494,7 @@ def check_availability(request_id: str) -> dict:
             )
 
     checked = []
+    free_by_type: dict[str, list[dict]] = {}
     for item in items:
         units = units_by_type.get(item["equipment_type_id"], [])
         out_of_service = [unit for unit in units if unit["status"] != "available"]
@@ -373,6 +504,7 @@ def check_availability(request_id: str) -> dict:
             {"asset_tag": unit["asset_tag"], **hold} for unit in usable for hold in held.get(unit["id"], [])
         ]
         available = len(free)
+        free_by_type[item["equipment_type_id"]] = free
         checked.append(
             {
                 "equipment_type_id": item["equipment_type_id"],
@@ -389,7 +521,7 @@ def check_availability(request_id: str) -> dict:
             }
         )
 
-    return {
+    result = {
         "request": {
             "id": request["id"],
             "status": request["status"],
@@ -401,3 +533,161 @@ def check_availability(request_id: str) -> dict:
         "items": checked,
         "all_sufficient": all(entry["sufficient"] for entry in checked),
     }
+    return result, free_by_type, request
+
+
+# -- accept a request and reserve stock (IS-19) -----------------------------
+
+
+def accept_request(request_id: str) -> dict:
+    """Accept an equipment request and reserve stock (IS-19): the request
+    becomes "confirmed" and a specific unit is reserved for every piece of
+    equipment it asks for.
+
+    authz (rule_equipment_request_accept) has already checked the caller is
+    Technical Support Staff, the request is "pending" (AC: "Only requests
+    in a pending status can be accepted") and its event is still in
+    planning (a cancelled or moved-on event must not take stock).
+
+    Follows the conventions the event page and the release story already
+    rely on (docs/design-decisions.md, "Conventions this relies on"):
+      1. one reservation row per UNIT, not per quantity;
+      2. the request becomes "confirmed" when its reservation rows are
+         written, never before;
+      3. each reservation copies the request's needed_start/needed_end, so
+         "available quantity ... scoped to the event's date and time" falls
+         out of the existing availability arithmetic with no stored count.
+
+    Refuses outright when any line cannot be covered (IS-41 is the story
+    that turns this into a warning with a reject); nothing is reserved in
+    that case, so a request is accepted whole or not at all.
+
+    Units are taken lowest asset tag first, so which units a request gets
+    is predictable. There is no transaction through the REST client, so
+    the order is: reserve the units, then flip the status conditioned on
+    the request still being "pending". If the status flip finds nothing to
+    update (two people accepting at once) the units just reserved are
+    deleted again. The database exclusion constraint is the backstop if
+    two DIFFERENT requests race for the same unit: it refuses the second
+    insert and nothing is half-reserved.
+    """
+    result, free_by_type, request = _compute_availability(request_id)
+    if not result["all_sufficient"]:
+        short = "; ".join(
+            f"{item['type']}: {item['requested']} requested, {item['available']} available"
+            for item in result["items"]
+            if not item["sufficient"]
+        )
+        raise ValidationError(f"There is not enough equipment available for this request ({short}).")
+
+    reservations = []
+    allocated = []
+    for item in request["items"]:
+        chosen = free_by_type[item["equipment_type_id"]][: item["quantity"]]
+        allocated.append(
+            {
+                "equipment_type_id": item["equipment_type_id"],
+                "type": item["type"],
+                "quantity": len(chosen),
+                "units": [{"id": unit["id"], "asset_tag": unit["asset_tag"]} for unit in chosen],
+            }
+        )
+        reservations.extend(
+            {
+                "equipment_id": unit["id"],
+                "request_item_id": item["id"],
+                "reserved_start": request["needed_start"],
+                "reserved_end": request["needed_end"],
+            }
+            for unit in chosen
+        )
+
+    try:
+        inserted = supabase.table("equipment_reservations").insert(reservations).execute().data or []
+    except APIError as exc:
+        # The exclusion constraint refused: another request took one of
+        # these units for an overlapping period between the check above and
+        # this write. 40P01 when both reached it before either committed.
+        if exc.code in ("23P01", "40P01"):
+            raise ValidationError(
+                "Some of that equipment was just reserved for another event -- check availability again."
+            ) from exc
+        raise
+
+    try:
+        updated = (
+            supabase.table("equipment_requests")
+            .update({"status": "confirmed"})
+            .eq("id", request_id)
+            .eq("status", "pending")
+            .select("*")
+            .execute()
+        )
+        if not updated.data:
+            raise ValidationError("This request is no longer pending -- refresh to see its current status.")
+    except Exception:
+        reserved_ids = [row["id"] for row in inserted]
+        if reserved_ids:
+            supabase.table("equipment_reservations").delete().in_("id", reserved_ids).execute()
+        raise
+
+    _notify_request_decision(request_id, "confirmed")
+    return {**get_request(request_id), "allocated": allocated}
+
+
+MAX_REJECTION_REASON_LENGTH = 1000
+
+
+def reject_request(request_id: str, reason, decided_by: str) -> dict:
+    """Reject an equipment request with an explanation (IS-41): the request
+    becomes "rejected" and the coordinator can read why.
+
+    authz (rule_equipment_request_reject) has already checked the caller is
+    Technical Support Staff and the request is "pending".
+
+    AC: "Rejecting requires an explanation that's sent to the Event
+    Coordinator". The reason is required (blank or whitespace-only is
+    refused) and stored on the request (see the migration), where the
+    coordinator's Equipment Booking section reads it. "Sent" is the
+    notification placeholder below plus that visibility: no notification
+    system exists yet.
+
+    Nothing is reserved while a request is pending, so there is nothing to
+    release. The update is conditioned on the request still being
+    "pending", same race-proofing as accept_request: if someone accepted it
+    a moment ago this matches no row and says so, instead of overwriting a
+    confirmed request (and its reservations) with a rejection.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to reject an equipment request.")
+    reason = reason.strip()
+    if len(reason) > MAX_REJECTION_REASON_LENGTH:
+        raise ValidationError(f"The reason is too long (limit {MAX_REJECTION_REASON_LENGTH} characters).")
+
+    updated = (
+        supabase.table("equipment_requests")
+        .update(
+            {
+                "status": "rejected",
+                "rejection_reason": reason,
+                "decided_by": decided_by,
+                "decided_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        .eq("id", request_id)
+        .eq("status", "pending")
+        .select("*")
+        .execute()
+    )
+    if not updated.data:
+        raise ValidationError("This request is no longer pending -- refresh to see its current status.")
+
+    _notify_request_decision(request_id, "rejected")
+    return get_request(request_id)
+
+
+def _notify_request_decision(request_id: str, decision: str) -> None:
+    """Hook for the Notification System story. No-op placeholder, same
+    shape as booking_service._notify_booking_decision -- no notification
+    plumbing exists anywhere in this codebase yet."""
+    print(f"[notify] equipment request {request_id} {decision}")

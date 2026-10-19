@@ -673,6 +673,111 @@ def rule_equipment_request_list(user: Any, resource: Any = None) -> Decision:
     return Decision.DENY_FORBIDDEN
 
 
+def rule_equipment_request_create(user: Any, event: Any) -> Decision:
+    """Record Equipment Request for Event (IS-17). Resource is the EVENT
+    (session) the equipment is for, not a request. Exact mirror of
+    rule_venue_booking_create: only that event's assigned coordinator (a
+    stranger gets the same 404 as a missing event), and only while it is
+    in "planning" -- a coordinator starts planning themselves, and a
+    request raised before then, or after the event has moved on, would be
+    committing equipment to an arrangement that is not being made."""
+    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "planning"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_request_accept(user: Any, request: Any) -> Decision:
+    """Accept an equipment request and reserve stock (IS-19). Technical
+    Support Staff only (anyone else gets the same 404 as the availability
+    check). The AC: "Only requests in a 'pending' status can be accepted".
+    Also only while the request's event is still in planning: a request on
+    a cancelled event (or one that has moved on) must not take stock, and
+    the safety-review gate already requires no pending request by then."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) != "planning":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_request_reject(user: Any, request: Any) -> Decision:
+    """Reject an equipment request with a reason (IS-41). Technical Support
+    Staff only (anyone else gets the same 404 as accept), and only a
+    pending request. Unlike accept, the event's status is NOT checked: a
+    pending request left behind on a cancelled or moved-on event must
+    still be clearable from Technical Support's queue -- rejecting takes
+    no stock, so there is nothing to protect."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- equipment_change.* (IS-43) ----------------------------------------------
+# The event may have moved on from "planning" since the request was accepted
+# (safety review, confirmed), and a change to its equipment is still
+# legitimate then; it is not once the event is cancelled, completed or
+# rejected. `request` below is the equipment request for create, and the
+# change request (carrying event_status) for accept/reject.
+CHANGEABLE_EVENT_STATUSES = ("planning", "safety_review", "confirmed")
+
+
+def rule_equipment_change_create(user: Any, request: Any) -> Decision:
+    """The coordinator who raised the request asks to change a line's
+    quantity. Only a CONFIRMED request has reservations to change (a
+    pending one is still just a request -- Technical Support decide it as
+    it stands)."""
+    if not (_has_role(user, "event_coordinator") and request.requested_by == user.id):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "confirmed":
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_change_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_equipment_change_accept(user: Any, change: Any) -> Decision:
+    """Technical Support only; a pending change only; and not once the
+    event is cancelled/completed/rejected, because accepting moves stock."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    if getattr(change, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_change_reject(user: Any, change: Any) -> Decision:
+    """Like accept, but with no event-status gate: rejecting moves no stock,
+    and a pending change on a cancelled event should still be clearable."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_type_list(user: Any, resource: Any = None) -> Decision:
+    """The equipment catalogue (kinds, not units) is what a coordinator
+    picks from on the request form; Technical Support Staff see it too.
+    Role-only, nothing per-row: a type name is not sensitive."""
+    if _has_role(user, "technical_support_staff") or _has_role(user, "event_coordinator"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
 def rule_equipment_request_view(user: Any, request: Any) -> Decision:
     if _has_role(user, "technical_support_staff"):
         return Decision.ALLOW

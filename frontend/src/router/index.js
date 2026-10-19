@@ -13,6 +13,7 @@ import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vu
 import EquipmentRequestDetailView from '../views/equipment/EquipmentRequestDetailView.vue'
 import EquipmentRequestsView from '../views/equipment/EquipmentRequestsView.vue'
 import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
+import RequestEquipmentView from '../views/equipment/RequestEquipmentView.vue'
 import RoomLayoutsView from '../views/venues/RoomLayoutsView.vue'
 import VenueBookingQueueView from '../views/venues/VenueBookingQueueView.vue'
 import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
@@ -68,6 +69,12 @@ const routes = [
     name: 'request-venue-booking',
     component: RequestVenueBookingView,
     meta: { roles: _rolesByRouteName.get('request-venue-booking') },
+  },
+  {
+    path: '/events/:eventId/equipment-requests/new',
+    name: 'request-equipment',
+    component: RequestEquipmentView,
+    meta: { roles: _rolesByRouteName.get('request-equipment') },
   },
   {
     path: '/safety-reviews/:reviewId',

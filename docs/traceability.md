@@ -426,3 +426,90 @@ marked (guard) were mutation-tested by hand (broken, caught, restored).
 Not built, so not tested: notifications for submissions and decisions, and
 resetting a check when a session is edited during it (see
 `docs/open-questions.md`, "Safety Officer").
+
+## Sprint 3 — Record Equipment Request for Event (IS-17, Nawaz)
+
+Source: IS-17's AC, plus Aaralyn's IS-9 note that equipment requests need
+planning. Unit tests: `test_equipment_create_request.py` (service),
+`test_authz_equipment_create.py` (rules), `test_equipment_create_routes.py`
+(routes). Frontend: `lib/equipment.test.js`,
+`views/equipment/RequestEquipmentView.test.js`,
+`components/EquipmentBookingStatus.test.js`, `lib/roles.test.js`,
+`router/index.test.js`. Not tested against a real database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Can specify an event and specify one or more equipment items required for it" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines`, `::test_needs_at_least_one_item`, `RequestEquipmentView.test.js` ("submits every line and returns to the event page", "can remove an added line but never the last one") | `POST /events/<id>/equipment-requests`, `equipment_service.create_request`, `RequestEquipmentView.vue` |
+| "Can specify the quantity needed for each equipment item" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines`, `test_equipment_create_request.py::test_a_type_can_only_appear_once` | `_validate_request_items`, one `equipment_request_items` row per type |
+| "Can enter free-text technical requirements for each equipment item" | `test_equipment_create_request.py::test_blank_requirements_are_stored_as_null_and_text_is_trimmed`, `::test_requirements_must_be_text_and_within_the_limit` | `technical_requirements` on each line, 2000 character cap |
+| "System prevents submitting a request if quantity is missing or zero for a selected equipment item" | `test_equipment_create_request.py::test_quantity_must_be_a_whole_number_of_at_least_one`, `::test_missing_quantity_key_is_rejected`, `equipment.test.js` (validateRequestLines), `RequestEquipmentView.test.js::blocks submit and shows the error when quantity is missing or zero` | `validateRequestLines` (client) and `_validate_request_items` (server) |
+| "Submitted equipment request is viewable later" | `EquipmentBookingStatus.test.js` ("shows each request with its items, total quantity and status"), existing `test_equipment_service.py` list/get tests | Equipment Booking section (Justin, `GET /events/<id>/equipment-requests`), Technical Support queue (IS-18) |
+| "When it's created, its status is set to Pending and is visible to relevant Technical Staff" | `test_equipment_create_request.py::test_creates_a_pending_request_for_the_event_with_its_lines` | status `pending` on insert; queue is IS-18's `GET /equipment/requests` |
+| (design) Only the assigned coordinator, only while planning | `test_authz_equipment_create.py` (all), `test_equipment_create_routes.py` (403 outside planning, 404 for a stranger), `EquipmentBookingStatus.test.js` ("requesting equipment") | `rule_equipment_request_create`, `canRequest` in `EquipmentBookingStatus.vue` |
+| (design) A request is for the session's own window | `test_equipment_create_request.py::test_needed_period_is_the_sessions_own_window_in_singapore_time`, `::test_session_with_no_times_needs_equipment_all_day` | `booking_service._event_window` |
+| (design) No half-created request | `test_equipment_create_request.py::test_request_row_is_deleted_if_its_lines_cannot_be_saved` | compensating delete in `create_request` |
+| (design) Coordinators can read the type catalogue | `test_authz_equipment_create.py` (type list), `test_equipment_create_routes.py` (types) | `GET /equipment/types`, `rule_equipment_type_list` |
+
+## Sprint 3 — Accept an Equipment Request and Reserve Stock (IS-19, Nawaz)
+
+Source: the Reservation story's first AC. Unit tests:
+`test_equipment_accept.py` (service), `test_authz_equipment_accept.py`
+(rule), `test_equipment_accept_routes.py` (route). Frontend:
+`views/equipment/EquipmentRequestDetailView.test.js`. Not tested against a
+real database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Accepting a request changes its status to confirmed" | `test_equipment_accept.py::test_accept_reserves_one_row_per_unit_and_confirms_the_request`, `::test_reserves_the_reservations_before_flipping_the_status`, `test_equipment_accept_routes.py::test_technical_staff_accept_returns_the_confirmed_request` | `POST /equipment/requests/<id>/accept`, `equipment_service.accept_request` |
+| "Available quantity for that equipment is reduced by the reserved amount, scoped to the event's date and time" | `test_equipment_accept.py::test_each_reservation_copies_the_requests_period`, `::test_skips_units_held_for_an_overlapping_event_and_units_out_of_service`, `::test_a_unit_returned_when_the_request_starts_is_free` | one `equipment_reservations` row per unit copying `needed_start`/`needed_end`; availability is counted, not stored |
+| "Only requests in a pending status can be accepted" | `test_authz_equipment_accept.py::test_only_a_pending_request_can_be_accepted`, `test_equipment_accept_routes.py::test_an_already_confirmed_request_is_403`, `::test_a_second_accept_racing_the_first_releases_what_it_reserved` (guard) | `rule_equipment_request_accept`; status update conditioned on `pending` |
+| (design) Technical Support only | `test_authz_equipment_accept.py::test_other_roles_cannot_accept_and_get_a_404`, `test_equipment_accept_routes.py::test_a_coordinator_cannot_accept` | `rule_equipment_request_accept` |
+| (design) Not for a request whose event has left planning | `test_authz_equipment_accept.py::test_a_request_is_only_accepted_while_its_event_is_in_planning`, `test_equipment_accept_routes.py::test_a_cancelled_events_request_is_403` | `get_request` carries `event_status`; the rule checks it |
+| (design) Accepted whole or not at all; says what is short | `test_equipment_accept.py::test_refuses_when_there_is_not_enough_and_says_what_is_short`, `::test_one_short_line_means_nothing_is_reserved_for_any_line` (guard) | `accept_request` checks every line before writing |
+| (design) Two requests cannot take the same unit | `test_equipment_accept.py::test_the_exclusion_constraint_refusing_a_unit_is_a_clear_error`, `::test_a_failure_flipping_the_status_also_releases_the_units` | exclusion constraint `equipment_reservations_no_unit_overlap`; clean-up in `accept_request` |
+| Technical Support can accept from the request page and sees what was reserved | `EquipmentRequestDetailView.test.js` ("accepting the request": enabled/disabled button, no decision once decided, accepts and lists units, shows the server error) | `EquipmentRequestDetailView.vue` "Your decision" and "Reserved for this event" |
+
+## Sprint 3 — Get Warned and Reject When Requested Quantity Exceeds Availability (IS-41, Nawaz)
+
+Source: the Reservation story's second sub-story. Unit tests:
+`test_equipment_reject.py` (service), `test_authz_equipment_reject.py`
+(rule), `test_equipment_reject_routes.py` (route). Frontend:
+`EquipmentRequestDetailView.test.js` ("rejecting the request"),
+`EquipmentBookingStatus.test.js`. Needs migration
+`20261019100000_equipment_request_rejection.sql`. Not tested against a real
+database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "The system shows the actual available quantity when a request exceeds it" | `EquipmentRequestDetailView.test.js::suggests rejecting and shows the available quantity when stock is short` (the numbers themselves are IS-18's check) | per-line "Requested n · available m" on the request page |
+| "Technical Staff is suggested to reject the request" | `EquipmentRequestDetailView.test.js::suggests rejecting ...`, `::does not suggest rejecting when everything is covered` | `shortOnStock` hint in "Your decision" |
+| "Rejecting requires an explanation" | `test_equipment_reject.py::test_a_reason_is_required`, `::test_a_very_long_reason_is_refused`, `EquipmentRequestDetailView.test.js::keeps Reject disabled until a reason is typed`, `test_equipment_reject_routes.py::test_a_missing_reason_is_a_400` | `reject_request` validation; Reject button disabled until the reason has text |
+| "...that's sent to the Event Coordinator" | `test_equipment_reject.py::test_reject_marks_the_request_rejected_with_the_reason_and_who_decided`, `::test_reject_notifies_the_coordinator_of_the_decision`, `EquipmentBookingStatus.test.js::shows why a request was rejected` | reason stored on `equipment_requests`, shown in the coordinator's Equipment Booking section; `_notify_request_decision` is still a placeholder |
+| (design) Only a pending request, Technical Support only | `test_authz_equipment_reject.py` (all), `test_equipment_reject_routes.py::test_an_already_decided_request_is_403`, `::test_a_coordinator_cannot_reject` | `rule_equipment_request_reject` |
+| (design) Rejecting works on a cancelled event's pending request | `test_authz_equipment_reject.py::test_rejecting_does_not_depend_on_the_event_status`, `test_equipment_reject_routes.py::test_a_cancelled_events_pending_request_can_still_be_rejected` | no event-status check in the rule |
+| (design) Never overwrites an accepted request | `test_equipment_reject.py::test_the_update_is_conditional_on_the_request_still_being_pending` | update conditioned on `status = 'pending'` |
+| (design) Rejecting reserves/releases nothing | `test_equipment_reject.py::test_reject_reserves_nothing` | pending requests hold no stock |
+
+## Sprint 3 — Update Quantity on an Existing Equipment Reservation (IS-43, Nawaz)
+
+Source: the Reservation story's third sub-story. Unit tests:
+`test_equipment_change.py` (service), `test_authz_equipment_change.py`
+(rules), `test_equipment_change_routes.py` (routes). Frontend:
+`EquipmentChangeRequests.test.js`, `EquipmentChangeDecisions.test.js`,
+`EquipmentBookingStatus.test.js` ("quantity changes"),
+`EquipmentRequestDetailView.test.js`, `EquipmentRequestsView.test.js`,
+`equipment.test.js`. Needs migration
+`20261019200000_equipment_change_requests.sql`. Not tested against a real
+database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Coordinator's change request triggers a recalculation of available quantity for that date/time" | `test_equipment_change.py::test_an_increase_is_accommodated_when_enough_units_could_cover_the_request`, `::test_an_increase_is_not_accommodated_when_short_and_says_by_how_much`, `::test_a_decrease_is_always_accommodated`, `::test_pending_changes_carry_a_fresh_check_and_decided_ones_do_not`, `EquipmentChangeDecisions.test.js` (shows the recalculated availability) | `change_service._recalculate`, `list_changes_for_request` (check computed on every read) |
+| The coordinator can ask for a change | `test_equipment_change.py::test_create_stores_the_ask_with_the_current_and_requested_quantity`, `::test_the_new_quantity_must_be_a_whole_number_of_at_least_one`, `::test_asking_for_the_quantity_it_already_has_is_refused`, `::test_a_second_ask_while_one_is_waiting_is_refused`, `EquipmentChangeRequests.test.js` | `POST /equipment/requests/<id>/change-requests`, `create_change_request`, `EquipmentChangeRequests.vue` |
+| "If accommodated, the event record reflects the new reserved quantity" | `test_equipment_change.py::test_accepting_an_increase_reserves_the_extra_unit_and_updates_the_quantity`, `::test_the_extra_units_are_never_ones_the_request_already_holds`, `::test_accepting_a_decrease_releases_the_highest_asset_tags` | `accept_change`: reservation rows added or removed, line quantity updated (the event page reads these) |
+| "If the new quantity can't be accommodated, Technical Staff rejects the change with an explanation to the Coordinator" | `test_equipment_change.py::test_an_increase_the_stock_cannot_cover_is_refused_and_changes_nothing`, `::test_reject_records_the_reason_and_leaves_the_reservation_alone`, `::test_rejecting_requires_a_reason`, `EquipmentChangeDecisions.test.js` (disabled Accept, suggestion, reason required), `EquipmentChangeRequests.test.js::shows why an ask was rejected` | `reject_change`; reason shown to the coordinator under the request |
+| (design) Technical Support only decide; coordinator only asks for own confirmed request | `test_authz_equipment_change.py` (all), `test_equipment_change_routes.py` (403/404 cases) | `rule_equipment_change_*` |
+| (design) Event must be live to accept; reject always allowed | `test_authz_equipment_change.py::test_accepting_needs_a_live_event_but_rejecting_does_not`, `test_equipment_change_routes.py::test_accept_is_blocked_on_a_cancelled_event_but_reject_is_not` | `CHANGEABLE_EVENT_STATUSES` |
+| (design) Never double-applied or overwritten | `test_equipment_change.py::test_someone_deciding_it_first_releases_the_extra_unit`, `::test_rejecting_a_change_decided_a_moment_ago_does_not_overwrite_it`, `::test_the_unique_index_catching_a_simultaneous_ask_is_a_clear_error` | claim conditioned on `pending`; partial unique index |
+| (design) Failure leaves nothing half-applied | `test_equipment_change.py::test_a_failure_updating_the_quantity_undoes_the_claim_and_the_reservation`, `::test_the_exclusion_constraint_refusing_the_extra_unit_is_a_clear_error` | undo steps in `accept_change` |
+| Technical Support can find asks waiting | `EquipmentRequestsView.test.js`, `test_equipment_change_routes.py::test_technical_staff_see_the_pending_queue_and_a_coordinator_does_not` | `GET /equipment/change-requests`, "Quantity changes waiting" on the queue |

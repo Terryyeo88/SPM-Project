@@ -250,6 +250,32 @@ describe('router: authentication and role-based route guarding', () => {
     })
   })
 
+  describe('/events/:eventId/equipment-requests/new (request-equipment)', () => {
+    it('a coordinator reaches it and the eventId arrives as a route param', async () => {
+      mockSession(true)
+      mockMe('event_coordinator')
+      await router.push('/events/abc-123/equipment-requests/new')
+      expect(router.currentRoute.value.name).toBe('request-equipment')
+      expect(router.currentRoute.value.params.eventId).toBe('abc-123')
+    })
+
+    it.each(['event_organizer', 'venue_staff', 'technical_support_staff', 'attendee'])(
+      '%s is redirected to /dashboard',
+      async (role) => {
+        mockSession(true)
+        mockMe(role)
+        await router.push('/events/abc-123/equipment-requests/new')
+        expect(router.currentRoute.value.name).toBe('dashboard')
+      },
+    )
+
+    it('an unauthenticated visitor is sent to /login', async () => {
+      mockSession(false)
+      await router.push('/events/abc-123/equipment-requests/new')
+      expect(router.currentRoute.value.name).toBe('login')
+    })
+  })
+
   describe('/events/:eventId/venue-bookings/new (request-venue-booking)', () => {
     it('a coordinator reaches it and the eventId arrives as a route param', async () => {
       mockSession(true)

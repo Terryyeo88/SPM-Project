@@ -14,7 +14,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiGet } from '../../lib/api'
 import AppNavBar from '../../components/AppNavBar.vue'
-import { REQUEST_TABS, formatPeriod, groupRequestsByTab, isRequestTab, summariseItems } from '../../lib/equipment'
+import {
+  REQUEST_TABS,
+  describeChange,
+  formatPeriod,
+  groupRequestsByTab,
+  isRequestTab,
+  summariseItems,
+} from '../../lib/equipment'
 import { statusLabel } from '../../lib/coordinatorDashboard'
 
 const route = useRoute()
@@ -25,6 +32,9 @@ const loading = ref(true)
 const error = ref('')
 const activeTab = ref(isRequestTab(route.query.tab) ? route.query.tab : 'pending')
 const search = ref('')
+// Quantity changes waiting for a decision (IS-43). Loaded separately: the
+// queue still works if this fails.
+const pendingChanges = ref([])
 
 function selectTab(key) {
   activeTab.value = key
@@ -44,6 +54,12 @@ async function loadRequests() {
   error.value = ''
   try {
     requests.value = await apiGet('/equipment/requests')
+    try {
+      const changes = await apiGet('/equipment/change-requests')
+      pendingChanges.value = Array.isArray(changes) ? changes : []
+    } catch {
+      pendingChanges.value = []
+    }
   } catch (requestError) {
     error.value = requestError.message
   } finally {
@@ -75,6 +91,21 @@ onMounted(loadRequests)
             <label for="request-search" class="visually-hidden">Search by event name</label>
             <input id="request-search" v-model="search" type="search" placeholder="Search by event name..." />
           </div>
+
+          <section v-if="pendingChanges.length" class="changes" aria-labelledby="pending-changes-heading">
+            <h2 id="pending-changes-heading" class="changes-title">
+              Quantity changes waiting ({{ pendingChanges.length }})
+            </h2>
+            <router-link
+              v-for="change in pendingChanges"
+              :key="change.id"
+              :to="{ name: 'equipment-request-details', params: { requestId: change.request_id } }"
+              class="change-link"
+            >
+              <span class="row-name">{{ change.event_name ?? 'Untitled event' }}</span>
+              <span class="row-meta">{{ describeChange(change) }}</span>
+            </router-link>
+          </section>
 
           <div class="tabs" role="group" aria-label="Filter by status">
             <button
@@ -128,6 +159,9 @@ onMounted(loadRequests)
 }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+.changes { background: #fdf6ec; border: 1px dashed #c9a35a; border-radius: 6px; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
+.changes-title { margin: 0; font-size: 14px; font-weight: 700; color: #8a5a12; }
+.change-link { display: flex; justify-content: space-between; gap: 12px; text-decoration: none; color: #2a2a2a; font-size: 14px; }
 .tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tab {
   border: 1px solid #b0b0b0; background: #ffffff; color: #555555; font-size: 13px; font-weight: 600;
