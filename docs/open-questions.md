@@ -722,6 +722,51 @@ in docs/design-decisions.md; please confirm or correct:
   when a significant change affects their arrangements; depends on the
   Notification System story.
 
+### Added 19 Oct (AC3 and AC9 completed)
+
+- **Edit window vs the team's note on the story.** The note reads: the
+  coordinator edits from under review to confirmed; the organiser edits
+  only a draft. `rule_event_edit` is wider on both sides: the organiser can
+  also edit a **rejected** session (the resubmit flow depends on it), and
+  the coordinator can edit in any status except completed/cancelled
+  (including draft/submitted/rejected, and safety_review). Left as is --
+  should either branch be narrowed?
+
+- **Touched-but-unbroken arrangements are shown, not acknowledged.** Only a
+  conflict needs the "I've reviewed these" tick. Should every touched
+  arrangement need it before a significant change saves?
+
+- **Cancelling a venue booking doesn't change the event's status.** A
+  confirmed event that loses its only confirmed venue stays confirmed. A
+  change to the event's details sends it back to planning (AC10); should
+  cancelling a confirmed booking of a confirmed event do the same?
+
+- **The current coordinator cancels, not the requester.** After the Lead
+  reassigns an event, the new coordinator can cancel the old coordinator's
+  bookings. Viewing a single booking (`rule_venue_booking_view`, IS-14) is
+  still requester-only, so the new coordinator can cancel a booking whose
+  page they can't open. Should view follow the current coordinator too?
+  (IS-14's rule -- Josiah's call.)
+
+- **"Request a venue" is hidden while a booking is pending or confirmed --
+  in the page only.** `POST /events/<id>/venue-bookings` still accepts a
+  second booking for the session. Enforce it in the backend too?
+
+- **Change History: older entries have no session.** Entries written before
+  `event_logs.event_id` existed are labelled only when the request has a
+  single session; on a multi-session request they show no session badge.
+
+- **"All sessions" means an applied shared-detail change.** A coordinator's
+  name/description/purpose-only change reaches every open session, so it is
+  labelled "All sessions"; completed/cancelled sessions it skipped are not
+  called out. An organiser's request is labelled with its own session.
+
+- **Migrations `20261019300000_venue_booking_cancel.sql` and
+  `20261019400000_event_logs_session.sql` must be applied before
+  deploying.** The backend writes `event_logs.event_id` on every logged
+  change; PostgREST refuses an insert naming a missing column, so edits and
+  change requests fail until it exists.
+
 ## Shared calendar extraction (16 Oct)
 
 - **Test gap: no venue calendar test pins the overlap boundary.** In a hand

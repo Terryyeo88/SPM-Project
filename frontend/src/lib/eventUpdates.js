@@ -6,10 +6,13 @@
  * Saving is two steps. POST /events/<id>/update-preview runs every check
  * and writes nothing; it answers
  *   { changes: { field: { from, to } }, significance, significant_fields,
- *     impacts: [{ area, severity, title, issues }], impacts_checked,
+ *     impacts: [{ area, severity, title, issues }],
+ *     arrangements: [{ area, id, title, status, fields }], impacts_checked,
  *     reverts_to_planning }
  * (app.events.event_update.preview_event_update). If the update is
- * significant, touches arrangements already made, or would send a confirmed
+ * significant, touches arrangements already made (`arrangements`: every
+ * venue booking, equipment request and the registrations it touches,
+ * conflict or not; `impacts`: the conflicts among them), or would send a confirmed
  * event back to planning, the coordinator reviews that first; then
  * POST /events/<id> saves it, naming the impact areas they acknowledged.
  * Before planning (under review, approved) impacts aren't checked
@@ -32,11 +35,42 @@ export function isNoChange(preview) {
 export function needsReview(preview) {
   if (isNoChange(preview)) return false
   const checked = preview.impacts_checked !== false
-  return (checked && preview.significance === 'significant') || impactsOfPreview(preview).length > 0 || Boolean(preview.reverts_to_planning)
+  return (checked && preview.significance === 'significant')
+    || impactsOfPreview(preview).length > 0
+    || arrangementsOfPreview(preview).length > 0
+    || Boolean(preview.reverts_to_planning)
 }
 
 export function impactsOfPreview(preview) {
   return Array.isArray(preview?.impacts) ? preview.impacts : []
+}
+
+export const ARRANGEMENT_AREA_LABELS = Object.freeze({
+  venue: 'Venue',
+  equipment: 'Equipment',
+  registration: 'Registration',
+})
+
+/**
+ * The arrangements already made that the update touches, ready to show:
+ * [{ key, area, areaLabel, title, status, fields: 'Start date, ...', conflict }].
+ * `conflict` is true when the preview's impacts flag a problem with it (a
+ * venue impact names its booking; equipment and registration impacts cover
+ * the whole area), so the coordinator can tell "touched" from "broken".
+ */
+export function arrangementsOfPreview(preview) {
+  const arrangements = Array.isArray(preview?.arrangements) ? preview.arrangements : []
+  const impacts = impactsOfPreview(preview)
+  return arrangements.map((arrangement) => ({
+    key: `${arrangement.area}:${arrangement.id ?? ''}`,
+    area: arrangement.area,
+    areaLabel: ARRANGEMENT_AREA_LABELS[arrangement.area] ?? arrangement.area,
+    title: arrangement.title,
+    status: arrangement.status ?? null,
+    fields: (arrangement.fields ?? []).map((field) => FIELD_LABELS[field] ?? field).join(', '),
+    conflict: impacts.some((impact) => impact.area === arrangement.area
+      && (arrangement.area !== 'venue' || !impact.booking_id || impact.booking_id === arrangement.id)),
+  }))
 }
 
 /** The distinct impact areas to acknowledge -- what the backend checks. */

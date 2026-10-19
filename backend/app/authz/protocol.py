@@ -29,6 +29,14 @@ class VenueBookingLike(Protocol):
     status: str
 
 
+class VenueBookingWithEventLike(VenueBookingLike, Protocol):
+    """venue_booking.cancel's resource: the booking plus its event's
+    assigned coordinator and status (app.venues.routes.load_booking_with_event)."""
+
+    event_coordinator_id: str | None
+    event_status: str
+
+
 class EquipmentRequestLike(Protocol):
     id: str
     requested_by: str

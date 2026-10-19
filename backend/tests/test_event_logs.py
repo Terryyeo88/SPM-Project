@@ -103,8 +103,8 @@ def test_diff_treats_the_same_instant_in_another_timezone_as_unchanged():
 
 def test_entry_records_what_who_and_which_request(fake):
     """A log entry records what changed (in the API's field names), who
-    changed it and which event request -- and sends only the live table's
-    columns, leaving the time to the database."""
+    changed it, which event request and which session -- and sends only the
+    live table's columns, leaving the time to the database."""
     before = fake.get("session-1")
     after = {**before, "expected_attendance": 150, "equipment_needed": {"equipment": [{"item": "wifi", "quantity": 1}]}}
 
@@ -113,6 +113,7 @@ def test_entry_records_what_who_and_which_request(fake):
     assert _logs(fake) == [entry]
     assert entry["event_log_id"]  # its own id, filled in by the database
     assert entry["shared_event_id"] == "group-1"
+    assert entry["event_id"] == "session-1"
     assert entry["changed_by"] == COORDINATOR
     # API field names ("equipment", not the equipment_needed column).
     assert entry["changes"] == {
@@ -121,7 +122,7 @@ def test_entry_records_what_who_and_which_request(fake):
     }
     # Exactly the live columns; WHEN is the database's changed_at default
     # (now()), not a client clock.
-    assert set(fake.calls[-1]["payload"]) == {"shared_event_id", "changes", "significance", "changed_by"}
+    assert set(fake.calls[-1]["payload"]) == {"shared_event_id", "event_id", "changes", "significance", "changed_by"}
     assert entry["significance"] == "significant"
 
 
@@ -317,3 +318,147 @@ def test_list_for_a_legacy_event_reads_its_own_id(fake):
     listed = event_log.list_event_logs(_event(fake, "legacy-1"))
 
     assert [entry["event_log_id"] for entry in listed] == ["a"]
+
+
+# -- which session each entry is about ------------------------------------------
+
+
+def _dated(fake, session_id, day_offset):
+    fake.get(session_id)["preferred_start_date"] = (date.today() + timedelta(days=day_offset)).isoformat()
+
+
+def test_a_coordinator_edit_records_the_session_it_was_made_on(fake):
+    event_update.update_event(_event(fake, "session-2"), {"expected_attendance": 150}, COORDINATOR)
+
+    assert [entry["event_id"] for entry in _logs(fake)] == ["session-2"]
+
+
+def test_a_change_request_records_the_session_it_is_for(fake):
+    request_event_change(_event(fake, "session-2"), ORGANISER, {"changes": {"expected_attendance": 150}})
+
+    assert [entry["event_id"] for entry in _logs(fake)] == ["session-2"]
+
+
+def test_the_history_labels_each_entry_with_its_session_in_date_order(fake):
+    """Sessions are numbered in date order, as the session list shows them:
+    session-2 is earlier, so it is Session 1."""
+    _dated(fake, "session-1", 40)
+    _dated(fake, "session-2", 35)
+    fake.tables["event_logs"] = [
+        {
+            "event_log_id": "a",
+            "shared_event_id": "group-1",
+            "event_id": "session-1",
+            "changed_by": COORDINATOR,
+            "changes": {"expected_attendance": {"from": 100, "to": 150}},
+            "changed_at": "2026-10-02T00:00:00Z",
+        },
+        {
+            "event_log_id": "b",
+            "shared_event_id": "group-1",
+            "event_id": "session-2",
+            "changed_by": ORGANISER,
+            "changes": {"expected_attendance": {"from": 100, "to": 120}},
+            "changed_at": "2026-10-01T00:00:00Z",
+        },
+    ]
+
+    listed = event_log.list_event_logs(_event(fake))
+
+    assert [(entry["event_log_id"], entry["session"]) for entry in listed] == [
+        ("a", {"id": "session-1", "number": 2, "label": "Session 2"}),
+        ("b", {"id": "session-2", "number": 1, "label": "Session 1"}),
+    ]
+
+
+def test_a_shared_detail_change_is_labelled_all_sessions(fake):
+    """A coordinator's name/description/purpose change is written to every
+    session, so it is about all of them, not the one it was made on."""
+    event_update.update_event(_event(fake), {"name": "Community Summit"}, COORDINATOR)
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["event_id"] == "session-1"
+    assert entry["session"] == {"id": None, "number": None, "label": "All sessions"}
+
+
+def test_an_organisers_request_to_rename_names_its_own_session(fake):
+    """Only an applied change reaches every session; a request is still
+    about the session it was made for."""
+    request_event_change(_event(fake, "session-2"), ORGANISER, {"changes": {"name": "Community Summit"}})
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["kind"] == "requested"
+    assert entry["session"]["id"] == "session-2"
+
+
+def test_a_mixed_change_names_the_session_it_was_made_on(fake):
+    event_update.update_event(_event(fake), {"name": "Community Summit", "expected_attendance": 150}, COORDINATOR)
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["session"]["id"] == "session-1"
+
+
+def test_a_single_session_request_has_no_session_label(fake):
+    fake.rows[:] = [row for row in fake.rows if row["id"] != "session-2"]
+    event_update.update_event(_event(fake), {"expected_attendance": 150}, COORDINATOR)
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["session"] is None
+
+
+def test_sessions_are_numbered_within_the_organisers_own_request(fake):
+    """Another organiser's row sharing the group id isn't one of this
+    request's sessions (the same scope apply_shared_details uses)."""
+    _dated(fake, "other-org-session", 1)
+    event_update.update_event(_event(fake, "session-2"), {"expected_attendance": 150}, COORDINATOR)
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["session"]["label"] == "Session 2"
+
+
+def test_an_older_entry_on_a_multi_session_request_says_its_session_was_not_recorded(fake):
+    """Entries written before event_logs.event_id existed can't be placed on a
+    session; the history says so rather than showing no label."""
+    fake.tables["event_logs"] = [
+        {
+            "event_log_id": "old",
+            "shared_event_id": "group-1",
+            "changed_by": COORDINATOR,
+            "changes": {"expected_attendance": {"from": 100, "to": 150}},
+        },
+    ]
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["session"] == {"id": None, "number": None, "label": "Session not recorded"}
+
+
+def test_an_older_entry_on_a_single_session_request_has_no_session_label(fake):
+    fake.rows[:] = [row for row in fake.rows if row["id"] != "session-2"]
+    fake.tables["event_logs"] = [
+        {
+            "event_log_id": "old",
+            "shared_event_id": "group-1",
+            "changed_by": COORDINATOR,
+            "changes": {"expected_attendance": {"from": 100, "to": 150}},
+        },
+    ]
+
+    [entry] = event_log.list_event_logs(_event(fake))
+
+    assert entry["session"] is None
+
+
+def test_the_history_route_returns_session_labels(client, signing_key, monkeypatch, fake):
+    event_update.update_event(_event(fake, "session-2"), {"expected_attendance": 150}, COORDINATOR)
+    _mock_profile(monkeypatch, ["event_coordinator"])
+
+    response = client.get("/events/session-1/logs", headers=_auth(signing_key, COORDINATOR))
+
+    assert response.status_code == 200
+    assert response.get_json()[0]["session"]["id"] == "session-2"

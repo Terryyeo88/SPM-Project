@@ -126,6 +126,9 @@ VENUE_BOOKING_VIEW = "venue_booking.view"
 VENUE_BOOKING_LIST = "venue_booking.list"
 VENUE_BOOKING_APPROVE = "venue_booking.approve"
 VENUE_BOOKING_REJECT = "venue_booking.reject"
+# venue_booking.cancel (IS-9): the event's assigned coordinator cancels one
+# pending or confirmed booking; the session's other bookings stay as they are.
+VENUE_BOOKING_CANCEL = "venue_booking.cancel"
 
 # -- equipment (Nawaz, Sprint 2: IS-18 Check Equipment Availability) --------
 # Source: "As a Technical Support Staff, I want to check whether sufficient

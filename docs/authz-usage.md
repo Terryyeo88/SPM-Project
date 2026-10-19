@@ -30,7 +30,7 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_LIST` | organiser, coordinator or Event Coordinator Lead | role only — **see warning below** |
 | `EVENT_CREATE` | organiser | role only |
 | `EVENT_SUBMIT` | organiser (own event) | status must be `draft` (first submission) or `rejected` (resubmission) |
-| `EVENT_EDIT` | organiser (own, `draft` or `rejected`) **or** coordinator (assigned, `under_review` or `planning`) | either relationship, its own status window |
+| `EVENT_EDIT` | organiser (own, `draft` or `rejected`) **or** coordinator (assigned, any status except `completed` / `cancelled`) | either relationship, its own status window; a 403 says why (`explain_event_edit_denial`, IS-9) |
 | `EVENT_DELETE` | organiser (own event) | status must be `draft` |
 | `EVENT_APPROVE` / `EVENT_REJECT` | coordinator (assigned) | status must be `under_review` |
 | `EVENT_REQUEST_CLARIFICATION` | coordinator (assigned) | status must be `under_review` |
@@ -46,6 +46,7 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `EVENT_VIEW_PUBLIC` | attendee | same as `EVENT_REGISTER`: the attendee's event page shows public fields only |
 | `REGISTRATION_WITHDRAW` | attendee | any session (no registration → 404 from the database function); not once the session has started |
 | `VENUE_VIEW` / `VENUE_LIST` | coordinator or venue staff | role only |
+| `VENUE_BOOKING_CANCEL` | coordinator (the event's **current** assigned coordinator, not necessarily the booking's requester) | booking `pending` or `confirmed`, event not `completed` / `cancelled`; a 403 says why (`explain_venue_booking_cancel_denial`); anyone else 404 (IS-9) |
 | `ROOM_LAYOUT_LIST` | organiser, coordinator, Event Coordinator Lead or venue staff | role only (the active layouts) |
 | `ROOM_LAYOUT_MANAGE` | venue staff | role only (add, rename, soft-delete, restore, permanently delete; see soft-deleted layouts) |
 | `SAFETY_REVIEW_SUBMIT` | coordinator (assigned) | status must be `planning`; the service also requires a confirmed venue and nothing pending (Week 7 change #6) |

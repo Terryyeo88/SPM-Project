@@ -44,6 +44,7 @@ from app.authz import actions
 from app.authz.rules import (
     Decision,
     explain_event_edit_denial,
+    explain_venue_booking_cancel_denial,
     rule_coordinator_list,
     rule_equipment_calendar_view,
     rule_equipment_change_accept,
@@ -89,6 +90,7 @@ from app.authz.rules import (
     rule_safety_review_submit,
     rule_safety_review_view,
     rule_venue_booking_approve,
+    rule_venue_booking_cancel,
     rule_venue_booking_create,
     rule_venue_booking_list,
     rule_venue_booking_reject,
@@ -127,6 +129,7 @@ _RULES: dict[str, RuleFunc] = {
     actions.VENUE_BOOKING_LIST: rule_venue_booking_list,
     actions.VENUE_BOOKING_APPROVE: rule_venue_booking_approve,
     actions.VENUE_BOOKING_REJECT: rule_venue_booking_reject,
+    actions.VENUE_BOOKING_CANCEL: rule_venue_booking_cancel,
     actions.EQUIPMENT_LIST: rule_equipment_list,
     actions.EQUIPMENT_VIEW: rule_equipment_view,
     actions.EQUIPMENT_REQUEST_LIST: rule_equipment_request_list,
@@ -161,6 +164,7 @@ _RULES: dict[str, RuleFunc] = {
 # called only after its rule returned DENY_FORBIDDEN.
 _DENIAL_REASONS: dict[str, Callable[[Any, Any], str]] = {
     actions.EVENT_EDIT: explain_event_edit_denial,
+    actions.VENUE_BOOKING_CANCEL: explain_venue_booking_cancel_denial,
 }
 
 

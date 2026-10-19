@@ -990,6 +990,94 @@ request's period. Without a request it stays a "check manually", as before.
 Technical support is still "check manually" -- there are no assignment
 records yet.
 
+### AC3 completed: every arrangement a change touches, conflict or not (2026-10-19)
+
+The preview only listed an arrangement when the change broke it (`impacts`),
+so a significant change that touched a venue booking, an equipment request
+or registrations without breaking them read "nothing is affected". The AC
+asks for "which already-made arrangements it touches", so the preview now
+also returns `arrangements` (`change_impact.touched_arrangements`): every
+pending/confirmed venue booking, pending/confirmed equipment request and the
+session's registrations that depend on a changed field --
+
+  venue         timing, expected attendance, room layout, accessibility needs
+  equipment     timing, equipment
+  registration  timing, registration window/needed, expected attendance
+
+The page lists them under "Arrangements this change touches", each marked
+"Still fits" or "Conflict". Only conflicts (`impacts`) still need the
+acknowledgement tick: requiring it for an arrangement the change doesn't
+break would make the coordinator confirm nothing. Same status window as the
+impact check (`IMPACT_CHECKED_STATUSES`, planning on); rejected and
+cancelled arrangements hold nothing, so they aren't listed.
+
+### AC9 completed: cancelling one venue booking (2026-10-19)
+
+AC9 ("changes or cancellation of one venue arrangement should not
+automatically remove the other venue bookings") had no cancel to test --
+no booking could be cancelled. Added:
+
+- A `cancelled` booking status (`20261019300000_venue_booking_cancel.sql`),
+  not a delete: the booking stays in the session's history. The IS-16
+  no-overlap constraint covers `confirmed` rows only, so a cancelled booking
+  frees the venue at once; the calendar, conflict and safety checks already
+  filter on pending/confirmed.
+- `POST /venues/bookings/<id>/cancel` -> `booking_service.cancel_booking`:
+  one `UPDATE ... WHERE id = <booking> AND status = <the status authz saw>`,
+  so only that row changes and a cancel racing a Venue Staff decision is
+  refused, not overwritten (same race-proofing as `_decide_booking`). A
+  reason is required; who/when/why go to `venue_booking_status_log`, like
+  approve/reject, and the coordinator reads it back as `cancellation`.
+- `venue_booking.cancel` (`rule_venue_booking_cancel`): the event's
+  **current** assigned coordinator -- not the booking's requester, who may
+  have been reassigned away by the Lead -- for a pending/confirmed booking,
+  until the event is completed or cancelled (the coordinator's edit
+  window). Anyone else 404; a closed booking or event 403 with the reason.
+  The loader attaches the event's coordinator_id/status to the booking.
+- The event's status is not changed by a cancel (see open-questions.md).
+- The page lists every booking of the session with its own Cancel, and
+  offers "Request a venue" only while no booking is pending or confirmed
+  (frontend only; see open-questions.md).
+
+### Equipment impacts: identical requests reported once (2026-10-19)
+
+The equipment impact wrote its sentences once per request, and they don't
+name the request, so two pending requests for the same window produced the
+same lines twice. Requests with the same status (and, for timing, the same
+window) are now grouped: one sentence each, saying how many it covers ("The
+2 pending equipment requests cover ...").
+
+### Venue Staff read a booking's event details through the booking (2026-10-19)
+
+The booking review page fetched `GET /events/<id>`, which `rule_event_view`
+refuses to Venue Staff (404), so the page failed for the very role that
+decides on bookings -- since IS-14. Rather than widen event.view to Venue
+Staff (who would then see every field of every event), `get_booking` embeds
+just the session details the review shows and checks suitability against
+(`booking_service.BOOKING_EVENT_FIELDS`), as `event` -- the same "only what
+the entry needs" embed the venue calendar uses. The page no longer calls
+`/events/<id>`.
+
+### Change History names the session; paged (2026-10-19)
+
+`event_logs` was keyed by the request only, so a multi-session request's
+history couldn't say which session changed. `event_logs.event_id`
+(`20261019400000_event_logs_session.sql`, nullable, ON DELETE SET NULL so the
+audit trail outlives a deleted session) is written by all three log writers.
+Entries from before the column are backfilled only where the request has a
+single session -- the only case that is unambiguous.
+
+`list_event_logs` adds `session`: "Session N" numbered in the order the
+session list shows (`_session_sort_key`), within the organiser's own request
+(same scope as `apply_shared_details`); "All sessions" for an applied change
+to shared details only (name/description/purpose), which reaches every
+session; none for a single-session request or an older unlabelled entry. A
+request is still about the session it was made for.
+
+Pagination is client-side, 5 per page, newest first, back to page 1 on
+reload: a request's history is small and already loaded in one call, so
+server paging would add an API shape change for no gain.
+
 ## Shared calendar module (refactor, 2026-10-16)
 
 Owner sign-off: Nawaz owns `backend/app/venues/calendar_service.py` and

@@ -13,8 +13,9 @@
  * enforcement regardless of what this page shows.
  *
  * Suitability panel: capacity/layout/accessibility are a pure client-side
- * comparison (lib/venueSuitability.js) between the event session already
- * fetched and the venue already fetched -- no new endpoint needed. The
+ * comparison (lib/venueSuitability.js) between the event session's details
+ * (embedded in the booking as `event`, since Venue Staff can't open the
+ * event itself) and the venue already fetched -- no new endpoint needed. The
  * turnaround-conflict half is server-computed (booking.conflict, from
  * app.venues.booking_service.get_booking) since it needs cross-booking
  * knowledge only the backend has.
@@ -57,12 +58,11 @@ async function load() {
   loadError.value = ''
   try {
     booking.value = await apiGet(`/venues/bookings/${route.params.bookingId}`)
-    const [loadedEvent, loadedVenue] = await Promise.all([
-      apiGet(`/events/${booking.value.event_id}`),
-      apiGet(`/venues/${booking.value.venue_id}`),
-    ])
-    event.value = loadedEvent
-    venue.value = loadedVenue
+    // The session's details come embedded in the booking (booking.event):
+    // Venue Staff may read the booking but not GET /events/<id> itself.
+    // Kept in its own ref because approve/reject return the bare booking row.
+    event.value = booking.value.event ?? null
+    venue.value = await apiGet(`/venues/${booking.value.venue_id}`)
   } catch (requestError) {
     loadError.value = requestError.message
   } finally {

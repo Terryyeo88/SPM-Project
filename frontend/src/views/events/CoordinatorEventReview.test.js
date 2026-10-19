@@ -244,6 +244,48 @@ describe('CoordinatorEventReview -- Edit Details (IS-9)', () => {
     expect(wrapper.emitted('updated')[0]).toEqual([updated])
   })
 
+  it('presents every arrangement a significant change touches, even ones that still fit', async () => {
+    const arrangements = [
+      { area: 'venue', id: 'booking-1', title: 'Venue booking: Hall A', status: 'confirmed', fields: ['expected_attendance'] },
+      { area: 'registration', id: null, title: 'Attendee registrations (40 confirmed)', status: null, fields: ['expected_attendance'] },
+    ]
+    apiPost.mockResolvedValueOnce(previewOf({ arrangements })).mockResolvedValueOnce(plannedEvent())
+    const wrapper = mountForEditing()
+
+    await saveEdits(wrapper)
+
+    const region = wrapper.find('.arrangements')
+    expect(region.exists()).toBe(true)
+    expect(region.text()).toContain('Arrangements this change touches')
+    expect(region.text()).toContain('Venue booking: Hall A')
+    expect(region.text()).toContain('Attendee registrations (40 confirmed)')
+    expect(region.text()).toContain('Depends on: Expected attendance')
+    expect(region.findAll('.kind-ok')).toHaveLength(2)
+    expect(wrapper.text()).toContain('None of these conflict with the change.')
+    expect(apiPost).toHaveBeenCalledTimes(1) // not saved until confirmed
+
+    // Nothing conflicts, so there is nothing to acknowledge.
+    await button(wrapper, 'Confirm and Save').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenLastCalledWith('/events/session-1', expect.objectContaining({ acknowledge_impacts: [] }))
+  })
+
+  it('flags the touched arrangement that conflicts', async () => {
+    const arrangements = [
+      { area: 'venue', id: 'booking-1', title: 'Venue booking: Hall A', status: 'confirmed', fields: ['expected_attendance'] },
+      { area: 'venue', id: 'booking-2', title: 'Venue booking: Room B', status: 'pending', fields: ['expected_attendance'] },
+    ]
+    apiPost.mockResolvedValueOnce(previewOf({ arrangements, impacts: [VENUE_IMPACT] }))
+    const wrapper = mountForEditing()
+
+    await saveEdits(wrapper)
+
+    const items = wrapper.findAll('.arrangements li')
+    expect(items[0].text()).toContain('Conflict')
+    expect(items[1].text()).toContain('Still fits')
+    expect(button(wrapper, 'Confirm and Save').attributes('disabled')).toBeDefined()
+  })
+
   it('warns that a confirmed event goes back to planning, and says so once saved', async () => {
     apiPost
       .mockResolvedValueOnce(previewOf({ significance: 'ordinary', significant_fields: [], reverts_to_planning: true }))

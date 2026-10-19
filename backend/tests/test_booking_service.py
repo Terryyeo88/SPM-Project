@@ -226,6 +226,36 @@ def test_get_booking_raises_not_found_for_missing_id(fake_db):
         service_module.get_booking("does-not-exist")
 
 
+def test_get_booking_embeds_the_event_details_as_event(fake_db):
+    """Venue Staff can't open the event itself (rule_event_view), so the
+    booking carries the session details the review page needs."""
+    details = {"id": "event-1", "name": "Tech Symposium", "expected_attendance": 150, "room_layout": "theatre"}
+    fake_db.tables["venue_bookings"] = [{**_booking(status="pending"), "events": details}]
+
+    booking = service_module.get_booking("booking-1")
+
+    assert booking["event"] == details
+    assert "events" not in booking
+
+
+def test_booking_event_fields_are_only_what_the_review_needs():
+    fields = {field.strip() for field in service_module.BOOKING_EVENT_FIELDS.split(",")}
+    assert fields == {
+        "id",
+        "name",
+        "status",
+        "description",
+        "purpose",
+        "preferred_start_date",
+        "preferred_end_date",
+        "preferred_start_time",
+        "preferred_end_time",
+        "expected_attendance",
+        "room_layout",
+        "accessibility_needs",
+    }
+
+
 def test_get_booking_conflict_is_false_with_no_other_confirmed_booking(fake_db):
     fake_db.tables["venue_bookings"] = [_booking(status="pending")]
 

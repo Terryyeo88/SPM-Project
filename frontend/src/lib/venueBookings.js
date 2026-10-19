@@ -6,7 +6,7 @@
  * anything -- same split as lib/coordinatorDashboard.js.
  *
  * Tab -> status mapping mirrors app.venues.booking_service.BOOKING_STATUSES
- * exactly (pending / confirmed / rejected) -- there is no "needs more
+ * (pending / confirmed / rejected / cancelled) -- there is no "needs more
  * info" or in-between state for a venue booking, unlike an event request.
  */
 
@@ -14,6 +14,7 @@ export const BOOKING_TABS = Object.freeze([
   Object.freeze({ key: 'pending', label: 'Pending', statuses: Object.freeze(['pending']) }),
   Object.freeze({ key: 'confirmed', label: 'Confirmed', statuses: Object.freeze(['confirmed']) }),
   Object.freeze({ key: 'rejected', label: 'Rejected', statuses: Object.freeze(['rejected']) }),
+  Object.freeze({ key: 'cancelled', label: 'Cancelled', statuses: Object.freeze(['cancelled']) }),
 ])
 
 /** true if `key` names one of BOOKING_TABS (used to validate the ?tab= query param). */
@@ -41,4 +42,15 @@ export function groupBookingsByTab(bookings) {
  */
 export function validateBookingForm(form) {
   return Boolean(form?.venue_id)
+}
+
+/**
+ * IS-9: true if the coordinator may cancel this one booking -- same
+ * conditions as rule_venue_booking_cancel: it is still pending or confirmed,
+ * and the event isn't completed or cancelled. Cancelling it never touches the
+ * session's other bookings.
+ */
+export function canCancelBooking(booking, event) {
+  return ['pending', 'confirmed'].includes(booking?.status)
+    && !['completed', 'cancelled'].includes(event?.status)
 }

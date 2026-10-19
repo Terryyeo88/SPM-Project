@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BOOKING_TABS, groupBookingsByTab, isBookingTab, validateBookingForm } from './venueBookings'
+import { BOOKING_TABS, canCancelBooking, groupBookingsByTab, isBookingTab, validateBookingForm } from './venueBookings'
 
 function booking(overrides) {
   return { id: overrides.name, ...overrides }
@@ -56,5 +56,26 @@ describe('validateBookingForm', () => {
     expect(validateBookingForm({ venue_id: '' })).toBe(false)
     expect(validateBookingForm({})).toBe(false)
     expect(validateBookingForm(undefined)).toBe(false)
+  })
+})
+
+describe('cancelled bookings (IS-9)', () => {
+  it('have a tab of their own', () => {
+    expect(isBookingTab('cancelled')).toBe(true)
+    expect(groupBookingsByTab([booking({ name: 'x', status: 'cancelled' })]).cancelled.map((b) => b.name)).toEqual(['x'])
+  })
+})
+
+describe('canCancelBooking (IS-9)', () => {
+  it.each(['pending', 'confirmed'])('allows cancelling a %s booking while the event is open', (status) => {
+    expect(canCancelBooking({ status }, { status: 'planning' })).toBe(true)
+  })
+
+  it.each(['rejected', 'cancelled'])('does not offer to cancel a %s booking', (status) => {
+    expect(canCancelBooking({ status }, { status: 'planning' })).toBe(false)
+  })
+
+  it.each(['completed', 'cancelled'])('does not offer to cancel once the event is %s', (status) => {
+    expect(canCancelBooking({ status: 'confirmed' }, { status })).toBe(false)
   })
 })
