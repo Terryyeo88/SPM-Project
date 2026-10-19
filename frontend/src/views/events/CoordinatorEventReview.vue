@@ -39,6 +39,9 @@
  *               registrations), or any change to a confirmed event (it goes
  *               back to planning) is shown for review before it's saved;
  *               affected arrangements must be acknowledged (lib/eventUpdates).
+ *               Every venue booking, equipment request and the registrations
+ *               the change touches is listed too, conflict or not, so a
+ *               significant change is never committed blind.
  *
  * Sessions:
  *   One coordinator is assigned to the whole request, so this page lists
@@ -60,6 +63,7 @@ import {
 } from '../../lib/eventSessions'
 import {
   SIGNIFICANCE_LABELS,
+  arrangementsOfPreview,
   describePreviewChanges,
   impactsOfPreview,
   isNoChange,
@@ -184,6 +188,7 @@ const review = ref(null) // null | { body, preview }
 const reviewAcknowledged = ref(false)
 const reviewImpacts = computed(() => impactsOfPreview(review.value?.preview))
 const reviewChanges = computed(() => describePreviewChanges(review.value?.preview))
+const reviewArrangements = computed(() => arrangementsOfPreview(review.value?.preview))
 
 function validateEdit() {
   Object.keys(editErrors).forEach((field) => delete editErrors[field])
@@ -479,6 +484,22 @@ function cancelEvent() {
           This event is confirmed. Saving these changes moves it back to In Planning until you confirm it again.
         </p>
 
+        <div v-if="reviewArrangements.length" class="arrangements" role="region"
+          aria-labelledby="arrangements-heading">
+          <span id="arrangements-heading" class="impact-title">Arrangements this change touches</span>
+          <ul>
+            <li v-for="arrangement in reviewArrangements" :key="arrangement.key">
+              <span class="area">{{ arrangement.areaLabel }}</span>
+              <strong>{{ arrangement.title }}</strong>
+              <span v-if="arrangement.status" class="muted">({{ arrangement.status }})</span>
+              <span class="impact-kind" :class="arrangement.conflict ? 'kind-conflict' : 'kind-ok'">
+                {{ arrangement.conflict ? 'Conflict -- see below' : 'Still fits' }}
+              </span>
+              <div class="muted small">Depends on: {{ arrangement.fields }}</div>
+            </li>
+          </ul>
+        </div>
+
         <div v-if="reviewImpacts.length" class="impact" role="note">
           <span class="impact-title">This affects arrangements already made</span>
           <ul>
@@ -497,6 +518,9 @@ function cancelEvent() {
             I've reviewed these and will follow up on them
           </label>
         </div>
+        <p v-else-if="reviewArrangements.length" class="muted small">
+          None of these conflict with the change. Nothing is changed or cancelled automatically.
+        </p>
         <p v-else class="muted small">No venue booking, equipment, technical support or registration is affected.</p>
 
         <div class="panel-actions">
@@ -649,6 +673,12 @@ h2 { margin: 0 0 4px; font-size: 15px; color: #222; }
 .impact > ul { padding-left: 0; list-style: none; }
 .impact-kind { margin-left: 8px; font-size: 11px; font-weight: 600; border-radius: 8px; padding: 1px 8px; background: #eee; color: #5a5a5a; }
 .impact-conflict .impact-kind { background: #f5e6e6; color: #a33f3f; }
+.arrangements { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-left: 3px solid #2568e8; border-radius: 4px; background: #eef3fc; font-size: 13px; }
+.arrangements .impact-title { color: #1f4f9e; }
+.arrangements ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.arrangements .area { margin-right: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #1f4f9e; }
+.kind-conflict { background: #f5e6e6; color: #a33f3f; }
+.kind-ok { background: #eaf5ec; color: #2f6b3f; }
 .check { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #444; }
 
 @media (max-width: 600px) {

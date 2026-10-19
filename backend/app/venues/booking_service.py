@@ -1,4 +1,6 @@
-"""Business logic for venue booking requests and their approval/rejection.
+"""Business logic for venue booking requests and their approval/rejection,
+and (IS-9) the coordinator cancelling one booking without touching the
+session's others (cancel_booking).
 
 Implements "Request Venue Booking" (Venue Booking Request, Josiah, Sprint
 2) and "Approve Venue Bookings" (Venue Booking Approval, Josiah, Sprint
@@ -25,7 +27,10 @@ from app.events.event_service import SINGAPORE_TZ
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
-BOOKING_STATUSES = {"pending", "confirmed", "rejected"}
+BOOKING_STATUSES = {"pending", "confirmed", "rejected", "cancelled"}
+# A booking the coordinator may still cancel (cancel_booking): one still
+# holding, or waiting to hold, the venue.
+CANCELLABLE_BOOKING_STATUSES = ("pending", "confirmed")
 
 # Statuses that count as "this booking is actively holding the venue" for
 # overlap purposes. Deliberately CONFIRMED ONLY -- not pending -- this is
@@ -172,15 +177,24 @@ def _attach_rejection_reasons(rows: list[dict]) -> list[dict]:
     view it") needs this join. Exact mirror of
     app.events.event_service._attach_rejections, same reasoning: only the
     LATEST rejection of a given booking, since in principle it could be
-    rejected, a fresh request made, and rejected again."""
-    rejected_ids = [row["id"] for row in rows if row.get("status") == "rejected"]
-    if not rejected_ids:
-        return rows
+    rejected, a fresh request made, and rejected again.
+
+    IS-9: likewise `cancellation` ({"reason", "cancelled_at",
+    "cancelled_by"}) on each cancelled booking (cancel_booking)."""
+    _attach_status_reason(rows, "rejected", "rejection")
+    _attach_status_reason(rows, "cancelled", "cancellation")
+    return rows
+
+
+def _attach_status_reason(rows: list[dict], status: str, key: str) -> None:
+    ids = [row["id"] for row in rows if row.get("status") == status]
+    if not ids:
+        return
     result = (
         supabase.table("venue_booking_status_log")
         .select("booking_id, reason, changed_at, profiles(name)")
-        .in_("booking_id", rejected_ids)
-        .eq("to_status", "rejected")
+        .in_("booking_id", ids)
+        .eq("to_status", status)
         .execute()
     )
     latest = {}
@@ -188,20 +202,38 @@ def _attach_rejection_reasons(rows: list[dict]) -> list[dict]:
         latest[entry["booking_id"]] = entry  # later entries overwrite earlier ones
     for row in rows:
         entry = latest.get(row["id"])
-        if row.get("status") == "rejected" and entry:
-            row["rejection"] = {
+        if row.get("status") == status and entry:
+            row[key] = {
                 "reason": entry.get("reason"),
-                "rejected_at": entry.get("changed_at"),
-                "rejected_by": (entry.get("profiles") or {}).get("name"),
+                f"{status}_at": entry.get("changed_at"),
+                f"{status}_by": (entry.get("profiles") or {}).get("name"),
             }
-    return rows
+
+
+# The event-session details a booking is judged against, embedded as
+# `event` in get_booking. Venue Staff decide on bookings but can't open the
+# event itself (rule_event_view), so they get exactly these fields -- what
+# the booking review page shows and checks suitability against -- and
+# nothing else about the request (same "only what the entry needs" stance
+# as app.venues.calendar_service's events(name, status) embed).
+BOOKING_EVENT_FIELDS = (
+    "id, name, status, description, purpose, preferred_start_date, preferred_end_date, "
+    "preferred_start_time, preferred_end_time, expected_attendance, room_layout, accessibility_needs"
+)
 
 
 def get_booking(booking_id: str) -> dict:
-    result = supabase.table("venue_bookings").select("*").eq("id", booking_id).maybe_single().execute()
+    result = (
+        supabase.table("venue_bookings")
+        .select(f"*, events({BOOKING_EVENT_FIELDS})")
+        .eq("id", booking_id)
+        .maybe_single()
+        .execute()
+    )
     if result is None or not result.data:
         raise NotFoundError("Venue booking not found.")
     booking = result.data
+    booking["event"] = booking.pop("events", None)
     # Read-only conflict flag, surfaced BEFORE a decision is made (not
     # just enforced when confirm_booking is actually called), so Venue
     # Staff see the same conflict a confirm attempt would hit -- the
@@ -217,9 +249,11 @@ def get_booking(booking_id: str) -> dict:
 
 
 def list_bookings_for_event(event_id: str) -> list[dict]:
+    # venues(name): a session may hold several bookings (IS-9), so the
+    # coordinator needs to tell them apart.
     result = (
         supabase.table("venue_bookings")
-        .select("*")
+        .select("*, venues(name)")
         .eq("event_id", event_id)
         .order("created_at", desc=True)
         .execute()
@@ -360,3 +394,37 @@ def reject_booking(booking_id: str, booking: SimpleNamespace, decided_by: str, r
     decided = _decide_booking(booking_id, booking, "rejected", decided_by, reason.strip())
     _notify_booking_decision(decided, "rejected")
     return decided
+
+
+def cancel_booking(booking_id: str, booking: SimpleNamespace, cancelled_by: str, reason) -> dict:
+    """IS-9: the assigned coordinator cancels ONE venue booking -> "cancelled".
+
+    "Changes or cancellation of one venue arrangement should not
+    automatically remove the other venue bookings": only this row is
+    written, so every other booking for the session (pending or confirmed)
+    is untouched, and the event's own status doesn't change either. A
+    confirmed booking that's cancelled stops holding the venue at once (the
+    no-overlap constraint covers confirmed rows only).
+
+    authz (rule_venue_booking_cancel) has already checked the caller is the
+    event's assigned coordinator and the booking is pending or confirmed.
+    The write is conditioned on that status too, so a cancel racing a
+    Venue Staff decision can't overwrite a status it never saw. The reason
+    is required and goes into venue_booking_status_log, with who and when.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to cancel a venue booking.")
+    result = (
+        supabase.table("venue_bookings")
+        .update({"status": "cancelled"})
+        .eq("id", booking_id)
+        .eq("status", booking.status)
+        .select("*")
+        .execute()
+    )
+    if not result.data:
+        raise ValidationError("This booking changed while you were cancelling it -- refresh to see its current status.")
+    _record_booking_status_change(booking_id, booking.status, "cancelled", cancelled_by, reason.strip())
+    cancelled = result.data[0] if isinstance(result.data, list) else result.data
+    _notify_booking_decision(cancelled, "cancelled")
+    return cancelled

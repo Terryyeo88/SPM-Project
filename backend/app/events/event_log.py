@@ -25,6 +25,10 @@ SIGNIFICANT_FIELDS) or "ordinary" (anything else), stored in
 `significance`. A coordinator's update also keeps the impacts they
 acknowledged before saving, in `acknowledged_impacts`.
 
+Each entry also records WHICH session it was made on (`event_id`), so a
+multi-session request's history can say "Session 2"; list_event_logs
+labels it (see _session_label).
+
 public.event_change_requests holds the change requests themselves (and
 their review); event_logs is the request's timeline of what was asked for
 and what was changed.
@@ -37,7 +41,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.events.event_service import REGISTRATION_WINDOW_FIELDS, _from_database_event, _parse_registration_datetime
+from app.events.event_service import (
+    REGISTRATION_WINDOW_FIELDS,
+    SHARED_FIELDS,
+    _from_database_event,
+    _parse_registration_datetime,
+    _session_sort_key,
+)
 from app.extensions import supabase
 
 # IS-9: "Changes to date, time, expected attendance, venue requirements, or
@@ -114,6 +124,7 @@ def record_event_change(
     after = after_row if isinstance(after_row, dict) else vars(after_row)
     entry = {
         "shared_event_id": group_id(after),
+        "event_id": after["id"],
         "changes": changes,
         "significance": significance(changes),
         "changed_by": changed_by,
@@ -130,6 +141,7 @@ def record_requested_change(event, requested_changes: dict, previous_values: dic
     the timeline reads "requested X -> Y", then (if approved) "changed"."""
     entry = {
         "shared_event_id": group_id(event),
+        "event_id": event.id,
         "changes": {
             field: {"from": previous_values.get(field), "to": value} for field, value in requested_changes.items()
         },
@@ -150,15 +162,62 @@ def entry_kind(entry: dict, event) -> str:
     return "changed"
 
 
+def _session_numbers(event: SimpleNamespace) -> dict[str, int]:
+    """session id -> its number in the request (1, 2, ...), in the same
+    order the request's sessions are listed (event_service._session_sort_key).
+    A request's sessions share shared_event_id AND organiser, the same scope
+    event_update.apply_shared_details uses."""
+    shared_event_id = getattr(event, "shared_event_id", None)
+    if not shared_event_id:
+        return {event.id: 1}
+    rows = (
+        supabase.table("events")
+        .select("id, preferred_start_date, preferred_start_time, created_at")
+        .eq("shared_event_id", shared_event_id)
+        .eq("organizer_id", event.organizer_id)
+        .execute()
+        .data
+        or []
+    )
+    return {row["id"]: number for number, row in enumerate(sorted(rows, key=_session_sort_key), start=1)}
+
+
+def _session_label(entry: dict, kind: str, numbers: dict[str, int]) -> dict | None:
+    """Which session an entry is about, as {"id", "number", "label"}:
+
+      "All sessions"  a change that took effect on the shared details only
+                      (name, description, purpose), which the coordinator's
+                      edit or approval writes to every session;
+      "Session N"     otherwise, the session it was made on;
+      "Session not recorded"
+                      an entry with no (or no longer a) session on a
+                      multi-session request: written before sessions were
+                      recorded (20261019400000_event_logs_session.sql), or
+                      its session was since removed. Said outright rather
+                      than left blank, so it doesn't read as a missing label;
+      None            a single-session request (nothing to tell apart).
+    """
+    if len(numbers) < 2:
+        return None
+    fields = set(entry.get("changes") or {})
+    if kind == "changed" and fields and fields <= set(SHARED_FIELDS):
+        return {"id": None, "number": None, "label": "All sessions"}
+    number = numbers.get(entry.get("event_id"))
+    if number is None:
+        return {"id": None, "number": None, "label": "Session not recorded"}
+    return {"id": entry["event_id"], "number": number, "label": f"Session {number}"}
+
+
 def list_event_logs(event: SimpleNamespace) -> list[dict]:
     """Every log entry for this event request, newest first, with the name
     of whoever made it (`profiles`, through changed_by), its `kind`
-    ("requested" or "changed", see entry_kind) and its `significance`
-    (worked out from the fields for entries written before it was stored).
+    ("requested" or "changed", see entry_kind), its `significance`
+    (worked out from the fields for entries written before it was stored)
+    and the `session` it was about (see _session_label).
 
     The caller has already been authorised to view `event` (EVENT_VIEW).
-    Entries aren't per session, so that covers the whole request -- which
-    has one organiser and one coordinator."""
+    Entries are read for the whole request, which has one organiser and one
+    coordinator, so that covers every session's entries."""
     result = (
         supabase.table("event_logs")
         .select("*, profiles(name)")
@@ -166,11 +225,17 @@ def list_event_logs(event: SimpleNamespace) -> list[dict]:
         .order("changed_at", desc=True)
         .execute()
     )
-    return [
-        {
-            **entry,
-            "kind": entry_kind(entry, event),
-            "significance": entry.get("significance") or significance(entry.get("changes") or {}),
-        }
-        for entry in result.data or []
-    ]
+    entries = result.data or []
+    numbers = _session_numbers(event) if entries else {}
+    listed = []
+    for entry in entries:
+        kind = entry_kind(entry, event)
+        listed.append(
+            {
+                **entry,
+                "kind": kind,
+                "significance": entry.get("significance") or significance(entry.get("changes") or {}),
+                "session": _session_label(entry, kind, numbers),
+            }
+        )
+    return listed

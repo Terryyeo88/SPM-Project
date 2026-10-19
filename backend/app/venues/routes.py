@@ -18,6 +18,7 @@ from flask import Blueprint, jsonify, request
 from app.auth.context import current_user
 from app.authz.actions import (
     VENUE_BOOKING_APPROVE,
+    VENUE_BOOKING_CANCEL,
     VENUE_BOOKING_LIST,
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
@@ -26,9 +27,11 @@ from app.authz.actions import (
     VENUE_VIEW,
 )
 from app.authz.decorators import require
+from app.extensions import supabase
 from app.shared.errors import ValidationError
 from app.venues.booking_service import (
     BOOKING_STATUSES,
+    cancel_booking,
     confirm_booking,
     get_booking,
     list_bookings,
@@ -72,6 +75,30 @@ def reject_venue_booking_route(booking, booking_id):
     body = request.get_json(silent=True) or {}
     rejected = reject_booking(booking_id, booking, current_user().id, body.get("reason"))
     return jsonify(rejected), 200
+
+
+# IS-9: the assigned coordinator cancels one booking (reason required). Only
+# that booking changes -- the session's other bookings are left as they are.
+# Static path -- must come before GET /venues/<venue_id> below.
+@venues_bp.route("/bookings/<booking_id>/cancel", methods=["POST"])
+@require(VENUE_BOOKING_CANCEL, loader=lambda booking_id: load_booking_with_event(booking_id))
+def cancel_venue_booking_route(booking, booking_id):
+    body = request.get_json(silent=True) or {}
+    cancelled = cancel_booking(booking_id, booking, current_user().id, body.get("reason"))
+    return jsonify(cancelled), 200
+
+
+def load_booking_with_event(booking_id: str) -> SimpleNamespace:
+    """load_booking plus the booking's event's coordinator_id and status
+    (as event_coordinator_id / event_status), which rule_venue_booking_cancel
+    needs: the event's current coordinator cancels, not whoever requested
+    the booking."""
+    booking = load_booking(booking_id)
+    rows = supabase.table("events").select("coordinator_id, status").eq("id", booking.event_id).execute().data or []
+    event = rows[0] if rows else {}
+    booking.event_coordinator_id = event.get("coordinator_id")
+    booking.event_status = event.get("status")
+    return booking
 
 
 def load_booking(booking_id: str) -> SimpleNamespace:

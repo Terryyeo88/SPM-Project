@@ -639,6 +639,34 @@ def rule_venue_booking_reject(user: Any, booking: Any) -> Decision:
     return rule_venue_booking_approve(user, booking)
 
 
+# -- venue_booking.cancel (IS-9) --------------------------------------------
+# Source: IS-9 "Changes or cancellation of one venue arrangement should not
+# automatically remove the other venue bookings." The event's CURRENT
+# assigned coordinator (not necessarily whoever requested the booking --
+# the Lead may have reassigned the event since) cancels one booking that
+# is still pending or confirmed, until the event itself is completed or
+# cancelled (the same window rule_event_edit gives the coordinator). The
+# resource is the booking with its event's coordinator_id and status
+# attached (app.venues.routes.load_booking_with_event).
+
+
+def rule_venue_booking_cancel(user: Any, booking: Any) -> Decision:
+    if not (_has_role(user, "event_coordinator") and booking.event_coordinator_id == user.id):
+        return Decision.DENY_NOT_FOUND
+    if not _booking_status_in(booking, "pending", "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    if booking.event_status in _COORDINATOR_EDIT_CLOSED:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def explain_venue_booking_cancel_denial(user: Any, booking: Any) -> str:
+    """The reason given with a 403 from rule_venue_booking_cancel."""
+    if booking.event_status in _COORDINATOR_EDIT_CLOSED:
+        return f"This event is {booking.event_status}, so its venue bookings can no longer be changed."
+    return f"This booking is already {booking.status}, so it can't be cancelled."
+
+
 # -- equipment.* / equipment_request.* (Nawaz, Sprint 2: IS-18) -------------
 # Source: Check Equipment Availability -- "As a Technical Support Staff,
 # I want to check whether sufficient equipment is available...". Equipment
