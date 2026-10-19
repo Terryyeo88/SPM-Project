@@ -8,6 +8,11 @@ All read-only.
   GET /equipment/requests/<id>/availability   -- the availability check
   POST /equipment/requests/<id>/accept        -- accept and reserve stock (IS-19)
   POST /equipment/requests/<id>/reject        -- reject with a reason (IS-41)
+  GET /equipment/requests/<id>/change-requests  -- quantity changes asked for (IS-43)
+  POST /equipment/requests/<id>/change-requests -- coordinator asks to change a line's quantity
+  GET /equipment/change-requests               -- Technical Support's pending queue
+  POST /equipment/change-requests/<id>/accept   -- apply the new quantity
+  POST /equipment/change-requests/<id>/reject   -- reject with a reason
   GET /equipment/<id>                         -- one unit plus its occupancy
 
 The static "/requests" paths are declared BEFORE the dynamic "/<id>" one,
@@ -21,6 +26,10 @@ from flask import Blueprint, jsonify, request
 
 from app.auth.context import current_user
 from app.authz.actions import (
+    EQUIPMENT_CHANGE_ACCEPT,
+    EQUIPMENT_CHANGE_CREATE,
+    EQUIPMENT_CHANGE_LIST,
+    EQUIPMENT_CHANGE_REJECT,
     EQUIPMENT_LIST,
     EQUIPMENT_REQUEST_ACCEPT,
     EQUIPMENT_REQUEST_CHECK_AVAILABILITY,
@@ -31,6 +40,14 @@ from app.authz.actions import (
     EQUIPMENT_VIEW,
 )
 from app.authz.decorators import require
+from app.equipment.change_service import (
+    accept_change,
+    create_change_request,
+    list_changes_for_request,
+    list_pending_changes,
+    load_change_resource,
+    reject_change,
+)
 from app.equipment.equipment_service import (
     accept_request,
     check_availability,
@@ -92,6 +109,40 @@ def accept_equipment_request_route(equipment_request, request_id):
 def reject_equipment_request_route(equipment_request, request_id):
     body = request.get_json(silent=True) or {}
     return jsonify(reject_request(request_id, body.get("reason"), current_user().id)), 200
+
+
+# IS-43. Static paths -- before GET /equipment/<equipment_id> below.
+@equipment_bp.route("/requests/<request_id>/change-requests", methods=["GET"])
+@require(EQUIPMENT_REQUEST_VIEW, loader=lambda request_id: load_request(request_id))
+def list_request_changes_route(equipment_request, request_id):
+    return jsonify(list_changes_for_request(request_id)), 200
+
+
+@equipment_bp.route("/requests/<request_id>/change-requests", methods=["POST"])
+@require(EQUIPMENT_CHANGE_CREATE, loader=lambda request_id: load_request(request_id))
+def create_request_change_route(equipment_request, request_id):
+    body = request.get_json(silent=True) or {}
+    created = create_change_request(request_id, body.get("item_id"), body.get("quantity"), current_user().id)
+    return jsonify(created), 201
+
+
+@equipment_bp.route("/change-requests", methods=["GET"])
+@require(EQUIPMENT_CHANGE_LIST)
+def list_pending_changes_route():
+    return jsonify(list_pending_changes()), 200
+
+
+@equipment_bp.route("/change-requests/<change_id>/accept", methods=["POST"])
+@require(EQUIPMENT_CHANGE_ACCEPT, loader=lambda change_id: load_change_resource(change_id))
+def accept_change_route(change, change_id):
+    return jsonify(accept_change(change_id, current_user().id)), 200
+
+
+@equipment_bp.route("/change-requests/<change_id>/reject", methods=["POST"])
+@require(EQUIPMENT_CHANGE_REJECT, loader=lambda change_id: load_change_resource(change_id))
+def reject_change_route(change, change_id):
+    body = request.get_json(silent=True) or {}
+    return jsonify(reject_change(change_id, body.get("reason"), current_user().id)), 200
 
 
 @equipment_bp.route("/<equipment_id>", methods=["GET"])

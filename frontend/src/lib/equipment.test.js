@@ -3,6 +3,7 @@ import {
   REQUEST_TABS,
   allocatedEquipment,
   buildRequestPayload,
+  describeChange,
   describeAvailability,
   equipmentTypeLabel,
   eventRequestStatus,
@@ -12,6 +13,7 @@ import {
   newRequestLine,
   summariseCheck,
   summariseItems,
+  validateChangeQuantity,
   unitStatusLabel,
   validateRequestLines,
 } from './equipment'
@@ -258,5 +260,31 @@ describe('buildRequestPayload', () => {
         { equipment_type_id: 't2', quantity: 1, technical_requirements: null },
       ],
     })
+  })
+})
+
+// Update quantity on an existing equipment reservation (IS-43)
+describe('validateChangeQuantity', () => {
+  it.each([
+    ['', 'Enter a whole number of at least 1.'],
+    [null, 'Enter a whole number of at least 1.'],
+    ['0', 'Enter a whole number of at least 1.'],
+    ['-2', 'Enter a whole number of at least 1.'],
+    ['2.5', 'Enter a whole number of at least 1.'],
+    ['abc', 'Enter a whole number of at least 1.'],
+    ['2', 'The quantity is already 2.'],
+  ])('refuses %j', (raw, error) => {
+    expect(validateChangeQuantity(raw, 2)).toMatchObject({ valid: false, error })
+  })
+
+  it('accepts a different whole number, typed as text or number', () => {
+    expect(validateChangeQuantity('4', 2)).toEqual({ valid: true, quantity: 4, error: '' })
+    expect(validateChangeQuantity(1, 2)).toEqual({ valid: true, quantity: 1, error: '' })
+  })
+})
+
+describe('describeChange', () => {
+  it('reads "type: old → new"', () => {
+    expect(describeChange({ type: 'projector', old_quantity: 2, new_quantity: 3 })).toBe('projector: 2 → 3')
   })
 })
