@@ -2,6 +2,7 @@
 All read-only.
 
   GET /equipment                              -- every unit (?type=, ?status=)
+  GET /equipment/types                        -- the kinds of equipment a request can name
   GET /equipment/requests                     -- requests the caller may see (?status=)
   GET /equipment/requests/<id>                -- one request, with its lines
   GET /equipment/requests/<id>/availability   -- the availability check
@@ -22,6 +23,7 @@ from app.authz.actions import (
     EQUIPMENT_REQUEST_CHECK_AVAILABILITY,
     EQUIPMENT_REQUEST_LIST,
     EQUIPMENT_REQUEST_VIEW,
+    EQUIPMENT_TYPE_LIST,
     EQUIPMENT_VIEW,
 )
 from app.authz.decorators import require
@@ -29,6 +31,7 @@ from app.equipment.equipment_service import (
     check_availability,
     get_equipment,
     list_equipment,
+    list_equipment_types,
     list_requests,
     load_request_resource,
 )
@@ -40,6 +43,13 @@ equipment_bp = Blueprint("equipment", __name__, url_prefix="/equipment")
 @require(EQUIPMENT_LIST)
 def list_equipment_route():
     return jsonify(list_equipment(request.args.get("type"), request.args.get("status"))), 200
+
+
+# Static path -- must come before GET /equipment/<equipment_id> below.
+@equipment_bp.route("/types", methods=["GET"])
+@require(EQUIPMENT_TYPE_LIST)
+def list_equipment_types_route():
+    return jsonify(list_equipment_types()), 200
 
 
 # Static path -- must come before GET /equipment/<equipment_id> below.

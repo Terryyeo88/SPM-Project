@@ -148,6 +148,11 @@ export function hasAnyRole(userRoles, allowedRoles) {
  *                           Event Coordinators are included even though
  *                           the story text only names Venue Staff. Not a
  *                           nav link: reached from the venue detail page.
+ *   request-equipment    -- Record Equipment Request for Event (Nawaz, Sprint
+ *                           3, IS-17). Coordinator-only; the backend checks
+ *                           the assigned coordinator and planning status per
+ *                           event. Not a nav link: reached from the Equipment
+ *                           Booking section of the event page.
  *   request-venue-booking -- Venue Booking Request story (Josiah, Sprint
  *                           2): "As an Event Coordinator, I want to
  *                           submit a request to book a venue for an
@@ -273,6 +278,12 @@ export const ROUTE_ACCESS = Object.freeze(
     {
       routeName: 'request-venue-booking',
       label: 'Request venue booking',
+      roles: [ROLES.EVENT_COORDINATOR],
+      inNav: false,
+    },
+    {
+      routeName: 'request-equipment',
+      label: 'Request equipment',
       roles: [ROLES.EVENT_COORDINATOR],
       inNav: false,
     },

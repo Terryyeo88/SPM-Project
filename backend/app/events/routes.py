@@ -18,6 +18,7 @@ from flask import Blueprint, jsonify, request
 from app.auth.context import current_user
 from app.authz.actions import (
     COORDINATOR_LIST,
+    EQUIPMENT_REQUEST_CREATE,
     EVENT_APPROVE,
     EVENT_ASSIGN_COORDINATOR,
     EVENT_CANCEL,
@@ -38,6 +39,7 @@ from app.authz.actions import (
     VENUE_BOOKING_CREATE,
 )
 from app.authz.decorators import require
+from app.equipment.equipment_service import create_request as create_equipment_request
 from app.equipment.equipment_service import list_requests_for_event as list_equipment_requests_for_event
 from app.equipment.reservation_release import release_event_equipment
 from app.events.change_request_service import (
@@ -185,6 +187,17 @@ def get_venue_bookings_for_event(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_equipment_requests_for_event(event, event_id):
     return jsonify(list_equipment_requests_for_event(event_id)), 200
+
+
+# Record Equipment Request for Event (Nawaz, Sprint 3, IS-17). Gated on
+# EQUIPMENT_REQUEST_CREATE, not EVENT_EDIT, for the same reason as
+# create_venue_booking above: its own precondition (assigned coordinator,
+# event in planning) differs from event.edit's.
+@events_bp.route("/<event_id>/equipment-requests", methods=["POST"])
+@require(EQUIPMENT_REQUEST_CREATE, loader=lambda event_id: load_event(event_id))
+def create_equipment_request_route(event, event_id):
+    body = request.get_json(silent=True) or {}
+    return jsonify(create_equipment_request(event, body.get("items"), current_user().id)), 201
 
 
 @events_bp.route("/<event_id>", methods=["DELETE"])
