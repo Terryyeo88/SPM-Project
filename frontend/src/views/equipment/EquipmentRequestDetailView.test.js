@@ -272,6 +272,24 @@ describe('EquipmentRequestDetailView', () => {
       expect(wrapper.find('.btn-reject').exists()).toBe(true)
     })
 
+    it('shows the quantity-change decisions for a confirmed request, not for a pending one', async () => {
+      apiGet.mockImplementation((path) =>
+        Promise.resolve(
+          path.endsWith('/availability') ? CHECK : path.endsWith('/change-requests') ? [] : { ...PENDING, status: 'confirmed' },
+        ),
+      )
+      await mountView().vm.$nextTick()
+      await flushPromises()
+      expect(apiGet).toHaveBeenCalledWith('/equipment/requests/req-1/change-requests')
+    })
+
+    it('does not look for quantity changes on a pending request', async () => {
+      serve(PENDING, CHECK)
+      mountView()
+      await flushPromises()
+      expect(apiGet).not.toHaveBeenCalledWith('/equipment/requests/req-1/change-requests')
+    })
+
     it('shows the recorded reason on a rejected request and no decision controls', async () => {
       serve({ ...PENDING, status: 'rejected', rejection_reason: 'Only 1 projector free' }, CHECK)
       const wrapper = mountView()

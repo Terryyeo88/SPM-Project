@@ -12,12 +12,17 @@
  * A cancelled event's confirmed requests read "Released" and list no
  * units (lib/equipment.js eventRequestStatus / allocatedEquipment).
  *
+ * Quantity changes (IS-43): under a confirmed request, the coordinator can
+ * ask Technical Support to change a line's quantity (EquipmentChangeRequests).
+ *
  * Data: GET /events/<id>/equipment-requests
  * (app.equipment.equipment_service.list_requests_for_event).
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet } from '../lib/api'
+import EquipmentChangeRequests from './EquipmentChangeRequests.vue'
 import {
+  CHANGEABLE_EVENT_STATUSES,
   allocatedEquipment,
   equipmentTypeLabel,
   eventRequestStatus,
@@ -37,6 +42,11 @@ const allocated = computed(() => allocatedEquipment(requests.value, props.event.
 // Same status precondition as rule_equipment_request_create: a request
 // can only be raised once the event is in planning -- an approved event is
 // moved there first with Start Planning (Record Equipment Request, IS-17).
+// Same preconditions as rule_equipment_change_create (IS-43): a confirmed
+// request, while the event is still live.
+const canChange = computed(() => CHANGEABLE_EVENT_STATUSES.includes(props.event.status))
+const confirmedRequests = computed(() => requests.value.filter((request) => request.status === 'confirmed'))
+
 const canRequest = computed(() => props.event.status === 'planning')
 
 const isReleased = computed(
@@ -114,6 +124,13 @@ watch(() => [props.event.id, props.event.status], load)
       <p v-else-if="isReleased" class="muted small">
         This event was cancelled, so its reserved equipment has been released.
       </p>
+
+      <EquipmentChangeRequests
+        v-for="request in confirmedRequests"
+        :key="`changes-${request.id}`"
+        :request="request"
+        :can-change="canChange"
+      />
 
       <p v-if="event.status === 'approved'" class="muted small">
         Start planning (under Your Decision) to request equipment.

@@ -489,3 +489,27 @@ database.
 | (design) Rejecting works on a cancelled event's pending request | `test_authz_equipment_reject.py::test_rejecting_does_not_depend_on_the_event_status`, `test_equipment_reject_routes.py::test_a_cancelled_events_pending_request_can_still_be_rejected` | no event-status check in the rule |
 | (design) Never overwrites an accepted request | `test_equipment_reject.py::test_the_update_is_conditional_on_the_request_still_being_pending` | update conditioned on `status = 'pending'` |
 | (design) Rejecting reserves/releases nothing | `test_equipment_reject.py::test_reject_reserves_nothing` | pending requests hold no stock |
+
+## Sprint 3 — Update Quantity on an Existing Equipment Reservation (IS-43, Nawaz)
+
+Source: the Reservation story's third sub-story. Unit tests:
+`test_equipment_change.py` (service), `test_authz_equipment_change.py`
+(rules), `test_equipment_change_routes.py` (routes). Frontend:
+`EquipmentChangeRequests.test.js`, `EquipmentChangeDecisions.test.js`,
+`EquipmentBookingStatus.test.js` ("quantity changes"),
+`EquipmentRequestDetailView.test.js`, `EquipmentRequestsView.test.js`,
+`equipment.test.js`. Needs migration
+`20261019200000_equipment_change_requests.sql`. Not tested against a real
+database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Coordinator's change request triggers a recalculation of available quantity for that date/time" | `test_equipment_change.py::test_an_increase_is_accommodated_when_enough_units_could_cover_the_request`, `::test_an_increase_is_not_accommodated_when_short_and_says_by_how_much`, `::test_a_decrease_is_always_accommodated`, `::test_pending_changes_carry_a_fresh_check_and_decided_ones_do_not`, `EquipmentChangeDecisions.test.js` (shows the recalculated availability) | `change_service._recalculate`, `list_changes_for_request` (check computed on every read) |
+| The coordinator can ask for a change | `test_equipment_change.py::test_create_stores_the_ask_with_the_current_and_requested_quantity`, `::test_the_new_quantity_must_be_a_whole_number_of_at_least_one`, `::test_asking_for_the_quantity_it_already_has_is_refused`, `::test_a_second_ask_while_one_is_waiting_is_refused`, `EquipmentChangeRequests.test.js` | `POST /equipment/requests/<id>/change-requests`, `create_change_request`, `EquipmentChangeRequests.vue` |
+| "If accommodated, the event record reflects the new reserved quantity" | `test_equipment_change.py::test_accepting_an_increase_reserves_the_extra_unit_and_updates_the_quantity`, `::test_the_extra_units_are_never_ones_the_request_already_holds`, `::test_accepting_a_decrease_releases_the_highest_asset_tags` | `accept_change`: reservation rows added or removed, line quantity updated (the event page reads these) |
+| "If the new quantity can't be accommodated, Technical Staff rejects the change with an explanation to the Coordinator" | `test_equipment_change.py::test_an_increase_the_stock_cannot_cover_is_refused_and_changes_nothing`, `::test_reject_records_the_reason_and_leaves_the_reservation_alone`, `::test_rejecting_requires_a_reason`, `EquipmentChangeDecisions.test.js` (disabled Accept, suggestion, reason required), `EquipmentChangeRequests.test.js::shows why an ask was rejected` | `reject_change`; reason shown to the coordinator under the request |
+| (design) Technical Support only decide; coordinator only asks for own confirmed request | `test_authz_equipment_change.py` (all), `test_equipment_change_routes.py` (403/404 cases) | `rule_equipment_change_*` |
+| (design) Event must be live to accept; reject always allowed | `test_authz_equipment_change.py::test_accepting_needs_a_live_event_but_rejecting_does_not`, `test_equipment_change_routes.py::test_accept_is_blocked_on_a_cancelled_event_but_reject_is_not` | `CHANGEABLE_EVENT_STATUSES` |
+| (design) Never double-applied or overwritten | `test_equipment_change.py::test_someone_deciding_it_first_releases_the_extra_unit`, `::test_rejecting_a_change_decided_a_moment_ago_does_not_overwrite_it`, `::test_the_unique_index_catching_a_simultaneous_ask_is_a_clear_error` | claim conditioned on `pending`; partial unique index |
+| (design) Failure leaves nothing half-applied | `test_equipment_change.py::test_a_failure_updating_the_quantity_undoes_the_claim_and_the_reservation`, `::test_the_exclusion_constraint_refusing_the_extra_unit_is_a_clear_error` | undo steps in `accept_change` |
+| Technical Support can find asks waiting | `EquipmentRequestsView.test.js`, `test_equipment_change_routes.py::test_technical_staff_see_the_pending_queue_and_a_coordinator_does_not` | `GET /equipment/change-requests`, "Quantity changes waiting" on the queue |

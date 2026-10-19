@@ -1020,3 +1020,50 @@ conventions Justin's View Reserved Equipment section documents
 - **Accepting does not write `decided_by`/`decided_at`.** IS-19 predates the
   columns and a confirmed request already shows its reservation rows.
   Say if the team wants those filled for accepts too.
+
+## Update Quantity on an Existing Equipment Reservation (IS-43, Nawaz, 19 Oct)
+
+- **Needs a migration.** `20261019200000_equipment_change_requests.sql` adds
+  `equipment_change_requests`: one row per ask, against one line of a request
+  (`request_item_id`), with `old_quantity`, `new_quantity`, a status
+  (pending/accepted/rejected), `rejection_reason`, `decided_by`, `decided_at`.
+  A partial unique index allows only one pending ask per line. Must be applied
+  in the Supabase SQL Editor before any of this works.
+- **The ask is stored and does not touch the confirmed request.** The story
+  has the coordinator "request" a change and Technical Staff accept or reject
+  it, so the ask needs a record Technical Support can review. Until it is
+  accepted the request's quantity and reservations are exactly as they were,
+  the same "goes through review first" stance Justin's Event Change Request
+  story takes for event details.
+- **"Triggers a recalculation" is computed whenever the ask is read.** Nothing
+  is stored: each pending ask comes back with a fresh `check` (units that could
+  cover the request vs the quantity asked for), the same way IS-18's check is
+  fresh. That number includes the units the request already holds, because the
+  availability check leaves a request's own reservations out of "held by
+  others". A decrease is always accommodated.
+- **Accepting an increase** reserves the extra units, lowest free asset tag
+  first, copying the request's period. **Accepting a decrease** releases the
+  surplus units, highest asset tags first. Technical Support cannot choose
+  which units; say if the team wants that.
+- **Whole-line quantity changes only.** Changing the date/time or adding a new
+  type is not covered by this story; for a new type the coordinator uses
+  "Request more equipment" (IS-17). A change to the date/time would follow the
+  event's own change flow.
+- **Allowed while the event is `planning`, `safety_review` or `confirmed`.**
+  Accept requires the event to still be in one of those; a cancelled,
+  completed or rejected event's change can only be rejected (to clear it).
+  A pending request cannot have a change asked for: Technical Support decide
+  it as it stands.
+- **Only the coordinator who raised the request can ask.** Same as who can
+  view it. If the assigned coordinator can differ from the requester, this
+  needs widening.
+- **No transaction.** Accept writes the extra reservations, claims the ask
+  (conditioned on still pending), then updates the line, and undoes the earlier
+  steps if a later one fails. The exclusion constraint is the backstop if
+  another request takes a unit meanwhile. The real-database behaviour is
+  untested.
+- **Notification** uses the same `_notify_request_decision` placeholder as
+  accept/reject ("change accepted" / "change rejected"). The coordinator sees
+  the outcome, and a rejection's reason, under the request on the event page.
+- **The coordinator's page does not refresh itself** when Technical Support
+  decide; they see the new quantity and allocated units after reloading.

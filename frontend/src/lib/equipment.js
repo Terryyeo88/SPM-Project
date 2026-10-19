@@ -216,3 +216,28 @@ export function buildRequestPayload(lines) {
     })),
   }
 }
+
+// Update quantity on an existing equipment reservation (IS-43).
+// Same rule as rule_equipment_change_create: only while the event is live.
+export const CHANGEABLE_EVENT_STATUSES = ['planning', 'safety_review', 'confirmed']
+
+/**
+ * Check the new quantity typed for a change request. It must be a whole
+ * number of at least 1 and different from the current one. Returns
+ * { valid, quantity, error }.
+ */
+export function validateChangeQuantity(raw, current) {
+  const quantity = Number(raw)
+  if (raw === '' || raw === null || raw === undefined || !Number.isInteger(quantity) || quantity < 1) {
+    return { valid: false, quantity: null, error: 'Enter a whole number of at least 1.' }
+  }
+  if (quantity === current) {
+    return { valid: false, quantity, error: `The quantity is already ${current}.` }
+  }
+  return { valid: true, quantity, error: '' }
+}
+
+/** "projector: 2 → 3" */
+export function describeChange(change) {
+  return `${change.type}: ${change.old_quantity} → ${change.new_quantity}`
+}

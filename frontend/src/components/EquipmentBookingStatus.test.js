@@ -1,7 +1,7 @@
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../lib/api', () => ({ apiGet: vi.fn() }))
+vi.mock('../lib/api', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }))
 
 import { apiGet } from '../lib/api'
 import EquipmentBookingStatus from './EquipmentBookingStatus.vue'
@@ -41,8 +41,8 @@ beforeEach(() => {
   apiGet.mockReset()
 })
 
-async function render(event, requests) {
-  apiGet.mockResolvedValue(requests)
+async function render(event, requests, changes = []) {
+  apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/change-requests') ? changes : requests))
   const wrapper = mount(EquipmentBookingStatus, { props: { event }, global: { stubs: { RouterLink: RouterLinkStub } } })
   await flushPromises()
   return wrapper
@@ -139,5 +139,39 @@ describe('EquipmentBookingStatus', () => {
         expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
       },
     )
+  })
+
+  // Update quantity on an existing equipment reservation (IS-43)
+  describe('quantity changes', () => {
+    const withIds = {
+      ...confirmedRequest,
+      items: [
+        { id: 'item-1', type: 'projector', quantity: 1 },
+        { id: 'item-2', type: 'microphone', quantity: 2 },
+      ],
+    }
+
+    it('offers a change form under a confirmed request while the event is live', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [withIds])
+      expect(wrapper.find('.changes').exists()).toBe(true)
+      expect(wrapper.findAll('.change-form')).toHaveLength(2)
+      expect(apiGet).toHaveBeenCalledWith('/equipment/requests/req-1/change-requests')
+    })
+
+    it.each(['safety_review', 'confirmed'])('still offers it once the event is %s', async (status) => {
+      const wrapper = await render({ id: 'session-1', status }, [withIds])
+      expect(wrapper.findAll('.change-form')).toHaveLength(2)
+    })
+
+    it('offers no form (only history) once the event is cancelled', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'cancelled' }, [withIds])
+      expect(wrapper.find('.change-form').exists()).toBe(false)
+    })
+
+    it('offers nothing for a request that is still pending', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
+      expect(wrapper.find('.changes').exists()).toBe(false)
+      expect(apiGet).not.toHaveBeenCalledWith('/equipment/requests/req-2/change-requests')
+    })
   })
 })

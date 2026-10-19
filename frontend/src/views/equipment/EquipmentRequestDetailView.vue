@@ -32,6 +32,8 @@ import { apiGet, apiPost } from '../../lib/api'
 import AppNavBar from '../../components/AppNavBar.vue'
 import { describeAvailability, formatPeriod, summariseCheck } from '../../lib/equipment'
 import { statusLabel } from '../../lib/coordinatorDashboard'
+import EquipmentChangeDecisions from '../../components/EquipmentChangeDecisions.vue'
+import { CHANGEABLE_EVENT_STATUSES } from '../../lib/equipment'
 
 const route = useRoute()
 const request = ref(null)
@@ -211,6 +213,13 @@ onMounted(load)
             <h2 id="rejection-heading" class="card-title">Why this request was rejected</h2>
             <p class="rejection-reason">{{ request.rejection_reason ?? 'No reason was recorded.' }}</p>
           </section>
+
+          <EquipmentChangeDecisions
+            v-if="request.status === 'confirmed'"
+            :request-id="request.id"
+            :event-live="CHANGEABLE_EVENT_STATUSES.includes(request.event_status)"
+            @decided="load"
+          />
 
           <section v-if="accepted.length" class="card" aria-labelledby="reserved-heading">
             <h2 id="reserved-heading" class="card-title">Reserved for this event</h2>

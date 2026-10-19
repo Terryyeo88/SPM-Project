@@ -161,6 +161,12 @@ EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
 # equipment_request.reject (IS-41): Technical Support Staff reject a pending
 # request with an explanation the coordinator can read.
 EQUIPMENT_REQUEST_REJECT = "equipment_request.reject"
+# equipment_change.* (IS-43): the coordinator asks to change the quantity on
+# an already-confirmed request line; Technical Support accept or reject it.
+EQUIPMENT_CHANGE_CREATE = "equipment_change.create"
+EQUIPMENT_CHANGE_LIST = "equipment_change.list"
+EQUIPMENT_CHANGE_ACCEPT = "equipment_change.accept"
+EQUIPMENT_CHANGE_REJECT = "equipment_change.reject"
 EQUIPMENT_TYPE_LIST = "equipment_type.list"
 
 # -- equipment calendar (IS-47: View Equipment Availability Calendar) -------
