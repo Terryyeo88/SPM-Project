@@ -71,6 +71,15 @@ describe('EquipmentBookingStatus', () => {
     expect(rows[1].find('.status').text()).toBe('Confirmed')
   })
 
+  it('shows why a request was rejected, and no reason line for other requests', async () => {
+    const rejected = { ...pendingRequest, id: 'req-3', status: 'rejected', rejection_reason: 'Only 1 screen free that day' }
+    const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest, rejected])
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0].find('.rejection').exists()).toBe(false)
+    expect(rows[1].find('.status').text()).toBe('Rejected')
+    expect(rows[1].find('.rejection').text()).toBe('Reason: Only 1 screen free that day')
+  })
+
   it('lists the reserved units by type, with quantity and asset tags, once confirmed', async () => {
     const wrapper = await render({ id: 'session-1', status: 'planning' }, [confirmedRequest])
     const groups = wrapper.findAll('.group')

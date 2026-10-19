@@ -158,6 +158,9 @@ EQUIPMENT_REQUEST_CREATE = "equipment_request.create"
 # equipment_request.accept (IS-19): Technical Support Staff accept a pending
 # request and reserve units for it. Reject is the separate IS-41 action.
 EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
+# equipment_request.reject (IS-41): Technical Support Staff reject a pending
+# request with an explanation the coordinator can read.
+EQUIPMENT_REQUEST_REJECT = "equipment_request.reject"
 EQUIPMENT_TYPE_LIST = "equipment_type.list"
 
 # -- equipment calendar (IS-47: View Equipment Availability Calendar) -------

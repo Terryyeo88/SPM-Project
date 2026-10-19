@@ -988,3 +988,35 @@ conventions Justin's View Reserved Equipment section documents
   like the venue one; the Notification System story is not built.
 - **Reject, warn on shortfall, and quantity changes** are IS-41 and IS-43,
   not here.
+
+## Get Warned and Reject When Requested Quantity Exceeds Availability (IS-41, Nawaz, 19 Oct)
+
+- **Needs a migration, unlike IS-17 and IS-19.** `equipment_requests` had a
+  `rejected` status but nowhere to keep the explanation the story requires.
+  `20261019100000_equipment_request_rejection.sql` adds `rejection_reason`,
+  `decided_by`, `decided_at`, plus a CHECK that a rejected request has a
+  non-blank reason and no other request has one (added `NOT VALID`, so it
+  only applies to new and updated rows). Each request is decided once, so
+  the reason lives on the request rather than in a status-log table; if a
+  later story reopens rejected requests, that is when to add a log table.
+  Must be applied in the Supabase SQL Editor before the reject button works.
+- **"Warned" is the existing availability check.** IS-18 already shows
+  requested vs available per line and flags shortfalls. IS-41 adds the
+  suggestion to reject (shown only when something is short) and keeps Accept
+  disabled in that case, which IS-19 already did.
+- **Rejecting is allowed even when stock is fine.** The story's trigger is a
+  shortfall, but Technical Support may have other reasons (equipment needed
+  elsewhere, unclear requirements), so the only requirement is a reason. If
+  the team wants reject limited to shortfalls, it is one extra check in
+  `rule_equipment_request_reject`.
+- **No event-status check on reject.** Accept requires the event to be in
+  `planning`; reject does not, so a pending request left on a cancelled
+  event can be cleared. Rejecting takes no stock, so there is nothing to
+  protect.
+- **"Sent to the Event Coordinator"** is the stored reason shown in the
+  coordinator's Equipment Booking section, plus `_notify_request_decision`,
+  which is still a print placeholder. No notification system exists yet;
+  wiring it up is a one-line change when one does.
+- **Accepting does not write `decided_by`/`decided_at`.** IS-19 predates the
+  columns and a confirmed request already shows its reservation rows.
+  Say if the team wants those filled for accepts too.
