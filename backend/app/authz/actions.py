@@ -155,6 +155,9 @@ EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
 #       name, which the request form needs and equipment.list (Technical
 #       Support only) does not give a coordinator.
 EQUIPMENT_REQUEST_CREATE = "equipment_request.create"
+# equipment_request.accept (IS-19): Technical Support Staff accept a pending
+# request and reserve units for it. Reject is the separate IS-41 action.
+EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
 EQUIPMENT_TYPE_LIST = "equipment_type.list"
 
 # -- equipment calendar (IS-47: View Equipment Availability Calendar) -------

@@ -2,7 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiGet = vi.fn()
-vi.mock('../../lib/api', () => ({ apiGet: (...args) => apiGet(...args) }))
+const apiPost = vi.fn()
+vi.mock('../../lib/api', () => ({
+  apiGet: (...args) => apiGet(...args),
+  apiPost: (...args) => apiPost(...args),
+}))
 // AppNavBar pulls in the auth store and so the Supabase client, which needs
 // real env vars at import time -- irrelevant to this screen, so replaced.
 vi.mock('../../components/AppNavBar.vue', () => ({ default: { template: '<div />' } }))
@@ -70,6 +74,7 @@ function mountView() {
 describe('EquipmentRequestDetailView', () => {
   beforeEach(() => {
     apiGet.mockReset()
+    apiPost.mockReset()
     apiGet.mockImplementation((path) =>
       Promise.resolve(path.endsWith('/availability') ? CHECK : REQUEST),
     )
@@ -124,5 +129,76 @@ describe('EquipmentRequestDetailView', () => {
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toContain('boom')
     expect(wrapper.find('.flag').exists()).toBe(false)
+  })
+
+  // Accept an equipment request and reserve stock (IS-19)
+  describe('accepting the request', () => {
+    const ENOUGH = { ...CHECK, all_sufficient: true, items: CHECK.items.map((item) => ({ ...item, sufficient: true, shortfall: 0, available: item.requested })) }
+    const PENDING = { ...REQUEST, status: 'pending', event_status: 'planning' }
+
+    function serve(request, check) {
+      apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/availability') ? check : request))
+    }
+
+    it('offers an enabled Accept button for a pending request that can be covered', async () => {
+      serve(PENDING, ENOUGH)
+      const wrapper = mountView()
+      await flushPromises()
+      const button = wrapper.find('.btn-accept')
+      expect(button.exists()).toBe(true)
+      expect(button.attributes('disabled')).toBeUndefined()
+    })
+
+    it('disables Accept and says why when there is not enough equipment', async () => {
+      serve(PENDING, CHECK)
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.btn-accept').attributes('disabled')).toBeDefined()
+      expect(wrapper.text()).toContain("can't be accepted yet")
+    })
+
+    it.each([
+      ['an already confirmed request', { ...PENDING, status: 'confirmed' }],
+      ['a rejected request', { ...PENDING, status: 'rejected' }],
+      ['a request on a cancelled event', { ...PENDING, event_status: 'cancelled' }],
+    ])('offers no decision for %s', async (_label, request) => {
+      serve(request, ENOUGH)
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.find('.btn-accept').exists()).toBe(false)
+    })
+
+    it('accepts, lists the reserved units and reloads the request', async () => {
+      serve(PENDING, ENOUGH)
+      apiPost.mockResolvedValue({
+        id: 'req-1',
+        status: 'confirmed',
+        allocated: [
+          { equipment_type_id: 't-prj', type: 'projector', quantity: 2, units: [{ id: 'u1', asset_tag: 'PRJ-001' }, { id: 'u2', asset_tag: 'PRJ-002' }] },
+        ],
+      })
+      const wrapper = mountView()
+      await flushPromises()
+      const loadsBefore = apiGet.mock.calls.length
+
+      await wrapper.find('.btn-accept').trigger('click')
+      await flushPromises()
+
+      expect(apiPost).toHaveBeenCalledWith('/equipment/requests/req-1/accept', {})
+      expect(wrapper.find('.reserved').text()).toContain('projector × 2: PRJ-001, PRJ-002')
+      expect(apiGet.mock.calls.length).toBeGreaterThan(loadsBefore)
+    })
+
+    it('shows the server error and keeps the button when accepting fails', async () => {
+      serve(PENDING, ENOUGH)
+      apiPost.mockRejectedValue(new Error('Some of that equipment was just reserved for another event'))
+      const wrapper = mountView()
+      await flushPromises()
+      await wrapper.find('.btn-accept').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[role="alert"]').text()).toContain('just reserved for another event')
+      expect(wrapper.find('.btn-accept').exists()).toBe(true)
+      expect(wrapper.find('.reserved').exists()).toBe(false)
+    })
   })
 })

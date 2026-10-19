@@ -943,3 +943,48 @@ require planning too"). No new migration: `equipment_requests` and
   queue (IS-18); no notification is sent (no notification system exists yet).
 - **The create-event form's `equipment_needed` list is unchanged** and does
   not create a request. Still open: whether it should.
+
+## Accept an Equipment Request and Reserve Stock (IS-19, Nawaz, 19 Oct)
+
+Source: the Reservation story's first AC ("Accepting a request changes its
+status to confirmed", "Available quantity for that equipment is reduced by
+the reserved amount, scoped to the event's date and time", "Only requests in
+a pending status can be accepted"). No new migration. Implements the three
+conventions Justin's View Reserved Equipment section documents
+("Conventions this relies on", `docs/design-decisions.md`).
+
+- **One reservation row per unit.** A request for 2 projectors writes 2 rows,
+  each naming a unit. The request becomes `confirmed` only after those rows
+  are written, and each row copies the request's `needed_start`/`needed_end`.
+- **The available quantity is not stored.** It still falls out of counting
+  reservation rows (IS-18's check, the IS-47 calendar and the exclusion
+  constraint all read the same rows), so there is no counter to keep in step.
+- **Accepted whole or not at all.** If any line is short, nothing is
+  reserved and the error says which type and by how much. A partial accept
+  (give them 1 of the 2 projectors) is not built; the Technical Support
+  user's other option is to reject, which is IS-41.
+- **Which units a request gets.** Lowest asset tag first, so it is
+  predictable. Nothing lets Technical Support pick specific units; if that
+  is wanted it is a change to this story, not a new one.
+- **Only while the event is in `planning`.** `rule_equipment_request_accept`
+  refuses a request whose event is cancelled, approved, in safety review or
+  later. The safety-review submit already requires no pending equipment
+  request, so a pending request on an event past planning is a leftover
+  (e.g. the event was cancelled), and accepting it would take stock for
+  nothing. This is our reading, not a story rule.
+- **Two ways it can lose a race, both handled.** Two people accepting the
+  same request: the status update is conditioned on `pending`, the loser's
+  units are deleted again and it gets "no longer pending". Two different
+  requests going for the same unit: the exclusion constraint refuses the
+  second insert and nothing is half-reserved. Neither has been exercised
+  against a real database (no local Supabase was available).
+- **No transaction.** The REST client gives none, so a crash between
+  writing the reservations and flipping the status could leave reservations
+  on a request that is still `pending`. Re-accepting it would then fail on
+  the exclusion constraint (its own units are already held), so a leftover
+  like that needs its reservation rows deleted by hand. Not guarded beyond
+  the clean-up above.
+- **No notification.** `_notify_request_decision` is a no-op placeholder
+  like the venue one; the Notification System story is not built.
+- **Reject, warn on shortfall, and quantity changes** are IS-41 and IS-43,
+  not here.

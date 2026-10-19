@@ -6,6 +6,7 @@ All read-only.
   GET /equipment/requests                     -- requests the caller may see (?status=)
   GET /equipment/requests/<id>                -- one request, with its lines
   GET /equipment/requests/<id>/availability   -- the availability check
+  POST /equipment/requests/<id>/accept        -- accept and reserve stock (IS-19)
   GET /equipment/<id>                         -- one unit plus its occupancy
 
 The static "/requests" paths are declared BEFORE the dynamic "/<id>" one,
@@ -20,6 +21,7 @@ from flask import Blueprint, jsonify, request
 from app.auth.context import current_user
 from app.authz.actions import (
     EQUIPMENT_LIST,
+    EQUIPMENT_REQUEST_ACCEPT,
     EQUIPMENT_REQUEST_CHECK_AVAILABILITY,
     EQUIPMENT_REQUEST_LIST,
     EQUIPMENT_REQUEST_VIEW,
@@ -28,6 +30,7 @@ from app.authz.actions import (
 )
 from app.authz.decorators import require
 from app.equipment.equipment_service import (
+    accept_request,
     check_availability,
     get_equipment,
     list_equipment,
@@ -71,6 +74,13 @@ def get_equipment_request_route(equipment_request, request_id):
 @require(EQUIPMENT_REQUEST_CHECK_AVAILABILITY, loader=lambda request_id: load_request(request_id))
 def check_equipment_request_availability_route(equipment_request, request_id):
     return jsonify(check_availability(request_id)), 200
+
+
+# Static path -- must come before GET /equipment/<equipment_id> below.
+@equipment_bp.route("/requests/<request_id>/accept", methods=["POST"])
+@require(EQUIPMENT_REQUEST_ACCEPT, loader=lambda request_id: load_request(request_id))
+def accept_equipment_request_route(equipment_request, request_id):
+    return jsonify(accept_request(request_id)), 200
 
 
 @equipment_bp.route("/<equipment_id>", methods=["GET"])

@@ -11,15 +11,20 @@
  *        which units and which events, so the number can be checked)
  *   AC5  the request is a stored row, so it is viewable again later
  *
- * Read-only: accepting or rejecting a request (and so reserving stock) is
- * the separate "Accept an equipment request" story, so there are no
- * decision buttons here. The check is fetched fresh on every load rather
- * than stored, so reopening the request later reflects reservations made
- * in the meantime.
+ * The check is fetched fresh on every load rather than stored, so
+ * reopening the request later reflects reservations made in the meantime.
+ *
+ * Accept an equipment request and reserve stock (IS-19, Nawaz, Sprint 3):
+ * a pending request on an event still in planning can be accepted from
+ * here (POST /equipment/requests/<id>/accept). The button is only enabled
+ * when every line is covered -- the backend refuses otherwise -- and a
+ * successful accept lists the units that were reserved, then reloads so
+ * the status and the availability numbers reflect the new reservations.
+ * Rejecting is a separate story and is not here.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { apiGet } from '../../lib/api'
+import { apiGet, apiPost } from '../../lib/api'
 import AppNavBar from '../../components/AppNavBar.vue'
 import { describeAvailability, formatPeriod, summariseCheck } from '../../lib/equipment'
 import { statusLabel } from '../../lib/coordinatorDashboard'
@@ -29,6 +34,9 @@ const request = ref(null)
 const check = ref(null)
 const loading = ref(true)
 const error = ref('')
+const accepting = ref(false)
+const acceptError = ref('')
+const accepted = ref([])
 
 const summary = computed(() => summariseCheck(check.value))
 const techRequirements = computed(() => {
@@ -42,6 +50,12 @@ const lines = computed(() =>
     technical_requirements: techRequirements.value.get(item.equipment_type_id)?.technical_requirements ?? null,
   })),
 )
+
+// Same preconditions as rule_equipment_request_accept: pending, and the
+// event still in planning. Whether there is ENOUGH stock is separate: it
+// only enables or disables the button.
+const canDecide = computed(() => request.value?.status === 'pending' && request.value?.event_status === 'planning')
+const canAccept = computed(() => canDecide.value && check.value?.all_sufficient === true)
 
 async function load() {
   loading.value = true
@@ -58,6 +72,20 @@ async function load() {
     error.value = requestError.message
   } finally {
     loading.value = false
+  }
+}
+
+async function accept() {
+  acceptError.value = ''
+  accepting.value = true
+  try {
+    const result = await apiPost(`/equipment/requests/${route.params.requestId}/accept`, {})
+    accepted.value = result.allocated ?? []
+    await load()
+  } catch (requestError) {
+    acceptError.value = requestError.message
+  } finally {
+    accepting.value = false
   }
 }
 
@@ -121,9 +149,29 @@ onMounted(load)
             </div>
           </section>
 
-          <p class="hint">
-            This screen only checks availability. Accepting or rejecting the request is not part of it yet.
-          </p>
+          <section v-if="canDecide" class="card" aria-labelledby="decision-heading">
+            <h2 id="decision-heading" class="card-title">Your decision</h2>
+            <p v-if="!canAccept" class="hint">
+              There is not enough equipment available for this period, so the request can't be accepted yet.
+            </p>
+            <p v-else class="hint">
+              Accepting reserves the units above for this event's date and time and confirms the request.
+            </p>
+            <p v-if="acceptError" class="error" role="alert">{{ acceptError }}</p>
+            <button type="button" class="btn-accept" :disabled="!canAccept || accepting" @click="accept">
+              {{ accepting ? 'Accepting...' : 'Accept request' }}
+            </button>
+          </section>
+
+          <section v-if="accepted.length" class="card" aria-labelledby="reserved-heading">
+            <h2 id="reserved-heading" class="card-title">Reserved for this event</h2>
+            <ul class="reserved">
+              <li v-for="group in accepted" :key="group.equipment_type_id">
+                <strong>{{ group.type }}</strong> &times; {{ group.quantity }}:
+                {{ group.units.map((unit) => unit.asset_tag).join(', ') }}
+              </li>
+            </ul>
+          </section>
         </template>
       </div>
     </main>
@@ -165,4 +213,11 @@ onMounted(load)
 .status-pending { color: #8a6d00; background: #fff4c2; }
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-rejected { color: #b42318; background: #fde8e6; }
+.error { margin: 0; font-size: 13px; color: #a33f3f; }
+.btn-accept {
+  align-self: flex-start; min-height: 40px; padding: 0 18px; border: none; border-radius: 4px;
+  background: #2568e8; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.btn-accept:disabled { background: #b9c7e6; cursor: not-allowed; }
+.reserved { margin: 0; padding-left: 18px; font-size: 14px; color: #2a2a2a; display: flex; flex-direction: column; gap: 4px; }
 </style>

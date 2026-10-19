@@ -688,6 +688,22 @@ def rule_equipment_request_create(user: Any, event: Any) -> Decision:
     return Decision.ALLOW
 
 
+def rule_equipment_request_accept(user: Any, request: Any) -> Decision:
+    """Accept an equipment request and reserve stock (IS-19). Technical
+    Support Staff only (anyone else gets the same 404 as the availability
+    check). The AC: "Only requests in a 'pending' status can be accepted".
+    Also only while the request's event is still in planning: a request on
+    a cancelled event (or one that has moved on) must not take stock, and
+    the safety-review gate already requires no pending request by then."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) != "planning":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 def rule_equipment_type_list(user: Any, resource: Any = None) -> Decision:
     """The equipment catalogue (kinds, not units) is what a coordinator
     picks from on the request form; Technical Support Staff see it too.

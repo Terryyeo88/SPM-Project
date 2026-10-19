@@ -449,3 +449,22 @@ planning. Unit tests: `test_equipment_create_request.py` (service),
 | (design) A request is for the session's own window | `test_equipment_create_request.py::test_needed_period_is_the_sessions_own_window_in_singapore_time`, `::test_session_with_no_times_needs_equipment_all_day` | `booking_service._event_window` |
 | (design) No half-created request | `test_equipment_create_request.py::test_request_row_is_deleted_if_its_lines_cannot_be_saved` | compensating delete in `create_request` |
 | (design) Coordinators can read the type catalogue | `test_authz_equipment_create.py` (type list), `test_equipment_create_routes.py` (types) | `GET /equipment/types`, `rule_equipment_type_list` |
+
+## Sprint 3 — Accept an Equipment Request and Reserve Stock (IS-19, Nawaz)
+
+Source: the Reservation story's first AC. Unit tests:
+`test_equipment_accept.py` (service), `test_authz_equipment_accept.py`
+(rule), `test_equipment_accept_routes.py` (route). Frontend:
+`views/equipment/EquipmentRequestDetailView.test.js`. Not tested against a
+real database.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| "Accepting a request changes its status to confirmed" | `test_equipment_accept.py::test_accept_reserves_one_row_per_unit_and_confirms_the_request`, `::test_reserves_the_reservations_before_flipping_the_status`, `test_equipment_accept_routes.py::test_technical_staff_accept_returns_the_confirmed_request` | `POST /equipment/requests/<id>/accept`, `equipment_service.accept_request` |
+| "Available quantity for that equipment is reduced by the reserved amount, scoped to the event's date and time" | `test_equipment_accept.py::test_each_reservation_copies_the_requests_period`, `::test_skips_units_held_for_an_overlapping_event_and_units_out_of_service`, `::test_a_unit_returned_when_the_request_starts_is_free` | one `equipment_reservations` row per unit copying `needed_start`/`needed_end`; availability is counted, not stored |
+| "Only requests in a pending status can be accepted" | `test_authz_equipment_accept.py::test_only_a_pending_request_can_be_accepted`, `test_equipment_accept_routes.py::test_an_already_confirmed_request_is_403`, `::test_a_second_accept_racing_the_first_releases_what_it_reserved` (guard) | `rule_equipment_request_accept`; status update conditioned on `pending` |
+| (design) Technical Support only | `test_authz_equipment_accept.py::test_other_roles_cannot_accept_and_get_a_404`, `test_equipment_accept_routes.py::test_a_coordinator_cannot_accept` | `rule_equipment_request_accept` |
+| (design) Not for a request whose event has left planning | `test_authz_equipment_accept.py::test_a_request_is_only_accepted_while_its_event_is_in_planning`, `test_equipment_accept_routes.py::test_a_cancelled_events_request_is_403` | `get_request` carries `event_status`; the rule checks it |
+| (design) Accepted whole or not at all; says what is short | `test_equipment_accept.py::test_refuses_when_there_is_not_enough_and_says_what_is_short`, `::test_one_short_line_means_nothing_is_reserved_for_any_line` (guard) | `accept_request` checks every line before writing |
+| (design) Two requests cannot take the same unit | `test_equipment_accept.py::test_the_exclusion_constraint_refusing_a_unit_is_a_clear_error`, `::test_a_failure_flipping_the_status_also_releases_the_units` | exclusion constraint `equipment_reservations_no_unit_overlap`; clean-up in `accept_request` |
+| Technical Support can accept from the request page and sees what was reserved | `EquipmentRequestDetailView.test.js` ("accepting the request": enabled/disabled button, no decision once decided, accepts and lists units, shows the server error) | `EquipmentRequestDetailView.vue` "Your decision" and "Reserved for this event" |
