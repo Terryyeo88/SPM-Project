@@ -753,3 +753,29 @@ through real `transition()` history; an irrelevant change or an organiser's
 request tells nobody; a venue swap is told and rebooking the same venue is
 not, against real `venue_bookings` / `venue_booking_status_log`.
 
+## Sprint 4 — Withdrawal of Equipment Booking (IS-66, Nawaz)
+
+Source: IS-66's one acceptance criterion ("Allow for deletion of equipment
+booking request when it is pending and once it has been accepted"), plus a
+teammate's request that the coordinator can then ask again for a different date
+and time. Unit tests: `test_equipment_cancel.py` (service), `test_authz_equipment_cancel.py`
+(rule), `test_equipment_cancel_routes.py` (route). Frontend:
+`EquipmentChangeRequests.test.js` ("cancelling the booking"),
+`EquipmentBookingStatus.test.js`, `equipment.test.js`,
+`EquipmentRequestDetailView.test.js`. Needs migration
+`20261102000000_equipment_request_cancel.sql`. Not tested against a real
+database.
+
+| Requirement | Test | Implementation |
+|---|---|---|
+| IS-66: "Allow for deletion of equipment booking request when it is pending ..." | `test_equipment_cancel.py::test_cancelling_a_pending_request_just_marks_it_cancelled`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[pending]`, `EquipmentBookingStatus.test.js::offers only Cancel (no quantity form, no history call) for a request that is still pending`, `EquipmentChangeRequests.test.js::works for a pending request, without loading quantity changes or offering the form` | `cancel_request`: the request moves to `cancelled` (see open-questions: "deletion" read as withdrawal) |
+| IS-66: "... and once it has been accepted" | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[confirmed]`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | a confirmed request's reservation rows are deleted, which frees its units |
+| The coordinator can cancel an equipment booking | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `::test_cancelling_a_pending_request_just_marks_it_cancelled`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | `POST /equipment/requests/<id>/cancel`, `equipment_service.cancel_request`, "Cancel this booking" under each pending/confirmed request |
+| ...so a new request can be made for a different date and time | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses` (units freed), `EquipmentBookingStatus.test.js` (the list reloads) | reservation rows deleted; "Request more equipment" still shown |
+| Only the coordinator who raised it, only while the event is live | `test_authz_equipment_cancel.py` (all), `test_equipment_cancel_routes.py` | `rule_equipment_request_cancel` |
+| Not for a request already decided against or cancelled | `test_authz_equipment_cancel.py::test_a_request_that_is_already_over_cannot_be_cancelled`, `test_equipment_cancel.py::test_a_request_that_is_already_over_is_refused` | status check in the rule and the service |
+| (design) A racing accept/reject wins; nothing freed | `test_equipment_cancel.py::test_the_status_update_is_conditional_so_a_racing_decision_wins` (hand-mutated: removing the condition fails it) | update conditioned on the status read |
+| (design) A failure freeing the units leaves the request as it was | `test_equipment_cancel.py::test_a_failure_freeing_the_units_puts_the_status_back` (hand-mutated: removing the restore fails it) | status restored in `cancel_request` |
+| (design) A waiting quantity change is dropped, and cannot be accepted | `test_equipment_cancel.py::test_a_waiting_quantity_change_is_rejected_with_a_reason_and_others_are_untouched`, `test_authz_equipment_cancel.py::test_a_change_on_a_cancelled_request_cannot_be_accepted_but_can_be_rejected` | change requests rejected in `cancel_request`; `rule_equipment_change_accept` checks `request_status` |
+| (design) Two clicks, so a mis-click cannot release units | `EquipmentChangeRequests.test.js::asks for a second click before cancelling, and Keep it backs out` | inline confirmation in `EquipmentChangeRequests.vue` |
+| Cancelled requests are visible, not hidden | `equipment.test.js` (Cancelled tab), `EquipmentBookingStatus.test.js::offers no Cancel for a rejected or already cancelled request` | `REQUEST_TABS`, `.status-cancelled` |

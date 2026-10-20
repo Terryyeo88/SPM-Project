@@ -271,6 +271,7 @@ onMounted(load)
 .status-pending { color: #8a6d00; background: #fff4c2; }
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-rejected { color: #b42318; background: #fde8e6; }
+.status-cancelled { color: #6a6a6a; background: #eeeeee; }
 .error { margin: 0; font-size: 13px; color: #a33f3f; }
 .btn-accept {
   align-self: flex-start; min-height: 40px; padding: 0 18px; border: none; border-radius: 4px;

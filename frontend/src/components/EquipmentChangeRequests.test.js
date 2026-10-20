@@ -107,4 +107,66 @@ describe('EquipmentChangeRequests', () => {
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toContain('boom')
   })
+
+  // Cancel the booking so the coordinator can ask again for another date/time
+  describe('cancelling the booking', () => {
+    const PENDING_REQUEST = { ...REQUEST, status: 'pending' }
+
+    it('shows which booking this is, with its items and when it is needed', async () => {
+      const wrapper = await render([], {
+        request: { ...REQUEST, needed_start: '2026-12-01T09:00:00+08:00', needed_end: '2026-12-01T13:00:00+08:00' },
+      })
+      const title = wrapper.find('.manage-title').text()
+      expect(title).toContain('2 × projector, 1 × microphone')
+      expect(title).toContain('01 Dec 2026, 09:00 – 13:00')
+    })
+
+    it('asks for a second click before cancelling, and Keep it backs out', async () => {
+      const wrapper = await render()
+      await wrapper.find('.btn-cancel').trigger('click')
+      expect(apiPost).not.toHaveBeenCalled()
+      expect(wrapper.find('.cancel-warning').text()).toContain('reserved equipment is released')
+      const keep = wrapper.findAll('.cancel-confirm button')[1]
+      await keep.trigger('click')
+      expect(wrapper.find('.cancel-confirm').exists()).toBe(false)
+      expect(wrapper.find('.btn-cancel').exists()).toBe(true)
+    })
+
+    it('cancels on the second click and tells the page', async () => {
+      apiPost.mockResolvedValue({ status: 'cancelled' })
+      const wrapper = await render()
+      await wrapper.find('.btn-cancel').trigger('click')
+      await wrapper.find('.btn-cancel-confirm').trigger('click')
+      await flushPromises()
+      expect(apiPost).toHaveBeenCalledWith('/equipment/requests/req-1/cancel', {})
+      expect(wrapper.emitted('cancelled')).toHaveLength(1)
+    })
+
+    it('works for a pending request, without loading quantity changes or offering the form', async () => {
+      apiPost.mockResolvedValue({ status: 'cancelled' })
+      const wrapper = await render([], { request: PENDING_REQUEST })
+      expect(apiGet).not.toHaveBeenCalled()
+      expect(wrapper.find('.change-form').exists()).toBe(false)
+      await wrapper.find('.btn-cancel').trigger('click')
+      expect(wrapper.find('.cancel-warning').text()).not.toContain('reserved equipment')
+      await wrapper.find('.btn-cancel-confirm').trigger('click')
+      await flushPromises()
+      expect(apiPost).toHaveBeenCalledWith('/equipment/requests/req-1/cancel', {})
+    })
+
+    it('shows the server error and does not tell the page', async () => {
+      apiPost.mockRejectedValue(new Error('This request changed while you were cancelling it'))
+      const wrapper = await render()
+      await wrapper.find('.btn-cancel').trigger('click')
+      await wrapper.find('.btn-cancel-confirm').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[role="alert"]').text()).toContain('changed while you were cancelling')
+      expect(wrapper.emitted('cancelled')).toBeUndefined()
+    })
+
+    it('offers no Cancel once the event is no longer live', async () => {
+      const wrapper = await render([], { canChange: false })
+      expect(wrapper.find('.btn-cancel').exists()).toBe(false)
+    })
+  })
 })

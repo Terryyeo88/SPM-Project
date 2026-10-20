@@ -19,21 +19,23 @@ import {
 } from './equipment'
 
 describe('groupRequestsByTab', () => {
-  it('splits requests by status into the three tabs', () => {
+  it('splits requests by status into the tabs', () => {
     const groups = groupRequestsByTab([
       { id: 'a', status: 'pending' },
       { id: 'b', status: 'confirmed' },
       { id: 'c', status: 'rejected' },
       { id: 'd', status: 'pending' },
+      { id: 'e', status: 'cancelled' },
     ])
     expect(groups.pending.map((r) => r.id)).toEqual(['a', 'd'])
     expect(groups.confirmed.map((r) => r.id)).toEqual(['b'])
     expect(groups.rejected.map((r) => r.id)).toEqual(['c'])
+    expect(groups.cancelled.map((r) => r.id)).toEqual(['e'])
   })
 
   it('returns empty groups for no requests, and ignores an unknown status', () => {
-    expect(groupRequestsByTab(undefined)).toEqual({ pending: [], confirmed: [], rejected: [] })
-    expect(groupRequestsByTab([{ id: 'x', status: 'weird' }])).toEqual({ pending: [], confirmed: [], rejected: [] })
+    expect(groupRequestsByTab(undefined)).toEqual({ pending: [], confirmed: [], rejected: [], cancelled: [] })
+    expect(groupRequestsByTab([{ id: 'x', status: 'weird' }])).toEqual({ pending: [], confirmed: [], rejected: [], cancelled: [] })
   })
 
   it('isRequestTab accepts exactly the tab keys', () => {

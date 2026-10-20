@@ -2335,3 +2335,67 @@ Each guard broken once, confirmed caught, restored:
 - Bookmarks (a separate story).
 - Reminders before an event.
 
+## Withdrawal of Equipment Booking (IS-66, Nawaz, Sprint 4)
+
+Source: IS-66, whose one criterion is "Allow for deletion of equipment
+booking request when it is pending and once it has been accepted", and a
+teammate's feedback on the Equipment Booking section: "allow the coordinator
+to cancel the equipment booking as well so the coordinator can make a new
+request for equipment at a different date and time if needed". The story says
+little, so these are the calls made; each is flagged in `open-questions.md`
+for confirmation.
+
+### Cancelled is a status, not a delete
+
+IS-66 says "deletion". Read as withdrawal: the request leaves the live queue
+and the coordinator can ask again, which is what the story is for. A request moves to `cancelled` and stays in the event's history, the same
+choice IS-9 made for venue bookings (`20261019300000_venue_booking_cancel.sql`).
+Deleting the row would also cascade away its items, reservations and any
+quantity-change history, and the coordinator could no longer see that a
+booking existed. The cost is one new enum value
+(`20261102000000_equipment_request_cancel.sql`).
+
+### Cancelling is what frees the units
+
+Availability is counted from `equipment_reservations` rows, never stored
+(design-decisions "Conventions this relies on"). So cancelling a confirmed
+request deletes its reservation rows and nothing else needs updating: the
+units are free for other events the moment the rows are gone. The same
+convention is why the new `cancelled` status needs no change to the
+availability arithmetic, the event page's allocated list (confirmed only) or
+the change-impact checks (pending/confirmed only).
+
+### Who and when
+
+- The coordinator who raised the request (the same person who can view it);
+  404 for anyone else, matching `equipment_request.view`.
+- A **pending** request can be cancelled too: the coordinator changed their
+  mind before Technical Support decided. Technical Support's queue loses it
+  and it shows under a new Cancelled tab.
+- Only while the event is `planning`, `safety_review` or `confirmed` (the
+  same window as IS-43 quantity changes). A cancelled event's equipment is
+  already released by the Release Equipment on Cancel story.
+- 403 (not 404) for a rejected or already cancelled request, or a closed
+  event: the caller can see the request, the action just is not available.
+
+### Racing a decision
+
+Cancelling moves the status conditioned on it still being what was read, the
+same guard `accept_request`/`reject_request` use. If Technical Support
+accept or reject the request at the same moment, the cancel matches nothing
+and says so, instead of freeing units that were just reserved or cancelling a
+decided request. If freeing the units fails, the status is put back.
+
+### A waiting quantity change dies with the request
+
+A pending IS-43 change on a cancelled request would sit in Technical
+Support's queue with nothing to change. It is rejected with the reason "The
+equipment request was cancelled.", and `rule_equipment_change_accept` also
+refuses a change whose request is no longer confirmed, so a change cannot be
+accepted even if that update were missed.
+
+### No reason required
+
+IS-9 requires a reason to cancel a venue booking. Nothing here asks for one:
+the coordinator is withdrawing their own request, and nobody has to act on
+the answer. Easy to add (a column plus a text box) if the team wants it.

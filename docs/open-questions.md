@@ -1364,3 +1364,34 @@ Decided and built; worth confirming with the customer:
 - **In-app only.** The email/SMS preferences collected at registration and
   on the profile (IS-68) are stored but not used to send anything yet.
 
+## Withdrawal of Equipment Booking (IS-66, Nawaz, Sprint 4)
+
+Reasoning is in `design-decisions.md` ("Cancel an Equipment Request"). Please
+confirm:
+
+- **Needs a migration.** `20261102000000_equipment_request_cancel.sql` adds
+  `cancelled` to `equipment_request_status`. Apply it in the Supabase SQL
+  Editor before the Cancel button works. It follows the latest on main
+  `20261031000000`; check no open branch picked `20261102000000`.
+- **IS-66 is the story for this.** Its one criterion is "Allow for deletion
+  of equipment booking request when it is pending and once it has been
+  accepted". That is what this builds, for both pending and confirmed
+  requests. Please confirm the next point.
+- **"Deletion" is built as cancelling, not deleting the row.** The request
+  moves to `cancelled` and stays in the event's history (and in Technical
+  Support's Cancelled tab); a confirmed request's reserved units are really
+  deleted, so they are free at once. If the team wants the request row itself
+  gone, that is a hard delete (it would also remove the request's items and
+  quantity-change history) and a one-line change in `cancel_request`.
+- **A pending request can be cancelled too**, not just a confirmed one.
+- **No reason is asked for.** Say if the team wants one, as IS-9 does for
+  venue bookings.
+- **Cancelling is final.** The coordinator asks again with "Request more
+  equipment" rather than reopening the old request, so the history shows
+  both. Technical Support see cancelled requests under a new Cancelled tab.
+- **Technical Support are not told** beyond the existing
+  `_notify_request_decision` print placeholder ("cancelled"). Whether they
+  should be notified when a confirmed request is cancelled belongs with the
+  notification story.
+- **Cancelling the whole event** is unchanged: Release Equipment on Cancel
+  (Justin) still releases everything.

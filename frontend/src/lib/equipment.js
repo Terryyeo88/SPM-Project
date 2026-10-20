@@ -14,6 +14,7 @@ export const REQUEST_TABS = Object.freeze([
   Object.freeze({ key: 'pending', label: 'Pending', statuses: Object.freeze(['pending']) }),
   Object.freeze({ key: 'confirmed', label: 'Confirmed', statuses: Object.freeze(['confirmed']) }),
   Object.freeze({ key: 'rejected', label: 'Rejected', statuses: Object.freeze(['rejected']) }),
+  Object.freeze({ key: 'cancelled', label: 'Cancelled', statuses: Object.freeze(['cancelled']) }),
 ])
 
 /** true if `key` names one of REQUEST_TABS (used to validate the ?tab= query param). */
@@ -21,7 +22,7 @@ export function isRequestTab(key) {
   return REQUEST_TABS.some((tab) => tab.key === key)
 }
 
-/** Splits requests into { pending: [], confirmed: [], rejected: [] }. */
+/** Splits requests into { pending: [], confirmed: [], rejected: [], cancelled: [] }. */
 export function groupRequestsByTab(requests) {
   const groups = Object.fromEntries(REQUEST_TABS.map((tab) => [tab.key, []]))
   for (const request of requests ?? []) {
@@ -241,3 +242,7 @@ export function validateChangeQuantity(raw, current) {
 export function describeChange(change) {
   return `${change.type}: ${change.old_quantity} → ${change.new_quantity}`
 }
+
+// Cancelling an equipment request (rule_equipment_request_cancel): the
+// coordinator can withdraw a pending request or give back a confirmed one.
+export const CANCELLABLE_REQUEST_STATUSES = ['pending', 'confirmed']

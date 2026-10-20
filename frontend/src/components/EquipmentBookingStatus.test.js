@@ -168,10 +168,30 @@ describe('EquipmentBookingStatus', () => {
       expect(wrapper.find('.change-form').exists()).toBe(false)
     })
 
-    it('offers nothing for a request that is still pending', async () => {
+    it('offers only Cancel (no quantity form, no history call) for a request that is still pending', async () => {
       const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
-      expect(wrapper.find('.changes').exists()).toBe(false)
+      expect(wrapper.find('.changes').exists()).toBe(true)
+      expect(wrapper.find('.btn-cancel').exists()).toBe(true)
+      expect(wrapper.find('.change-form').exists()).toBe(false)
       expect(apiGet).not.toHaveBeenCalledWith('/equipment/requests/req-2/change-requests')
+    })
+
+    it('offers no Cancel for a rejected or already cancelled request', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [
+        { ...pendingRequest, id: 'req-3', status: 'rejected' },
+        { ...pendingRequest, id: 'req-4', status: 'cancelled' },
+      ])
+      expect(wrapper.find('.changes').exists()).toBe(false)
+      const statuses = wrapper.findAll('.status').map((pill) => pill.text())
+      expect(statuses).toEqual(['Rejected', 'Cancelled'])
+    })
+
+    it('reloads the list after a request is cancelled', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
+      const loadsBefore = apiGet.mock.calls.length
+      await wrapper.findComponent({ name: 'EquipmentChangeRequests' }).vm.$emit('cancelled')
+      await flushPromises()
+      expect(apiGet.mock.calls.length).toBeGreaterThan(loadsBefore)
     })
   })
 })
