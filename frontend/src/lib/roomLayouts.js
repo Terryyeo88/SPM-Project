@@ -37,6 +37,16 @@ export function roomLayoutOptions(active, kept) {
   return options
 }
 
+/**
+ * Why a draft or rejected session's layout is empty, when Venue Staff
+ * disabled or deleted the layout it had (the database clears it and keeps
+ * the name in room_layout_removed). '' once a layout is chosen again.
+ */
+export function removedLayoutNotice(session) {
+  if (session.room_layout || !session.room_layout_removed) return ''
+  return `The room layout "${session.room_layout_removed}" is no longer available, so it has been removed from this session. Please choose a new room layout.`
+}
+
 // -- Venue Staff: managing layouts (RoomLayoutsView) ------------------------
 
 /** Every layout, soft-deleted ones included ({room_layout_id, name, is_active}). */
@@ -45,5 +55,5 @@ export const createRoomLayout = (name) => apiPost('/room-layouts', { name })
 export const renameRoomLayout = (id, name) => apiPost(`/room-layouts/${id}`, { name })
 export const softDeleteRoomLayout = (id) => apiDelete(`/room-layouts/${id}`)
 export const restoreRoomLayout = (id) => apiPost(`/room-layouts/${id}/restore`, {})
-/** Refused (409) unless soft-deleted and every event using it is completed or cancelled. */
+/** Refused (409) unless soft-deleted and every event using it is completed, cancelled or rejected. */
 export const deleteRoomLayout = (id) => apiDelete(`/room-layouts/${id}/permanent`)

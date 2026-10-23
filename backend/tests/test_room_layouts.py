@@ -1,11 +1,25 @@
-"""Room layouts managed by Venue Staff: who may read and manage them, the
-routes, the service's handling of database refusals, and how event
-validation treats active vs soft-deleted layouts.
+"""Room layouts managed by Venue Staff -- IS-60 Venue Categories.
 
-The database's own rules (permanent delete only once soft-deleted and no
-live event uses it, names kept on events, renames reaching events and
-venues) are tested against a real database in
-test_room_layouts_integration.py.
+Story: "As a Venue staff, I want to record what type of venues are
+available so that I can properly categorize the venues." Venue categories
+are the room layouts (theatre, classroom, ...): the `room_layouts` table,
+`/room-layouts` routes and app/room_layouts/room_layout_service.py.
+Disabling a category is its soft delete (is_active = false).
+
+  AC1  Venue Staff create a category.
+  AC2  Venue Staff edit a category.
+  AC3  A category can be disabled while ongoing events use it.
+  AC4  A category must be disabled before it can be permanently deleted.
+  AC5  A disabled category can be permanently deleted once no ongoing event
+       (one not completed, cancelled or rejected) uses it.
+
+Also: who may list categories, and how event validation (drafts,
+submission, change requests, a stale form) treats active vs disabled ones.
+
+These run against the in-memory FakeSupabase. The database's own rules
+(permanent delete only once disabled and no ongoing event uses it, names
+kept on events, renames reaching events and venues) are tested against a
+real database in test_room_layouts_integration.py.
 """
 
 from __future__ import annotations
@@ -51,16 +65,30 @@ def test_only_venue_staff_manage_layouts(role, allowed):
     assert can(make_user([role]), actions.ROOM_LAYOUT_MANAGE) is allowed
 
 
-# -- routes --------------------------------------------------------------------
+# Not completed, cancelled or rejected. Drafts and rejected sessions are with
+# their organiser to fix: disabling a category clears it from them (database
+# trigger), so they never hold one up.
+ONGOING_STATUSES = ["submitted", "under_review", "approved", "planning", "safety_review", "confirmed"]
+NON_STAFF_ROLES = [
+    "event_organizer",
+    "event_coordinator",
+    "event_coordinator_lead",
+    "safety_officer",
+    "attendee",
+]
 
 
-def _layout(room_layout_id, name, is_active=True):
+def _category(room_layout_id, name, is_active=True):
     return {"room_layout_id": room_layout_id, "name": name, "is_active": is_active}
 
 
+def _db_error(code, message="refused"):
+    return APIError({"message": message, "code": code, "hint": None, "details": None})
+
+
 class _RefusingSupabase(FakeSupabase):
-    """FakeSupabase whose `refuse_op` queries raise `error`, the way the real
-    database refuses through a constraint or trigger."""
+    """FakeSupabase whose `refuse_op` queries on room_layouts raise `error`,
+    the way the real database refuses through a constraint or trigger."""
 
     def __init__(self, rows, refuse_op, error):
         super().__init__()
@@ -72,7 +100,7 @@ class _RefusingSupabase(FakeSupabase):
         execute = query.execute
 
         def refusing_execute():
-            if query.op == self.refuse_op:
+            if name == "room_layouts" and query.op == self.refuse_op:
                 raise self.error
             return execute()
 
@@ -80,18 +108,38 @@ class _RefusingSupabase(FakeSupabase):
         return query
 
 
-def _db_error(code, message="refused"):
-    return APIError({"message": message, "code": code, "hint": None, "details": None})
+class _CategoriesSupabase(FakeSupabase):
+    """FakeSupabase that fills in room_layouts.is_active on insert, as the
+    column's database default (true) does."""
+
+    def table(self, name):
+        query = super().table(name)
+        insert = query.insert
+
+        def insert_with_default(payload):
+            return insert({"is_active": True, **payload} if name == "room_layouts" else payload)
+
+        query.insert = insert_with_default
+        return query
+
+
+# Event validation's real lookup of the categories table; conftest's autouse
+# _seeded_room_layouts replaces it with a fixed list for every unit test.
+_REAL_ROOM_LAYOUTS = event_service._room_layouts
 
 
 @pytest.fixture
-def layouts_db(monkeypatch):
-    fake = FakeSupabase()
+def categories_db(monkeypatch):
+    """theatre is active, banquet is disabled. Event validation reads the
+    same table (event_service -> list_room_layouts), so the effect of a
+    change on what events may pick is visible through this fake too."""
+    fake = _CategoriesSupabase()
     fake.tables["room_layouts"] = [
-        _layout("theatre-id", "theatre"),
-        _layout("banquet-id", "banquet", is_active=False),
+        _category("theatre-id", "theatre"),
+        _category("banquet-id", "banquet", is_active=False),
     ]
     monkeypatch.setattr(service, "supabase", fake)
+    monkeypatch.setattr(event_service, "_room_layouts", _REAL_ROOM_LAYOUTS)
     return fake
 
 
@@ -113,110 +161,241 @@ def api(client, signing_key, monkeypatch):
     return call
 
 
-def _names(response):
-    return [row["name"] for row in response.get_json()]
+def _listed(api, roles=("venue_staff",), include_inactive=True):
+    path = "/room-layouts?include_inactive=true" if include_inactive else "/room-layouts"
+    return {row["name"]: row["is_active"] for row in api("GET", path, list(roles)).get_json()}
 
 
-def test_list_shows_only_active_layouts_by_default(api, layouts_db):
-    response = api("GET", "/room-layouts", ["event_organizer"])
-
-    assert response.status_code == 200
-    assert _names(response) == ["theatre"]
-
-
-def test_venue_staff_can_include_soft_deleted_layouts(api, layouts_db):
-    response = api("GET", "/room-layouts?include_inactive=true", ["venue_staff"])
-
-    assert response.status_code == 200
-    assert _names(response) == ["banquet", "theatre"]
+def _choose(name, current=None):
+    """Validates an event session picking category `name`."""
+    return event_service.validate_event_payload(
+        {"name": "Talk", "room_layout": name}, for_submission=False, current_room_layout=current
+    )
 
 
-def test_only_venue_staff_may_see_soft_deleted_layouts(api, layouts_db):
-    assert api("GET", "/room-layouts?include_inactive=true", ["event_organizer"]).status_code == 403
+def _stored(db):
+    return [dict(row) for row in db.tables["room_layouts"]]
 
 
-def test_venue_staff_add_a_layout(api, layouts_db):
-    response = api("POST", "/room-layouts", ["venue_staff"], {"name": "  u-shape  "})
+# -- AC1: Venue Staff create a category ------------------------------------------
+
+
+def test_ac1_venue_staff_create_a_category(api, categories_db):
+    response = api("POST", "/room-layouts", ["venue_staff"], {"name": "  U-shape  "})
 
     assert response.status_code == 201
-    assert response.get_json()["name"] == "u-shape"  # trimmed
-    assert "u-shape" in [row["name"] for row in layouts_db.tables["room_layouts"]]
+    created = response.get_json()
+    assert created["name"] == "U-shape"  # trimmed
+    assert created["is_active"] is True
+    assert created["room_layout_id"]
+
+
+def test_ac1_a_new_category_is_offered_to_organisers_and_can_be_chosen(api, categories_db):
+    api("POST", "/room-layouts", ["venue_staff"], {"name": "u-shape"})
+
+    assert "u-shape" in _listed(api, ["event_organizer"], include_inactive=False)
+    assert _choose("u-shape")["room_layout"] == "u-shape"
 
 
 @pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("POST", "/room-layouts"),
-        ("POST", "/room-layouts/theatre-id"),
-        ("DELETE", "/room-layouts/theatre-id"),
-        ("POST", "/room-layouts/theatre-id/restore"),
-        ("DELETE", "/room-layouts/theatre-id/permanent"),
-    ],
+    "body",
+    [None, {}, {"name": ""}, {"name": "   "}, {"name": 5}, {"name": None}, {"name": "x", "is_active": False}, ["x"]],
+    ids=["no-body", "empty", "blank", "whitespace", "number", "null", "extra-field", "list"],
 )
-def test_other_roles_cannot_change_layouts(api, layouts_db, method, path):
-    before = [dict(row) for row in layouts_db.tables["room_layouts"]]
+def test_ac1_a_category_needs_a_non_blank_name(api, categories_db, body):
+    before = _stored(categories_db)
 
-    response = api(method, path, ["event_organizer", "event_coordinator"], {"name": "u-shape"})
+    response = api("POST", "/room-layouts", ["venue_staff"], body)
 
-    assert response.status_code == 403
-    assert layouts_db.tables["room_layouts"] == before
-
-
-@pytest.mark.parametrize("body", [{}, {"name": "   "}, {"name": 5}, {"name": "x", "is_active": False}, ["x"]])
-def test_adding_a_layout_needs_just_a_name(api, layouts_db, body):
-    assert api("POST", "/room-layouts", ["venue_staff"], body).status_code == 400
+    assert response.status_code == 400
+    assert _stored(categories_db) == before
 
 
-def test_adding_a_duplicate_name_is_a_409_that_mentions_restoring(api, monkeypatch):
+def test_ac1_a_duplicate_name_is_refused_and_points_to_restoring(api, monkeypatch):
+    """The unique index is case-insensitive, and the clash may be with a
+    disabled category the user can't pick -- so the message says to
+    restore it."""
     monkeypatch.setattr(service, "supabase", _RefusingSupabase([], "insert", _db_error("23505")))
 
     response = api("POST", "/room-layouts", ["venue_staff"], {"name": "Banquet"})
 
     assert response.status_code == 409
-    assert "restore it" in response.get_json()["error"]["message"]
+    assert response.get_json()["error"]["message"] == (
+        'A room layout named "Banquet" already exists. If it was deleted, restore it instead.'
+    )
 
 
-def test_venue_staff_rename_a_layout(api, layouts_db):
-    response = api("POST", "/room-layouts/theatre-id", ["venue_staff"], {"name": "theatre style"})
+@pytest.mark.parametrize("role", NON_STAFF_ROLES)
+def test_ac1_only_venue_staff_create_a_category(api, categories_db, role):
+    before = _stored(categories_db)
+
+    response = api("POST", "/room-layouts", [role], {"name": "u-shape"})
+
+    assert response.status_code == 403
+    assert _stored(categories_db) == before
+
+
+def test_ac1_creating_needs_a_signed_in_user(client, categories_db):
+    assert client.post("/room-layouts", json={"name": "u-shape"}).status_code == 401
+
+
+# -- AC2: Venue Staff edit a category ----------------------------------------------
+
+
+def test_ac2_venue_staff_rename_a_category(api, categories_db):
+    response = api("POST", "/room-layouts/theatre-id", ["venue_staff"], {"name": " Theatre Style "})
 
     assert response.status_code == 200
-    assert response.get_json()["name"] == "theatre style"
+    assert response.get_json() == _category("theatre-id", "Theatre Style")  # same row, trimmed
+    assert _listed(api) == {"Theatre Style": True, "banquet": False}
 
 
-def test_renaming_an_unknown_layout_is_a_404(api, layouts_db):
+def test_ac2_events_pick_the_category_by_its_new_name(api, categories_db):
+    api("POST", "/room-layouts/theatre-id", ["venue_staff"], {"name": "theatre style"})
+
+    assert _choose("theatre style")["room_layout"] == "theatre style"
+    with pytest.raises(ValidationError, match="no longer exists"):
+        _choose("theatre")
+
+
+def test_ac2_editing_a_disabled_category_keeps_it_disabled(api, categories_db):
+    response = api("POST", "/room-layouts/banquet-id", ["venue_staff"], {"name": "gala banquet"})
+
+    assert response.status_code == 200
+    assert response.get_json()["is_active"] is False
+
+
+@pytest.mark.parametrize("body", [{}, {"name": "  "}, {"name": 5}, {"name": "x", "is_active": True}])
+def test_ac2_an_edit_needs_a_non_blank_name_and_changes_nothing_otherwise(api, categories_db, body):
+    before = _stored(categories_db)
+
+    response = api("POST", "/room-layouts/theatre-id", ["venue_staff"], body)
+
+    assert response.status_code == 400
+    assert _stored(categories_db) == before
+
+
+def test_ac2_renaming_onto_another_categorys_name_is_refused(api, monkeypatch):
+    fake = _RefusingSupabase([_category("theatre-id", "theatre")], "update", _db_error("23505"))
+    monkeypatch.setattr(service, "supabase", fake)
+
+    response = api("POST", "/room-layouts/theatre-id", ["venue_staff"], {"name": "banquet"})
+
+    assert response.status_code == 409
+    assert "already exists" in response.get_json()["error"]["message"]
+
+
+def test_ac2_editing_an_unknown_category_is_a_404(api, categories_db):
     assert api("POST", "/room-layouts/nope", ["venue_staff"], {"name": "x"}).status_code == 404
 
 
-def test_soft_delete_and_restore(api, layouts_db):
-    deleted = api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
-    assert deleted.status_code == 200
-    assert deleted.get_json()["is_active"] is False
+@pytest.mark.parametrize("role", NON_STAFF_ROLES)
+def test_ac2_only_venue_staff_edit_a_category(api, categories_db, role):
+    before = _stored(categories_db)
 
-    restored = api("POST", "/room-layouts/theatre-id/restore", ["venue_staff"])
-    assert restored.status_code == 200
-    assert restored.get_json()["is_active"] is True
+    response = api("POST", "/room-layouts/theatre-id", [role], {"name": "renamed"})
 
-
-def test_permanent_delete_of_a_soft_deleted_layout(api, layouts_db):
-    response = api("DELETE", "/room-layouts/banquet-id/permanent", ["venue_staff"])
-
-    assert response.status_code == 204
-    assert [row["name"] for row in layouts_db.tables["room_layouts"]] == ["theatre"]
+    assert response.status_code == 403
+    assert _stored(categories_db) == before
 
 
-def test_permanent_delete_of_an_active_layout_is_refused(api, layouts_db):
+# -- AC3: disable a category while ongoing events use it ---------------------------
+
+
+def test_ac3_a_category_used_by_ongoing_events_can_be_disabled(api, categories_db):
+    """Disabling isn't held up by events: one per ongoing status uses
+    theatre, and the soft delete still goes through without touching them.
+    (Drafts lose the category through a database trigger -- integration.)"""
+    categories_db.rows = [
+        {"id": f"event-{status}", "status": status, "room_layout": "theatre", "room_layout_id": "theatre-id"}
+        for status in ONGOING_STATUSES
+    ]
+    events_before = [dict(row) for row in categories_db.rows]
+
+    response = api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
+
+    assert response.status_code == 200
+    assert response.get_json()["is_active"] is False
+    assert categories_db.rows == events_before
+    assert {call["table"] for call in categories_db.calls} == {"room_layouts"}
+
+
+def test_ac3_a_disabled_category_is_no_longer_offered(api, categories_db):
+    api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
+
+    assert "theatre" not in _listed(api, ["event_organizer"], include_inactive=False)
+    assert _listed(api) == {"banquet": False, "theatre": False}  # Venue Staff still see it
+
+
+def test_ac3_a_disabled_category_cannot_be_chosen_for_a_new_event(api, categories_db):
+    api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
+
+    with pytest.raises(ValidationError, match='"theatre" no longer exists'):
+        _choose("theatre")
+
+
+def test_ac3_an_ongoing_event_keeps_its_disabled_category(api, categories_db):
+    api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
+
+    assert _choose("theatre", current="theatre")["room_layout"] == "theatre"
+
+
+def test_ac3_a_disabled_category_can_be_restored(api, categories_db):
+    api("DELETE", "/room-layouts/theatre-id", ["venue_staff"])
+
+    response = api("POST", "/room-layouts/theatre-id/restore", ["venue_staff"])
+
+    assert response.status_code == 200
+    assert response.get_json()["is_active"] is True
+    assert _choose("theatre")["room_layout"] == "theatre"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("DELETE", "/room-layouts/nope"), ("POST", "/room-layouts/nope/restore")],
+)
+def test_ac3_disabling_or_restoring_an_unknown_category_is_a_404(api, categories_db, method, path):
+    assert api(method, path, ["venue_staff"]).status_code == 404
+
+
+@pytest.mark.parametrize("role", NON_STAFF_ROLES)
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("DELETE", "/room-layouts/theatre-id"), ("POST", "/room-layouts/banquet-id/restore")],
+)
+def test_ac3_only_venue_staff_disable_or_restore(api, categories_db, role, method, path):
+    before = _stored(categories_db)
+
+    assert api(method, path, [role]).status_code == 403
+    assert _stored(categories_db) == before
+
+
+@pytest.mark.parametrize("role", NON_STAFF_ROLES)
+def test_ac3_only_venue_staff_see_disabled_categories(api, categories_db, role):
+    assert api("GET", "/room-layouts?include_inactive=true", [role]).status_code == 403
+
+
+# -- AC4: disable before permanently deleting --------------------------------------
+
+
+def test_ac4_an_active_category_cannot_be_permanently_deleted(api, categories_db):
     response = api("DELETE", "/room-layouts/theatre-id/permanent", ["venue_staff"])
 
     assert response.status_code == 409
-    assert "must be soft-deleted" in response.get_json()["error"]["message"]
-    assert [call["op"] for call in layouts_db.calls] == ["select"]  # never attempted
+    assert response.get_json()["error"]["message"] == (
+        'Room layout "theatre" must be soft-deleted before it can be permanently deleted.'
+    )
+    assert [call["op"] for call in categories_db.calls] == ["select"]  # the delete is never sent
+    assert _listed(api)["theatre"] is True
 
 
-def test_permanent_delete_refused_while_live_events_use_it(api, monkeypatch):
-    """The database refuses (trigger, 23503) while an event that isn't
-    completed or cancelled still uses the layout; its message is passed on."""
-    message = 'Room layout "banquet" is still used by 2 event(s) that are not completed or cancelled.'
-    fake = _RefusingSupabase([_layout("banquet-id", "banquet", is_active=False)], "delete", _db_error("23503", message))
+def test_ac4_restored_between_the_check_and_the_delete_is_still_refused(api, monkeypatch):
+    """The database trigger refuses an active category with check_violation
+    (23514) even if it was restored after the service looked."""
+    message = 'Room layout "banquet" must be soft-deleted before it can be permanently deleted.'
+    fake = _RefusingSupabase(
+        [_category("banquet-id", "banquet", is_active=False)], "delete", _db_error("23514", message)
+    )
     monkeypatch.setattr(service, "supabase", fake)
 
     response = api("DELETE", "/room-layouts/banquet-id/permanent", ["venue_staff"])
@@ -225,8 +404,65 @@ def test_permanent_delete_refused_while_live_events_use_it(api, monkeypatch):
     assert response.get_json()["error"]["message"] == message
 
 
-def test_permanent_delete_of_an_unknown_layout_is_a_404(api, layouts_db):
+def test_ac4_disable_then_permanently_delete(api, categories_db):
+    assert api("DELETE", "/room-layouts/theatre-id/permanent", ["venue_staff"]).status_code == 409
+    assert api("DELETE", "/room-layouts/theatre-id", ["venue_staff"]).status_code == 200
+    assert api("DELETE", "/room-layouts/theatre-id/permanent", ["venue_staff"]).status_code == 204
+
+
+# -- AC5: permanent delete once no ongoing event uses it ---------------------------
+
+
+def test_ac5_a_disabled_unused_category_is_permanently_deleted(api, categories_db):
+    response = api("DELETE", "/room-layouts/banquet-id/permanent", ["venue_staff"])
+
+    assert response.status_code == 204
+    assert _listed(api) == {"theatre": True}
+    assert api("POST", "/room-layouts/banquet-id/restore", ["venue_staff"]).status_code == 404
+
+
+def test_ac5_a_permanently_deleted_category_cannot_be_chosen(api, categories_db):
+    api("DELETE", "/room-layouts/banquet-id/permanent", ["venue_staff"])
+
+    with pytest.raises(ValidationError, match="Please refresh the page and choose a new room layout"):
+        _choose("banquet")
+
+
+def test_ac5_refused_while_an_ongoing_event_uses_it(api, monkeypatch):
+    """The database refuses (trigger, 23503) while an event that isn't
+    completed, cancelled or rejected still uses the category; its reason is shown
+    and the category stays."""
+    message = 'Room layout "banquet" is still used by 1 event(s) that are not completed, cancelled or rejected.'
+    fake = _RefusingSupabase(
+        [_category("banquet-id", "banquet", is_active=False)], "delete", _db_error("23503", message)
+    )
+    monkeypatch.setattr(service, "supabase", fake)
+
+    response = api("DELETE", "/room-layouts/banquet-id/permanent", ["venue_staff"])
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["message"] == message
+    assert fake.tables["room_layouts"] == [_category("banquet-id", "banquet", is_active=False)]
+
+
+def test_ac5_any_other_database_error_is_not_reported_as_a_conflict(monkeypatch):
+    fake = _RefusingSupabase([_category("banquet-id", "banquet", is_active=False)], "delete", _db_error("42501"))
+    monkeypatch.setattr(service, "supabase", fake)
+
+    with pytest.raises(APIError):
+        service.delete_room_layout("banquet-id")
+
+
+def test_ac5_permanently_deleting_an_unknown_category_is_a_404(api, categories_db):
     assert api("DELETE", "/room-layouts/nope/permanent", ["venue_staff"]).status_code == 404
+
+
+@pytest.mark.parametrize("role", NON_STAFF_ROLES)
+def test_ac5_only_venue_staff_permanently_delete(api, categories_db, role):
+    before = _stored(categories_db)
+
+    assert api("DELETE", "/room-layouts/banquet-id/permanent", [role]).status_code == 403
+    assert _stored(categories_db) == before
 
 
 # -- event validation against the managed list -----------------------------------
@@ -235,9 +471,7 @@ def test_permanent_delete_of_an_unknown_layout_is_a_404(api, layouts_db):
 @pytest.fixture
 def managed_layouts(monkeypatch):
     """theatre and u-shape (added by Venue Staff) are active; banquet is soft-deleted."""
-    monkeypatch.setattr(
-        event_service, "_room_layouts", lambda: {"theatre": True, "u-shape": True, "banquet": False}
-    )
+    monkeypatch.setattr(event_service, "_room_layouts", lambda: {"theatre": True, "u-shape": True, "banquet": False})
 
 
 def test_a_layout_venue_staff_added_can_be_chosen(managed_layouts):

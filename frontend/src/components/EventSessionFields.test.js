@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
 
 vi.mock('../lib/api', () => ({ apiGet: vi.fn() }))
 
@@ -48,6 +49,26 @@ describe('EventSessionFields -- room layout', () => {
     await wrapper.find('select').setValue('u-shape')
 
     expect(session.room_layout).toBe('u-shape')
+  })
+
+  it('tells the organiser why the layout is empty when Venue Staff removed it', async () => {
+    const session = reactive({ ...emptySession(), room_layout: '', room_layout_removed: 'banquet' })
+    const wrapper = await mountWith(session)
+
+    expect(wrapper.find('select').element.value).toBe('')
+    expect(wrapper.find('[data-test="removed-layout"]').text()).toBe(
+      'The room layout "banquet" is no longer available, so it has been removed from this session. Please choose a new room layout.',
+    )
+
+    await wrapper.find('select').setValue('u-shape')
+
+    expect(wrapper.find('[data-test="removed-layout"]').exists()).toBe(false)
+  })
+
+  it('shows no removed-layout notice for a session that never lost its layout', async () => {
+    const wrapper = await mountWith(emptySession())
+
+    expect(wrapper.find('[data-test="removed-layout"]').exists()).toBe(false)
   })
 
   it('says so when the layouts could not be loaded', async () => {

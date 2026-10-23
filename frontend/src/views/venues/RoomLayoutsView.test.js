@@ -114,7 +114,7 @@ describe('RoomLayoutsView', () => {
 
   it("shows the backend's reason when a permanent delete is refused", async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const refused = new Error('Room layout "banquet" is still used by 2 event(s) that are not completed or cancelled.')
+    const refused = new Error('Room layout "banquet" is still used by 2 event(s) that are not completed, cancelled or rejected.')
     apiDelete.mockRejectedValueOnce(refused)
     const wrapper = await mountView()
 
