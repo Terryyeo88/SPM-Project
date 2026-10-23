@@ -91,6 +91,9 @@ def _get_venue(venue_id: str) -> dict:
     result = supabase.table("venues").select("*").eq("id", venue_id).maybe_single().execute()
     if result is None or not result.data:
         raise ValidationError("venue_id does not reference an existing venue.")
+    if result.data.get("deleted_at"):
+        # IS-61. The database refuses it too (trg_venue_bookings_refuse_deleted_venue).
+        raise ValidationError(f'Venue "{result.data["name"]}" has been deleted from the venue catalogue.')
     return result.data
 
 
@@ -143,25 +146,32 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     booking_start = session_start - timedelta(minutes=setup)
     booking_end = session_end + timedelta(minutes=turnaround)
 
-    result = (
-        supabase.table("venue_bookings")
-        .insert(
-            {
-                "event_id": event.id,
-                "venue_id": venue_id,
-                "status": "pending",
-                "requested_by": requested_by,
-                # Snapshotted at creation time -- see the migration's own
-                # comment on why this isn't re-read from the venue later.
-                "setup_minutes": setup,
-                "turnaround_minutes": turnaround,
-                "booking_start": booking_start.isoformat(),
-                "booking_end": booking_end.isoformat(),
-            }
+    try:
+        result = (
+            supabase.table("venue_bookings")
+            .insert(
+                {
+                    "event_id": event.id,
+                    "venue_id": venue_id,
+                    "status": "pending",
+                    "requested_by": requested_by,
+                    # Snapshotted at creation time -- see the migration's own
+                    # comment on why this isn't re-read from the venue later.
+                    "setup_minutes": setup,
+                    "turnaround_minutes": turnaround,
+                    "booking_start": booking_start.isoformat(),
+                    "booking_end": booking_end.isoformat(),
+                }
+            )
+            .select("*")
+            .execute()
         )
-        .select("*")
-        .execute()
-    )
+    except APIError as exc:
+        # IS-61: the venue was deleted between the check above and the insert
+        # (trg_venue_bookings_refuse_deleted_venue).
+        if exc.code == "23514":
+            raise ValidationError(exc.message) from exc
+        raise
     if not result.data:
         raise ValidationError("The venue booking database operation did not return a booking.")
     booking = result.data[0] if isinstance(result.data, list) else result.data
@@ -355,6 +365,9 @@ def _decide_booking(booking_id: str, booking: SimpleNamespace, to_status: str, d
             raise ValidationError(
                 "This venue already has a confirmed booking overlapping this period -- it cannot be confirmed."
             ) from exc
+        # IS-61: the venue has been deleted (trg_venue_bookings_refuse_deleted_venue).
+        if exc.code == "23514":
+            raise ValidationError(exc.message) from exc
         raise
     if not result.data:
         raise ValidationError("This booking is no longer pending -- refresh to see its current status.")

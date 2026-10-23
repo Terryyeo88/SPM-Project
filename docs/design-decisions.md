@@ -1493,3 +1493,122 @@ Staff can't otherwise tell why the name is taken.
   (not revealing that a resource exists) doesn't apply.
 - `room_layout.list` gives the same 403 to roles that never work with
   layouts (attendee, safety officer).
+
+## CRUD in Venue Catalogue (IS-61, Sprint 3, 2026-10-23)
+
+Story: "As a Venue staff, I want to add, edit and delete venues so that I can
+easily manage what venues ConnectSphere currently has." Built on the existing
+`public.venues` table: `POST /venues` (add), `POST /venues/<id>` (edit),
+`DELETE /venues/<id>` (delete), in `app/venues/venue_service.py`, plus
+migration `20261023100000_venue_catalogue_crud.sql`. Frontend:
+`VenueFormView.vue` (add/edit), the staff actions on `VenueDetailView.vue`,
+and `VenueRemovedAlert.vue` on the coordinator's event page. The calls below
+are flagged in docs/open-questions.md.
+
+### Deleting is a soft delete
+
+`venues.deleted_at` / `deleted_by`, not a `DELETE`:
+
+- `venue_bookings.venue_id` references the venue with no `ON DELETE`, so a
+  real delete is refused while any booking, even a finished event's, points
+  at it. Cascading instead would erase where completed events were held.
+- The booking review page loads a booking's venue by id
+  (`GET /venues/<id>`), which has to keep working for old bookings.
+
+So a deleted venue leaves the catalogue (`GET /venues`), can't be edited
+(409 `venue_deleted`) or booked, but `GET /venues/<id>` still returns it,
+marked deleted. There is no restore: the story doesn't ask for one.
+
+### AC4: what "lose their booking" does
+
+Deleting runs one database function, `delete_venue()`, so the soft delete and
+the releases land together or not at all. Every **pending or confirmed**
+booking of the venue whose event is **ongoing** (not completed, cancelled or
+rejected -- the IS-60 reading) becomes `cancelled`, with
+`released_by_venue_deletion = true` and a `venue_booking_status_log` row
+(changed_by = the Venue Staff member, reason naming the venue). Bookings of
+finished events are left as they were.
+
+- **Pending bookings are released too.** A pending request for a venue that
+  no longer exists can't be approved, and the coordinator needs to know.
+- **Only that venue's bookings.** A session's bookings at other venues stay
+  (IS-9: one arrangement's change doesn't remove the others).
+- **A deleted venue can't be booked or approved against.** The backend says
+  so first; trigger `trg_venue_bookings_refuse_deleted_venue` enforces it, so
+  a request racing the delete is either released by it or refused.
+
+### Confirmed sessions go back to planning
+
+A session can't stay confirmed without the venue it was confirmed with, and a
+coordinator can only book a venue in planning (`rule_venue_booking_create`).
+So a released session that was **confirmed** moves `confirmed -> planning`,
+the edge IS-9 already uses when a confirmed event's details change. It goes
+through `transitions.transition()` (status is only written there), with the
+reason in `event_status_log`, attributed to the Venue Staff member.
+
+A session **under a safety check** (`safety_review`) goes back to planning
+the same way (`safety_review -> planning`). Its pending safety review is
+closed as `changes_requested`, with the reason as the comment
+(`safety_service.withdraw_pending_review`). Left pending, the Safety Officer
+couldn't decide it (the session is no longer in safety_review) and the
+coordinator couldn't resubmit (one pending review per session).
+
+Like every other status change that follows another write here, this step is
+not in the same transaction as `delete_venue()`. A session that moved on in
+between (e.g. was cancelled) is left alone.
+
+### The coordinator's alert
+
+`VenueRemovedAlert.vue`, at the top of the coordinator's event details page,
+shows while the session has a booking released by a venue deletion that
+hasn't been replaced (`lib/venueBookings.js::unreplacedVenueReleases`). It
+names the venue and links to request another. "Replaced" means a pending or
+confirmed booking made after the release (the released row's `updated_at`),
+so it stays up if the session only has older bookings left, and goes once
+the coordinator rebooks. The released booking stays listed under Venue
+Booking, marked as released by the deletion. There is no email or push
+notification: none exists anywhere in the app yet (`_notify_venue_deleted`
+is the same no-op hook as the other `_notify_*` functions).
+
+### Facilities and accessibility provisions are closed lists
+
+The Sprint 1 migration left `facilities` / `accessibility_features` as open
+`text[]`. Now that Venue Staff enter them, the backend only accepts the
+values event sessions ask for (`event_service.EQUIPMENT` /
+`ACCESSIBILITY_NEEDS`). Venue search and the suitability checks compare the
+two lists value for value, so "Wheelchair Access" on a venue would never
+match a session needing `wheelchair_access`. Adding a new facility is now a
+code change rather than a data entry.
+
+### Editing
+
+- Only the fields sent change, but the merged record is re-checked (e.g. one
+  half of the opening hours against the other).
+- A venue keeps a room layout it lists that has since been soft-deleted, but
+  can't newly add one (same rule as event sessions).
+- Changing setup/turnaround minutes doesn't touch existing bookings: each
+  snapshotted them when made (`20261005100000_venue_bookings.sql`). New
+  check constraint `venues_buffers_non_negative`.
+- Lowering capacity, or removing a layout or provision, doesn't re-check
+  existing bookings.
+- The form has no status field. A new venue is added as `available`; an
+  edit never sends the status, so a venue in maintenance stays that way.
+  The API still accepts `status`.
+
+### Operating hours are left out of add and edit
+
+`venues.operating_hours_start/end` (added by IS-11) aren't in the venue form
+or accepted by `POST /venues` / `POST /venues/<id>`. Nothing relies on them:
+bookings, conflict checks and suitability checks ignore them, and the venue
+calendar only shows them as a note. So a venue added here has no set hours
+(both NULL), and an edit leaves a venue's existing hours (the seed data's)
+as they are. The venue page still shows them read-only. If a later story
+needs Venue Staff to set them, add the two fields back with their own rules,
+including whether a venue may close after midnight.
+
+### Who can do it
+
+`venue.create` / `venue.edit` / `venue.delete`, Venue Staff only, 403 for
+everyone else (venues are shared inventory every coordinator can list, so
+there's nothing to hide with a 404). Edit is `POST /venues/<id>`, not PATCH,
+matching `POST /room-layouts/<id>`.

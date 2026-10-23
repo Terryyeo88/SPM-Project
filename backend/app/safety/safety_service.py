@@ -251,6 +251,36 @@ def submit_for_safety_check(event: SimpleNamespace, submitted_by: str) -> dict:
     return {"event": updated_event, "review": review}
 
 
+def withdraw_pending_review(event_id: str, withdrawn_by: str, comment: str) -> dict | None:
+    """IS-61: the session's venue was deleted, so its pending safety check
+    is for arrangements it no longer has. Closed as changes_requested --
+    changes ARE required (a new venue), and Week 7 sends such a session back
+    to planning -- attributed to the Venue Staff member who deleted the
+    venue, with `comment` saying why. The Safety Officer's queue no longer
+    shows it, and the coordinator can resubmit once rebooked (the
+    one-pending-per-session index would otherwise refuse that). Returns the
+    closed review, or None if none was pending."""
+    result = (
+        supabase.table(TABLE)
+        .update(
+            {
+                "status": "changes_requested",
+                "comment": comment,
+                "reviewed_by": withdrawn_by,
+                "reviewed_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        .eq("event_id", event_id)
+        .eq("status", "pending")
+        .select("*")
+        .execute()
+    )
+    withdrawn = _first(result.data or [])
+    if withdrawn:
+        _notify_safety_review(withdrawn, "withdrawn")
+    return withdrawn
+
+
 def _notify_safety_review(review: dict, what: str) -> None:
     """Hook for the Notification System story (later sprint). No-op
     placeholder, same shape as booking_service._notify_booking_decision."""

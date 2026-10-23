@@ -543,6 +543,27 @@ def rule_venue_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue.create / venue.edit / venue.delete (IS-61) -----------------------
+# Source: "As a Venue staff, I want to add, edit and delete venues". Venue
+# Staff only. Everyone else gets 403, not 404: venues are shared inventory
+# every coordinator can already list, so there's no existence to hide (same
+# reasoning as rule_room_layout_manage).
+
+
+def rule_venue_create(user: Any, venue: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_venue_edit(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_create(user, venue)
+
+
+def rule_venue_delete(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_create(user, venue)
+
+
 # -- venue.calendar_view (Nawaz, Sprint 2: IS-11) --------------------------
 # Same event_coordinator/venue_staff pair as rule_venue_view above -- see
 # actions.py's VENUE_CALENDAR_VIEW comment for why this isn't just a

@@ -1,7 +1,12 @@
 """HTTP routes for the venue catalogue (View Venue Catalogue, Nawaz,
 Sprint 1) and venue bookings (Venue Booking Request / Approval, Josiah,
-Sprint 2). Read-only catalogue: GET /venues (list, optionally filtered by
-?status=) and GET /venues/<venue_id> (single record).
+Sprint 2). Catalogue: GET /venues (list, optionally filtered by
+?status=) and GET /venues/<venue_id> (single record). IS-61 (Venue Staff
+only):
+
+  POST   /venues              -- add a venue
+  POST   /venues/<venue_id>   -- edit a venue (only the fields sent change)
+  DELETE /venues/<venue_id>   -- delete it; releases ongoing events' bookings
 
 Booking routes use a static "/bookings" prefix, declared BEFORE the
 catalogue's own dynamic "/<venue_id>" route below -- otherwise Flask
@@ -23,6 +28,9 @@ from app.authz.actions import (
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
     VENUE_CALENDAR_VIEW,
+    VENUE_CREATE,
+    VENUE_DELETE,
+    VENUE_EDIT,
     VENUE_LIST,
     VENUE_VIEW,
 )
@@ -38,7 +46,14 @@ from app.venues.booking_service import (
     reject_booking,
 )
 from app.venues.calendar_service import get_venue_calendar
-from app.venues.venue_service import VENUE_STATUSES, get_venue, list_venues
+from app.venues.venue_service import (
+    VENUE_STATUSES,
+    create_venue,
+    delete_venue,
+    get_venue,
+    list_venues,
+    update_venue,
+)
 
 venues_bp = Blueprint("venues", __name__, url_prefix="/venues")
 
@@ -125,6 +140,25 @@ def list_venues_route():
 @require(VENUE_VIEW, loader=lambda venue_id: load_venue(venue_id))
 def get_venue_route(venue, venue_id):
     return jsonify(venue), 200
+
+
+@venues_bp.route("", methods=["POST"])
+@require(VENUE_CREATE)
+def create_venue_route():
+    return jsonify(create_venue(request.get_json(silent=True))), 201
+
+
+# POST, not PATCH, for an edit -- same as POST /room-layouts/<id>.
+@venues_bp.route("/<venue_id>", methods=["POST"])
+@require(VENUE_EDIT)
+def update_venue_route(venue_id):
+    return jsonify(update_venue(venue_id, request.get_json(silent=True))), 200
+
+
+@venues_bp.route("/<venue_id>", methods=["DELETE"])
+@require(VENUE_DELETE)
+def delete_venue_route(venue_id):
+    return jsonify(delete_venue(venue_id, current_user().id)), 200
 
 
 # View Venue Availability Calendar (Nawaz, Sprint 2, IS-11). `start`/`end`

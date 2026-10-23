@@ -142,3 +142,15 @@ describe('VenueBookingStatus', () => {
     expect(row(wrapper, 'booking-hall').find('.status').text()).toBe('Confirmed')
   })
 })
+
+describe('IS-61: a booking released because its venue was deleted', () => {
+  it('is marked as released by the venue deletion, not as a cancellation', async () => {
+    const released = { id: 'booking-gone', status: 'cancelled', released_by_venue_deletion: true, venues: { name: 'Old Hall' } }
+    const wrapper = await render([released])
+
+    expect(row(wrapper, 'booking-gone').find('[data-test="released-by-deletion"]').text()).toContain(
+      'deleted from the venue catalogue',
+    )
+    expect(row(wrapper, 'booking-gone').text()).not.toContain('Cancelled:')
+  })
+})

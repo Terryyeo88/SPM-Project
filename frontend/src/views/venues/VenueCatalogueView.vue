@@ -1,7 +1,17 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { apiGet } from '../../lib/api'
+import { ROLES, hasAnyRole } from '../../lib/roles'
+import { useAuthStore } from '../../stores/auth'
 import AppNavBar from '../../components/AppNavBar.vue'
+
+const route = useRoute()
+const auth = useAuthStore()
+// IS-61: Venue Staff add venues from here; after a delete, the venue page
+// sends them back here with what the delete did (?deleted=...).
+const isVenueStaff = computed(() => hasAnyRole(auth.roles, [ROLES.VENUE_STAFF]))
+const deletedMessage = computed(() => (typeof route.query.deleted === 'string' ? route.query.deleted : ''))
 
 const venues = ref([])
 const loading = ref(true)
@@ -33,7 +43,11 @@ onMounted(loadVenues)
 
     <main class="content">
       <div class="container">
-        <h1 class="title">Venue Catalogue</h1>
+        <div class="heading">
+          <h1 class="title">Venue Catalogue</h1>
+          <router-link v-if="isVenueStaff" :to="{ name: 'venue-create' }" class="add-btn">Add venue</router-link>
+        </div>
+        <p v-if="deletedMessage" class="deleted-message" role="status">{{ deletedMessage }}</p>
 
         <div class="tabs" role="group" aria-label="Filter by status">
           <button
@@ -82,6 +96,12 @@ onMounted(loadVenues)
 .content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
 .container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 20px; }
 .title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.add-btn {
+  min-height: 36px; padding: 0 16px; border-radius: 4px; background: #2568e8; color: #fff;
+  font-size: 13px; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center;
+}
+.deleted-message { margin: 0; padding: 10px 14px; background: #eaf5ec; color: #2f6b3f; border-radius: 4px; font-size: 14px; }
 .tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tab {
   border: 1px solid #b0b0b0;

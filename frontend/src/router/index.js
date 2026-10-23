@@ -20,6 +20,7 @@ import VenueBookingReviewView from '../views/venues/VenueBookingReviewView.vue'
 import VenueCalendarView from '../views/venues/VenueCalendarView.vue'
 import VenueCatalogueView from '../views/venues/VenueCatalogueView.vue'
 import VenueDetailView from '../views/venues/VenueDetailView.vue'
+import VenueFormView from '../views/venues/VenueFormView.vue'
 import AttendeeEventView from '../views/registrations/AttendeeEventView.vue'
 import SafetyReviewView from '../views/safety/SafetyReviewView.vue'
 
@@ -110,6 +111,20 @@ const routes = [
     name: 'venue-booking-review',
     component: VenueBookingReviewView,
     meta: { roles: _rolesByRouteName.get('venue-booking-review') },
+  },
+  // IS-61: Venue Staff add and edit venues. Static /venues/new before the
+  // dynamic /venues/:venueId, same as /venues/bookings above.
+  {
+    path: '/venues/new',
+    name: 'venue-create',
+    component: VenueFormView,
+    meta: { roles: _rolesByRouteName.get('venue-create') },
+  },
+  {
+    path: '/venues/:venueId/edit',
+    name: 'venue-edit',
+    component: VenueFormView,
+    meta: { roles: _rolesByRouteName.get('venue-edit') },
   },
   {
     path: '/venues/:venueId',
