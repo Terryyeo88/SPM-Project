@@ -1145,3 +1145,39 @@ Reasoning for each item is in docs/design-decisions.md, "Venue Categories
   restore; the story doesn't mention restoring. Please confirm.
 - **Category names are unique regardless of case.** "Theatre" and
   "theatre" can't both exist. Please confirm.
+
+## CRUD in Venue Catalogue (IS-61, 23 Oct)
+
+Reasoning for each item is in docs/design-decisions.md, "CRUD in Venue
+Catalogue (IS-61)".
+
+- **Pending bookings are released too, not just confirmed ones.** Please
+  confirm "events that have booked the venue" includes requests still
+  waiting on Venue Staff.
+- **Confirmed sessions go back to planning** when they lose their venue
+  (as IS-9 does when a confirmed event's details change), so the coordinator
+  can book again. Please confirm.
+- **A session under a safety check also goes back to planning**, and its
+  pending safety review is closed as "changes requested" by the Venue Staff
+  member who deleted the venue. Please confirm, or say how the Safety
+  Officer should be involved.
+- **The alert is on the event page only.** No email or push notification
+  exists in the app yet. Please confirm that is enough for now.
+- **Facilities and accessibility provisions are fixed lists** (the ones
+  event requests choose from), so Venue Staff pick rather than type them.
+  Please confirm, or say if Venue Staff need to add new kinds.
+- **Edits don't re-check existing bookings.** Lowering capacity or removing
+  a layout or accessibility provision from a venue leaves its bookings as
+  they are. Please confirm.
+- **Venue Staff can't set operating hours.** They're left out of the add
+  and edit form because nothing else in the app relies on them (the venue
+  calendar only shows them as a note). New venues have no set hours. Please
+  confirm, or say if Venue Staff need to manage them.
+- **New venues are always "available".** The form has no status field, so
+  a venue is added as available and an edit never changes its status.
+  Please confirm, or say if Venue Staff need to set it (e.g. a venue added
+  while still under maintenance).
+- **"Ongoing events" (AC4) means not completed, cancelled or rejected** --
+  the same reading as IS-60. Only those events' bookings are released when
+  a venue is deleted; finished and rejected events keep their record.
+  Please confirm rejected events shouldn't lose their booking too.

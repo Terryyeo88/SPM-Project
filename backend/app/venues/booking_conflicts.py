@@ -33,6 +33,8 @@ def confirmed_clashes(
     """Every confirmed booking of `venue_id` whose period overlaps
     [booking_start, booking_end), earliest first. `exclude_booking_id`
     leaves out the booking being checked, if it is itself confirmed."""
+    if venue_id is None:
+        return []  # IS-61: the venue was permanently deleted; nothing to clash with
     clashes = []
     for row in _db_blocking_bookings(venue_id):
         if row["id"] == exclude_booking_id:

@@ -16,6 +16,9 @@
  * and each pending or confirmed booking can be cancelled on its own
  * (POST /venues/bookings/<id>/cancel, reason required) -- the others stay
  * exactly as they were.
+ *
+ * IS-61: a booking released because Venue Staff deleted its venue is marked
+ * as such; VenueRemovedAlert, at the top of the page, asks for a new venue.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet, apiPost } from '../lib/api'
@@ -128,7 +131,10 @@ watch(() => props.event.id, () => {
           <p v-if="booking.status === 'rejected'" class="rejection-reason">
             Reason: {{ booking.rejection?.reason || 'No reason was recorded.' }}
           </p>
-          <p v-if="booking.status === 'cancelled'" class="muted small">
+          <p v-if="booking.released_by_venue_deletion" class="released small" data-test="released-by-deletion">
+            Released: this venue was deleted from the venue catalogue by Venue Staff.
+          </p>
+          <p v-else-if="booking.status === 'cancelled'" class="muted small">
             Cancelled: {{ booking.cancellation?.reason || 'No reason was recorded.' }}
           </p>
 
@@ -176,6 +182,7 @@ h2 { margin: 0; font-size: 15px; color: #222; }
 .venue-name { font-size: 13px; font-weight: 600; color: #2a2a2a; }
 .link { font-size: 13px; color: #2568e8; text-decoration: underline; }
 .rejection-reason { margin: 0; font-size: 13px; color: #a33f3f; }
+.released { color: #7a4a06; }
 
 .status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; }
 .status-pending { background: #f7efe1; color: #8a5a12; }

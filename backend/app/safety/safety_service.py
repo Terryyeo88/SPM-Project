@@ -43,6 +43,7 @@ from app.equipment.equipment_service import list_requests_for_event
 from app.events.transitions import TransitionConflictError, label, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+from app.venues.booking_service import with_venue_names
 
 TABLE = "safety_reviews"
 
@@ -201,7 +202,7 @@ def review_detail(review: SimpleNamespace) -> dict:
         **vars(review),
         **_flatten_names(names or {}),
         "event": event,
-        "venue_bookings": bookings,
+        "venue_bookings": with_venue_names(bookings),
         "equipment_requests": list_requests_for_event(review.event_id),
         "history": history,
     }
@@ -249,6 +250,36 @@ def submit_for_safety_check(event: SimpleNamespace, submitted_by: str) -> dict:
         raise
     _notify_safety_review(review, "submitted")
     return {"event": updated_event, "review": review}
+
+
+def withdraw_pending_review(event_id: str, withdrawn_by: str, comment: str) -> dict | None:
+    """IS-61: the session's venue was deleted, so its pending safety check
+    is for arrangements it no longer has. Closed as changes_requested --
+    changes ARE required (a new venue), and Week 7 sends such a session back
+    to planning -- attributed to the Venue Staff member who deleted the
+    venue, with `comment` saying why. The Safety Officer's queue no longer
+    shows it, and the coordinator can resubmit once rebooked (the
+    one-pending-per-session index would otherwise refuse that). Returns the
+    closed review, or None if none was pending."""
+    result = (
+        supabase.table(TABLE)
+        .update(
+            {
+                "status": "changes_requested",
+                "comment": comment,
+                "reviewed_by": withdrawn_by,
+                "reviewed_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        .eq("event_id", event_id)
+        .eq("status", "pending")
+        .select("*")
+        .execute()
+    )
+    withdrawn = _first(result.data or [])
+    if withdrawn:
+        _notify_safety_review(withdrawn, "withdrawn")
+    return withdrawn
 
 
 def _notify_safety_review(review: dict, what: str) -> None:

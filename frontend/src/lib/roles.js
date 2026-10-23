@@ -236,6 +236,21 @@ export const ROUTE_ACCESS = Object.freeze(
       roles: [ROLES.EVENT_COORDINATOR, ROLES.VENUE_STAFF],
       inNav: false,
     },
+    // IS-61 CRUD in Venue Catalogue: Venue Staff add and edit venues
+    // (app/authz/rules.py::rule_venue_create / rule_venue_edit). Reached
+    // from the catalogue and the venue page, not the nav.
+    {
+      routeName: 'venue-create',
+      label: 'Add venue',
+      roles: [ROLES.VENUE_STAFF],
+      inNav: false,
+    },
+    {
+      routeName: 'venue-edit',
+      label: 'Edit venue',
+      roles: [ROLES.VENUE_STAFF],
+      inNav: false,
+    },
     {
       routeName: 'venue-calendar',
       label: 'Venue availability calendar',

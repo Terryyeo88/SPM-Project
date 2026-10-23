@@ -27,6 +27,7 @@ import EventLogHistory from '../../components/EventLogHistory.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
 import VenueBookingStatus from '../../components/VenueBookingStatus.vue'
+import VenueRemovedAlert from '../../components/VenueRemovedAlert.vue'
 import EquipmentBookingStatus from '../../components/EquipmentBookingStatus.vue'
 import SafetyCheckStatus from '../../components/SafetyCheckStatus.vue'
 
@@ -385,6 +386,7 @@ watch(() => route.params.eventId, (eventId) => {
         <p v-if="loading" class="message">Loading event...</p>
         <p v-else-if="error && !event" class="message error" role="alert">{{ error }}</p>
         <template v-else-if="event && isAssignedCoordinator">
+          <VenueRemovedAlert :event="event" />
           <CoordinatorEventReview
             :event="event"
             :sessions="visibleSessions"

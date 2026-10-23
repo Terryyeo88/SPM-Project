@@ -78,9 +78,7 @@ REGISTRATION_LIST = "registration.list"
 # -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
 # Source: "As an Event Coordinator, I want to see venue details so that
 # I can find the appropriate venue for the event request." The catalogue
-# is read-only in Sprint 1 -- no venue.create/edit/delete actions exist
-# yet because no story asks for them; whoever builds venue management
-# later should add those the same way, sourced the same way.
+# was read-only in Sprint 1; IS-61 added venue.create/edit/delete below.
 #
 # Both role-only, same shape as EVENT_LIST/EVENT_CREATE (see that
 # section's warning above `rule_event_list` in rules.py) -- a venue
@@ -92,6 +90,15 @@ REGISTRATION_LIST = "registration.list"
 
 VENUE_VIEW = "venue.view"
 VENUE_LIST = "venue.list"
+
+# -- venue management (IS-61: CRUD in Venue Catalogue) -----------------------
+# Source: "As a Venue staff, I want to add, edit and delete venues so that I
+# can easily manage what venues ConnectSphere currently has." Role-only, like
+# VENUE_LIST: a venue has no owner. Three actions, not one "manage", per
+# rules.py's "WHY SEPARATE ACTIONS" -- each AC is its own decision.
+VENUE_CREATE = "venue.create"
+VENUE_EDIT = "venue.edit"
+VENUE_DELETE = "venue.delete"
 
 # -- venue calendar (Nawaz, Sprint 2: View Venue Availability Calendar,
 # IS-11) ------------------------------------------------------------

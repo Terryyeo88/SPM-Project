@@ -78,3 +78,16 @@ describe('VenueBookingReviewView (Venue Staff)', () => {
     expect(wrapper.find('h1').text()).toBe('Annual Tech Symposium')
   })
 })
+
+describe('VenueBookingReviewView -- IS-61: a permanently deleted venue', () => {
+  it("shows the venue's kept name and doesn't try to load the venue", async () => {
+    const gone = { ...booking, venue_id: null, venue_name: 'Old Hall', status: 'confirmed' }
+    apiGet.mockImplementation((path) => Promise.resolve(path.startsWith('/venues/bookings/') ? gone : venue))
+
+    const wrapper = await render()
+
+    expect(apiGet).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Old Hall (permanently deleted)')
+  })
+})
