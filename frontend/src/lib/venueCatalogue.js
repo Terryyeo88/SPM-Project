@@ -20,6 +20,10 @@ import { ACCESSIBILITY_OPTIONS, EQUIPMENT_OPTIONS, timeValue } from './eventSess
 // leaves the venue's status as it is (it's never sent).
 export const NEW_VENUE_STATUS = 'available'
 
+// Setup and turnaround buffers are at least this long (same as
+// venue_service.MIN_BUFFER_MINUTES).
+export const MIN_BUFFER_MINUTES = 5
+
 export const FACILITY_OPTIONS = Object.freeze(EQUIPMENT_OPTIONS.map(({ value, label }) => ({ value, label })))
 export const ACCESSIBILITY_FEATURE_OPTIONS = Object.freeze(
   ACCESSIBILITY_OPTIONS.map(({ value, label }) => ({ value, label })),
@@ -91,9 +95,12 @@ export function validateVenueForm(form) {
   if (!payload.name) errors.name = 'Name is required.'
   if (!payload.location) errors.location = 'Location is required.'
   if (!(payload.capacity >= 1)) errors.capacity = 'Maximum capacity must be a whole number of at least 1.'
-  if (!(payload.setup_minutes >= 0)) errors.setup_minutes = 'Setup time must be a whole number of minutes (0 or more).'
-  if (!(payload.turnaround_minutes >= 0)) {
-    errors.turnaround_minutes = 'Turnaround time must be a whole number of minutes (0 or more).'
+  if (!payload.supported_layouts.length) errors.supported_layouts = 'Choose at least one supported room layout.'
+  if (!(payload.setup_minutes >= MIN_BUFFER_MINUTES)) {
+    errors.setup_minutes = `Setup time must be a whole number of at least ${MIN_BUFFER_MINUTES} minutes.`
+  }
+  if (!(payload.turnaround_minutes >= MIN_BUFFER_MINUTES)) {
+    errors.turnaround_minutes = `Turnaround time must be a whole number of at least ${MIN_BUFFER_MINUTES} minutes.`
   }
   return errors
 }

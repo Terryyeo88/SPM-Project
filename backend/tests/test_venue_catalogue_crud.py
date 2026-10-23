@@ -120,12 +120,14 @@ def test_ac1_venue_staff_add_a_venue_with_every_detail(db):
     assert created in [dict(row) for row in db.tables["venues"]]
 
 
-def test_ac1_only_name_location_and_capacity_are_required(db):
-    created = service.create_venue({"name": "Annex", "location": "East Campus", "capacity": 10})
+def test_ac1_name_location_capacity_and_one_layout_are_all_that_is_required(db):
+    created = service.create_venue(
+        {"name": "Annex", "location": "East Campus", "capacity": 10, "supported_layouts": ["theatre"]}
+    )
 
     assert created["facilities"] == []
     assert created["accessibility_features"] == []
-    assert created["supported_layouts"] == []
+    assert created["supported_layouts"] == ["theatre"]
     assert created["status"] == "available"
     assert (created["setup_minutes"], created["turnaround_minutes"]) == (30, 30)
 
@@ -155,8 +157,11 @@ def test_ac1_a_missing_required_detail_is_refused(db):
         ({"facilities": ["jacuzzi"]}, "Unknown facilities: jacuzzi"),
         ({"accessibility_features": ["Wheelchair Access"]}, "Unknown accessibility provisions"),
         ({"supported_layouts": ["amphitheatre"]}, "Unknown room layout: amphitheatre"),
+        ({"supported_layouts": []}, "Choose at least one supported room layout"),
         ({"status": "closed"}, "status must be one of"),
-        ({"setup_minutes": -5}, "Setup time must be at least 0"),
+        ({"setup_minutes": 4}, "Setup time must be at least 5 minutes"),
+        ({"setup_minutes": -5}, "Setup time must be at least 5 minutes"),
+        ({"turnaround_minutes": 0}, "Turnaround time must be at least 5 minutes"),
         ({"rating": 5}, "Unknown venue fields: rating"),
         ({"operating_hours_start": "08:00"}, "Unknown venue fields: operating_hours_start"),
     ],
@@ -165,6 +170,12 @@ def test_ac1_invalid_details_are_refused(db, change, message):
     with pytest.raises(ValidationError, match=message):
         service.create_venue({**_NEW_VENUE, **change})
     assert len(db.tables["venues"]) == 1
+
+
+def test_ac1_five_minute_buffers_are_accepted(db):
+    created = service.create_venue({**_NEW_VENUE, "setup_minutes": 5, "turnaround_minutes": 5})
+
+    assert (created["setup_minutes"], created["turnaround_minutes"]) == (5, 5)
 
 
 def test_ac1_a_new_venue_cannot_list_a_soft_deleted_layout(db):
@@ -218,6 +229,17 @@ def test_ac2_a_venue_keeps_a_layout_listed_before_it_was_soft_deleted(db):
 def test_ac2_a_soft_deleted_layout_cannot_be_newly_added(db):
     with pytest.raises(ValidationError, match="Unknown room layout: lecture"):
         service.update_venue("venue-1", {"supported_layouts": ["theatre", "lecture"]})
+
+
+def test_ac2_an_edit_cannot_remove_every_layout(db):
+    with pytest.raises(ValidationError, match="Choose at least one supported room layout"):
+        service.update_venue("venue-1", {"supported_layouts": []})
+    assert not [call for call in db.calls if call["op"] == "update"]
+
+
+def test_ac2_an_edit_cannot_shorten_a_buffer_below_five_minutes(db):
+    with pytest.raises(ValidationError, match="Turnaround time must be at least 5 minutes"):
+        service.update_venue("venue-1", {"turnaround_minutes": 4})
 
 
 def test_ac2_an_empty_edit_is_refused(db):

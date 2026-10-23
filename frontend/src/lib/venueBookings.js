@@ -67,7 +67,8 @@ export function canCancelBooking(booking, event) {
  */
 export function unreplacedVenueReleases(bookings, event) {
   if (['completed', 'cancelled'].includes(event?.status)) return []
-  const rows = bookings ?? []
+  // Anything but a list (an unexpected response) means no bookings, not a crash.
+  const rows = Array.isArray(bookings) ? bookings : []
   const active = rows.filter((booking) => ['pending', 'confirmed'].includes(booking.status))
   return rows.filter(
     (booking) =>

@@ -115,6 +115,11 @@ describe('unreplacedVenueReleases (IS-61 AC4)', () => {
     expect(unreplacedVenueReleases([older, released], { status: 'planning' })).toEqual([released])
   })
 
+  it('treats a response that is not a list as no bookings', () => {
+    expect(unreplacedVenueReleases(undefined, { status: 'planning' })).toEqual([])
+    expect(unreplacedVenueReleases({ id: 'not-a-list' }, { status: 'planning' })).toEqual([])
+  })
+
   it('lists nothing for a completed or cancelled event', () => {
     expect(unreplacedVenueReleases([released], { status: 'completed' })).toEqual([])
     expect(unreplacedVenueReleases([released], { status: 'cancelled' })).toEqual([])

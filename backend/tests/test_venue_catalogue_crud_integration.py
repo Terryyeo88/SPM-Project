@@ -11,7 +11,9 @@ supabase/migrations/20261023100000_venue_catalogue_crud.sql.
        alone; a confirmed session returns to planning, and one under a
        safety check has the check withdrawn and returns to planning.
 
-Also: the database refuses a new booking, or an approval, on a deleted venue.
+Also: the database refuses a new booking, or an approval, on a deleted venue;
+and only the backend (service role) can delete or change a venue -- a
+signed-in user, even Venue Staff, calling the database directly can't.
 
 Every test creates its own throwaway users, venue and events and removes
 them afterwards. Skipped automatically without a local Supabase (see
@@ -20,12 +22,14 @@ conftest.py).
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
 from postgrest.exceptions import APIError
+from supabase import create_client
 
 from app.extensions import supabase
 from app.shared.errors import ValidationError
@@ -58,7 +62,13 @@ class _Fixtures:
 
     def venue(self, **overrides) -> dict:
         venue = service.create_venue(
-            {"name": f"IS-61 Venue {uuid.uuid4()}", "location": "Test Wing", "capacity": 100, **overrides}
+            {
+                "name": f"IS-61 Venue {uuid.uuid4()}",
+                "location": "Test Wing",
+                "capacity": 100,
+                "supported_layouts": ["theatre"],
+                **overrides,
+            }
         )
         self.venue_ids.append(venue["id"])
         return venue
@@ -153,10 +163,10 @@ def test_ac1_an_added_venue_is_stored_and_listed(f):
 def test_ac2_an_edit_is_stored(f):
     venue = f.venue()
 
-    service.update_venue(venue["id"], {"capacity": 42, "status": "maintenance", "setup_minutes": 0})
+    service.update_venue(venue["id"], {"capacity": 42, "status": "maintenance", "setup_minutes": 5})
 
     stored = service.get_venue(venue["id"])
-    assert (stored["capacity"], stored["status"], stored["setup_minutes"]) == (42, "maintenance", 0)
+    assert (stored["capacity"], stored["status"], stored["setup_minutes"]) == (42, "maintenance", 5)
 
 
 def test_ac2_the_database_refuses_a_negative_buffer_written_straight_to_the_table(f):
@@ -363,3 +373,39 @@ def test_a_pending_booking_left_on_a_deleted_venue_cannot_be_approved(f, staff, 
     with pytest.raises(ValidationError, match="has been deleted"):
         confirm_booking(booking["id"], SimpleNamespace(**_booking(booking["id"])), staff)
     assert _booking(booking["id"])["status"] == "pending"
+
+
+# -- only the backend can delete or change a venue -----------------------------
+
+
+def _signed_in_as(user_id: str):
+    """A Supabase client signed in as this user: requests carry their JWT, so
+    the database applies the `authenticated` role's grants and RLS -- what a
+    caller bypassing Flask would get."""
+    email = supabase.table("profiles").select("email").eq("id", user_id).single().execute().data["email"]
+    client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+    client.auth.sign_in_with_password({"email": email, "password": _PASSWORD})
+    return client
+
+
+def test_a_signed_in_user_cannot_call_delete_venue_directly(f, staff):
+    venue = f.venue()
+
+    with pytest.raises(APIError) as refused:
+        _signed_in_as(staff).rpc("delete_venue", {"p_venue_id": venue["id"], "p_deleted_by": staff}).execute()
+
+    assert refused.value.code == "42501"  # permission denied: execute is revoked from authenticated
+    assert service.get_venue(venue["id"])["deleted_at"] is None
+
+
+def test_a_signed_in_user_cannot_change_a_venue_directly(f, staff):
+    venue = f.venue()
+
+    # venues has a read policy only (20260923000000_venues.sql), so RLS
+    # matches no row to update or soft-delete.
+    _signed_in_as(staff).table("venues").update({"capacity": 1, "deleted_at": "2026-10-23T00:00:00+00:00"}).eq(
+        "id", venue["id"]
+    ).execute()
+
+    stored = service.get_venue(venue["id"])
+    assert (stored["capacity"], stored["deleted_at"]) == (100, None)

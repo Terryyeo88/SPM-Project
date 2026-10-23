@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+// api.js builds the Supabase client on import, which needs the frontend .env
+// (absent in CI); these pure helpers never call it.
+vi.mock('./api', () => ({ apiDelete: vi.fn(), apiPost: vi.fn() }))
+
 import {
   changedFields,
   deleteOutcomeMessage,
@@ -27,7 +32,14 @@ const venue = {
 }
 
 function validForm(overrides = {}) {
-  return { ...emptyVenueForm(), name: 'Annex', location: 'East Campus', capacity: '40', ...overrides }
+  return {
+    ...emptyVenueForm(),
+    name: 'Annex',
+    location: 'East Campus',
+    capacity: '40',
+    supported_layouts: ['theatre'],
+    ...overrides,
+  }
 }
 
 describe('venuePayload', () => {
@@ -38,7 +50,7 @@ describe('venuePayload', () => {
       capacity: 40,
       facilities: [],
       accessibility_features: [],
-      supported_layouts: [],
+      supported_layouts: ['theatre'],
       setup_minutes: 0,
       turnaround_minutes: 30,
     })
@@ -69,14 +81,25 @@ describe('validateVenueForm (IS-61 AC1/AC2)', () => {
     expect(validateVenueForm(validForm())).toEqual({})
   })
 
-  it('requires a name, location and a capacity of at least 1', () => {
-    const errors = validateVenueForm(validForm({ name: ' ', location: '', capacity: '0' }))
-    expect(Object.keys(errors).sort()).toEqual(['capacity', 'location', 'name'])
+  it('requires a name, location, a capacity of at least 1 and a room layout', () => {
+    const errors = validateVenueForm(validForm({ name: ' ', location: '', capacity: '0', supported_layouts: [] }))
+    expect(Object.keys(errors).sort()).toEqual(['capacity', 'location', 'name', 'supported_layouts'])
+    expect(errors.supported_layouts).toBe('Choose at least one supported room layout.')
   })
 
   it('refuses a fractional capacity or negative buffer', () => {
     expect(validateVenueForm(validForm({ capacity: '2.5' })).capacity).toBeTruthy()
     expect(validateVenueForm(validForm({ turnaround_minutes: '-1' })).turnaround_minutes).toBeTruthy()
+  })
+
+  it('needs setup and turnaround times of at least 5 minutes', () => {
+    expect(validateVenueForm(validForm({ setup_minutes: '4' })).setup_minutes).toBe(
+      'Setup time must be a whole number of at least 5 minutes.',
+    )
+    expect(validateVenueForm(validForm({ turnaround_minutes: '' })).turnaround_minutes).toBe(
+      'Turnaround time must be a whole number of at least 5 minutes.',
+    )
+    expect(validateVenueForm(validForm({ setup_minutes: '5', turnaround_minutes: '5' }))).toEqual({})
   })
 
 })

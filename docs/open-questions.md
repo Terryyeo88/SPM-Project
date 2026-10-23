@@ -1177,3 +1177,11 @@ Catalogue (IS-61)".
   and edit form because nothing else in the app relies on them (the venue
   calendar only shows them as a note). New venues have no set hours. Please
   confirm, or say if Venue Staff need to manage them.
+- **New venues are always "available".** The form has no status field, so
+  a venue is added as available and an edit never changes its status.
+  Please confirm, or say if Venue Staff need to set it (e.g. a venue added
+  while still under maintenance).
+- **"Ongoing events" (AC4) means not completed, cancelled or rejected** --
+  the same reading as IS-60. Only those events' bookings are released when
+  a venue is deleted; finished and rejected events keep their record.
+  Please confirm rejected events shouldn't lose their booking too.

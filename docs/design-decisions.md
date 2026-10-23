@@ -1582,8 +1582,8 @@ code change rather than a data entry.
 
 ### Editing
 
-- Only the fields sent change, but the merged record is re-checked (e.g. one
-  half of the opening hours against the other).
+- Only the fields sent change, but the merged record is re-checked, so an
+  edit can never leave the venue invalid.
 - A venue keeps a room layout it lists that has since been soft-deleted, but
   can't newly add one (same rule as event sessions).
 - Changing setup/turnaround minutes doesn't touch existing bookings: each
@@ -1594,6 +1594,33 @@ code change rather than a data entry.
 - The form has no status field. A new venue is added as `available`; an
   edit never sends the status, so a venue in maintenance stays that way.
   The API still accepts `status`.
+
+### Required fields and minimums
+
+A venue needs a name, a location, a capacity of at least 1, **at least one
+supported room layout**, and setup and turnaround times of **at least 5
+minutes** each. Both the form (`lib/venueCatalogue.js::validateVenueForm`)
+and the backend (`venue_service._validated`, `MIN_BUFFER_MINUTES`) check
+them, on add and on edit. An edit re-checks the whole venue, so an older
+venue with no layouts must be given one before any change to it saves.
+
+The 5-minute floor is not in the database: its constraint
+(`venues_buffers_non_negative`) only refuses negatives. Other stories'
+integration tests insert venues straight into the table with 0-minute
+buffers (`test_venue_bookings_integration.py`), and raising the floor there
+would need a new migration. Venues are only ever added or edited through
+the backend, which enforces 5.
+
+The form checks as Venue Staff go:
+
+- **When an error appears:** once Venue Staff leave a field (blur). The
+  room layout checkboxes count as one field, flagged when focus leaves the
+  group rather than when it moves between boxes. After that, the message
+  updates live and disappears as soon as the field is fixed.
+- **Save:** disabled, with a short "Fill in every field marked *" hint,
+  until every check passes.
+- **Editing a venue that already breaks a rule:** its errors show
+  immediately, so Save is never disabled without a visible reason.
 
 ### Operating hours are left out of add and edit
 

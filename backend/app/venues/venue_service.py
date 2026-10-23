@@ -36,6 +36,9 @@ FACILITIES = EQUIPMENT
 ACCESSIBILITY_FEATURES = ACCESSIBILITY_NEEDS
 
 DEFAULT_BUFFER_MINUTES = 30
+# Setup and turnaround buffers are at least this long: every booking needs
+# some time to prepare and reset the room.
+MIN_BUFFER_MINUTES = 5
 
 _REQUIRED_ON_CREATE = ("name", "location", "capacity")
 EDITABLE_FIELDS = frozenset(
@@ -108,13 +111,13 @@ def _text(record: dict, field: str, label: str) -> str:
     return value.strip()
 
 
-def _whole_number(record: dict, field: str, label: str, minimum: int) -> int:
+def _whole_number(record: dict, field: str, label: str, minimum: int, unit: str = "") -> int:
     value = record.get(field)
     # bool is an int subclass; True is not a capacity.
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValidationError(f"{label} must be a whole number.")
     if value < minimum:
-        raise ValidationError(f"{label} must be at least {minimum}.")
+        raise ValidationError(f"{label} must be at least {minimum}{unit}.")
     return value
 
 
@@ -137,10 +140,12 @@ def _validated(record: dict, kept_layouts=()) -> dict:
     `kept_layouts` are layouts the venue already lists: they may stay even if
     Venue Staff have since soft-deleted them (the room can still be set up
     that way -- see 20261012100000_venue_supported_layouts.sql), but only
-    active layouts can be newly added."""
+    active layouts can be newly added. A venue supports at least one."""
     layouts = record.get("supported_layouts") or []
     if not isinstance(layouts, list) or not all(isinstance(item, str) for item in layouts):
         raise ValidationError("Supported room layouts must be a list of names.")
+    if not layouts:
+        raise ValidationError("Choose at least one supported room layout.")
     offered = {row["name"] for row in list_room_layouts()} | set(kept_layouts)
     unknown = sorted({name for name in layouts if name not in offered})
     if unknown:
@@ -160,8 +165,10 @@ def _validated(record: dict, kept_layouts=()) -> dict:
         ),
         "supported_layouts": list(dict.fromkeys(layouts)),
         "status": status,
-        "setup_minutes": _whole_number(record, "setup_minutes", "Setup time", 0),
-        "turnaround_minutes": _whole_number(record, "turnaround_minutes", "Turnaround time", 0),
+        "setup_minutes": _whole_number(record, "setup_minutes", "Setup time", MIN_BUFFER_MINUTES, " minutes"),
+        "turnaround_minutes": _whole_number(
+            record, "turnaround_minutes", "Turnaround time", MIN_BUFFER_MINUTES, " minutes"
+        ),
     }
 
 
