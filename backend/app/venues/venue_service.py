@@ -12,6 +12,11 @@ deleted venue:
     rejected) -- they become 'cancelled' with released_by_venue_deletion
     set, which is what the coordinator's "book another venue" alert on the
     event details page reads.
+
+A deleted venue can then be permanently deleted (permanently_delete_venue),
+so it isn't left as a stale row -- see
+20261023200000_venue_permanent_delete.sql. Its bookings keep the venue's
+name (venue_bookings.venue_name) and lose only the link.
 """
 
 from __future__ import annotations
@@ -76,6 +81,14 @@ class VenueDeletedError(AppError):
     code = "venue_deleted"
 
 
+class VenuePermanentDeleteError(AppError):
+    """A permanent delete was refused: the venue isn't deleted from the
+    catalogue yet, or an ongoing event still has a live booking on it."""
+
+    status_code = 409
+    code = "venue_permanent_delete_refused"
+
+
 # -- reading -------------------------------------------------------------------
 
 
@@ -90,6 +103,15 @@ def list_venues(status: str | None = None) -> list[dict]:
         query = query.eq("status", status)
     result = query.order("name").execute()
     return result.data or []
+
+
+def list_deleted_venues() -> list[dict]:
+    """Venues deleted from the catalogue but not yet permanently deleted, by
+    name -- what Venue Staff pick from to permanently delete one. Filtered
+    here rather than in the query: the table is small, and it keeps the
+    read the same shape as list_venues'."""
+    result = supabase.table("venues").select("*").order("name").execute()
+    return [venue for venue in result.data or [] if venue.get("deleted_at")]
 
 
 def get_venue(venue_id: str) -> dict:
@@ -302,6 +324,31 @@ def _notify_venue_deleted(released_booking: dict, venue: dict) -> None:
     is on the event details page (VenueRemovedAlert.vue), read from the
     booking's released_by_venue_deletion flag."""
     print(f"[notify] venue booking {released_booking['booking_id']} released: venue {venue['id']} deleted")
+
+
+def permanently_delete_venue(venue_id: str) -> None:
+    """Removes a venue already deleted from the catalogue. Its bookings --
+    completed and cancelled events' included -- keep the venue's name and
+    lose only the link (database trigger before_venue_delete, ON DELETE SET
+    NULL).
+
+    Two guards: "deleted from the catalogue first" is checked here (the
+    two-step flow), and "no ongoing event still has a live booking on it" by
+    the database trigger, whoever runs the DELETE. The first is the app's
+    alone so other stories' tests can still remove throwaway venues -- see
+    the migration's header."""
+    venue = get_venue(venue_id)
+    if not venue.get("deleted_at"):
+        raise VenuePermanentDeleteError(
+            f'Venue "{venue["name"]}" must be deleted from the catalogue before it can be permanently deleted.'
+        )
+    try:
+        supabase.table("venues").delete().eq("id", venue_id).execute()
+    except APIError as exc:
+        # 23503: an ongoing event still has a live booking on it.
+        if exc.code == "23503":
+            raise VenuePermanentDeleteError(exc.message) from exc
+        raise
 
 
 # -- database access (isolated so unit tests don't fake the query builder) --

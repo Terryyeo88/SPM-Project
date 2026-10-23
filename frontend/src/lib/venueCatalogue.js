@@ -155,3 +155,6 @@ export function deleteOutcomeMessage(result) {
 export const createVenue = (body) => apiPost('/venues', body)
 export const updateVenue = (venueId, changes) => apiPost(`/venues/${venueId}`, changes)
 export const deleteVenue = (venueId) => apiDelete(`/venues/${venueId}`)
+// The second step: remove a venue already deleted from the catalogue. Its
+// bookings keep the venue's name.
+export const permanentlyDeleteVenue = (venueId) => apiDelete(`/venues/${venueId}/permanent`)

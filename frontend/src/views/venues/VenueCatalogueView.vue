@@ -19,11 +19,18 @@ const error = ref('')
 const statusFilter = ref('')
 
 const STATUSES = ['available', 'occupied', 'maintenance']
+// IS-61: Venue Staff only -- venues deleted from the catalogue, waiting to be
+// permanently deleted (GET /venues/deleted).
+const DELETED = 'deleted'
 
 async function loadVenues() {
   loading.value = true
   error.value = ''
   try {
+    if (statusFilter.value === DELETED) {
+      venues.value = await apiGet('/venues/deleted')
+      return
+    }
     const query = statusFilter.value ? `?status=${statusFilter.value}` : ''
     venues.value = await apiGet(`/venues${query}`)
   } catch (requestError) {
@@ -68,13 +75,27 @@ onMounted(loadVenues)
           >
             {{ status }}<template v-if="statusFilter === status && !loading && !error"> ({{ venues.length }})</template>
           </button>
+          <button
+            v-if="isVenueStaff"
+            type="button"
+            class="tab tab-deleted"
+            data-test="deleted-tab"
+            :class="{ active: statusFilter === DELETED }"
+            @click="statusFilter = DELETED"
+          >
+            Deleted<template v-if="statusFilter === DELETED && !loading && !error"> ({{ venues.length }})</template>
+          </button>
         </div>
+        <p v-if="statusFilter === DELETED" class="deleted-note">
+          Deleted from the catalogue and no longer bookable. Open one to permanently delete it.
+        </p>
 
         <div class="list">
           <p v-if="loading" class="message">Loading venues...</p>
           <p v-else-if="error" class="message error" role="alert">{{ error }}</p>
           <p v-else-if="venues.length === 0" class="message">
-            No venues to show{{ statusFilter ? ` with status "${statusFilter}"` : '' }}.
+            <template v-if="statusFilter === DELETED">No deleted venues waiting to be permanently deleted.</template>
+            <template v-else>No venues to show{{ statusFilter ? ` with status "${statusFilter}"` : '' }}.</template>
           </p>
           <template v-else>
             <router-link v-for="venue in venues" :key="venue.id" :to="`/venues/${venue.id}`" class="row">
@@ -82,7 +103,8 @@ onMounted(loadVenues)
                 <span class="row-name">{{ venue.name }}</span>
                 <span class="row-meta">{{ venue.location }} &middot; capacity {{ venue.capacity }}</span>
               </div>
-              <span class="status" :class="`status-${venue.status}`">{{ venue.status }}</span>
+              <span v-if="venue.deleted_at" class="status status-deleted">deleted</span>
+              <span v-else class="status" :class="`status-${venue.status}`">{{ venue.status }}</span>
             </router-link>
           </template>
         </div>
@@ -146,4 +168,7 @@ onMounted(loadVenues)
 .status-available { background: #d1fae5; color: #067647; }
 .status-occupied { background: #fee2e2; color: #b42318; }
 .status-maintenance { background: #fef3c7; color: #92400e; }
+.status-deleted { background: #f5e6e6; color: #a33f3f; }
+.tab-deleted.active { border-color: #a33f3f; background: #a33f3f; color: #ffffff; }
+.deleted-note { margin: 0; font-size: 13px; color: #6b6b6b; }
 </style>

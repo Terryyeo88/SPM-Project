@@ -115,6 +115,17 @@ describe('unreplacedVenueReleases (IS-61 AC4)', () => {
     expect(unreplacedVenueReleases([older, released], { status: 'planning' })).toEqual([released])
   })
 
+  it('uses released_at, which a later permanent delete does not move, over updated_at', () => {
+    const rebooked = { id: 'new', status: 'pending', created_at: '2026-10-21T09:00:00+00:00' }
+    // The permanent delete rewrote updated_at to after the rebooking.
+    const releasedThenVenueRemoved = {
+      ...released,
+      released_at: '2026-10-20T09:00:00+00:00',
+      updated_at: '2026-10-22T09:00:00+00:00',
+    }
+    expect(unreplacedVenueReleases([rebooked, releasedThenVenueRemoved], { status: 'planning' })).toEqual([])
+  })
+
   it('treats a response that is not a list as no bookings', () => {
     expect(unreplacedVenueReleases(undefined, { status: 'planning' })).toEqual([])
     expect(unreplacedVenueReleases({ id: 'not-a-list' }, { status: 'planning' })).toEqual([])

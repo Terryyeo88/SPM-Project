@@ -60,10 +60,11 @@ export function canCancelBooking(booking, event) {
  * venue (released_by_venue_deletion) and hasn't replaced yet -- what the
  * "book another venue" alert on the event details page lists. A release
  * counts as replaced once the session has a pending or confirmed booking
- * made after it (the released row's updated_at is when it was released:
- * a cancelled booking is never written again). So the alert stays while the
- * coordinator still only has bookings they made before the delete, and goes
- * once they rebook. Nothing is listed for a completed or cancelled event.
+ * made after it (released_at; updated_at only for a row released before that
+ * column existed -- a permanent delete rewrites updated_at, so it can't be
+ * trusted after one). So the alert stays while the coordinator still only
+ * has bookings they made before the delete, and goes once they rebook.
+ * Nothing is listed for a completed or cancelled event.
  */
 export function unreplacedVenueReleases(bookings, event) {
   if (['completed', 'cancelled'].includes(event?.status)) return []
@@ -73,6 +74,6 @@ export function unreplacedVenueReleases(bookings, event) {
   return rows.filter(
     (booking) =>
       booking.released_by_venue_deletion
-      && !active.some((other) => (other.created_at ?? '') > (booking.updated_at ?? '')),
+      && !active.some((other) => (other.created_at ?? '') > (booking.released_at ?? booking.updated_at ?? '')),
   )
 }

@@ -111,6 +111,8 @@ def _confirmed_overlap_exists(
 ) -> bool:
     """True if `venue_id` already has another CONFIRMED booking whose
     padded span overlaps [booking_start, booking_end)."""
+    if venue_id is None:
+        return False  # IS-61: the venue was permanently deleted; nothing to overlap
     result = (
         supabase.table("venue_bookings")
         .select("id, booking_start, booking_end")
@@ -258,6 +260,18 @@ def get_booking(booking_id: str) -> dict:
     return _attach_rejection_reasons([booking])[0]
 
 
+def with_venue_names(rows: list[dict]) -> list[dict]:
+    """IS-61: a booking whose venue was permanently deleted has no venue_id
+    (so the venues(...) embed comes back empty) and keeps the venue's name in
+    venue_name. Fills the embed from it, so every list still shows which
+    venue a past booking was for. Rows whose venue still exists are left as
+    they are."""
+    for row in rows:
+        if row.get("venues") is None and row.get("venue_name"):
+            row["venues"] = {"name": row["venue_name"]}
+    return rows
+
+
 def list_bookings_for_event(event_id: str) -> list[dict]:
     # venues(name): a session may hold several bookings (IS-9), so the
     # coordinator needs to tell them apart.
@@ -268,7 +282,7 @@ def list_bookings_for_event(event_id: str) -> list[dict]:
         .order("created_at", desc=True)
         .execute()
     )
-    return _attach_rejection_reasons(result.data or [])
+    return _attach_rejection_reasons(with_venue_names(result.data or []))
 
 
 def list_bookings(user, status: str | None = None) -> list[dict]:
@@ -308,7 +322,7 @@ def list_bookings(user, status: str | None = None) -> list[dict]:
     if status is not None:
         query = query.eq("status", status)
     result = query.order("created_at", desc=True).execute()
-    return result.data or []
+    return with_venue_names(result.data or [])
 
 
 def _record_booking_status_change(

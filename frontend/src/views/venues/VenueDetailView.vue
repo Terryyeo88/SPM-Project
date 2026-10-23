@@ -5,13 +5,19 @@
  * bookings of ongoing events that booked it; their coordinators are alerted
  * on the event page (VenueRemovedAlert.vue). A deleted venue is still shown
  * when opened by link (an old booking's venue), marked as deleted, without
- * the staff actions.
+ * the edit/delete actions; Venue Staff can then permanently delete it (its
+ * past bookings keep its name).
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiGet } from '../../lib/api'
 import { ROLES, hasAnyRole } from '../../lib/roles'
-import { deleteOutcomeMessage, deleteVenue, formatOperatingHours } from '../../lib/venueCatalogue'
+import {
+  deleteOutcomeMessage,
+  deleteVenue,
+  formatOperatingHours,
+  permanentlyDeleteVenue,
+} from '../../lib/venueCatalogue'
 import { useAuthStore } from '../../stores/auth'
 import AppNavBar from '../../components/AppNavBar.vue'
 
@@ -24,6 +30,8 @@ const error = ref('')
 
 const isVenueStaff = computed(() => hasAnyRole(auth.roles, [ROLES.VENUE_STAFF]))
 const canManage = computed(() => isVenueStaff.value && venue.value && !venue.value.deleted_at)
+// The second step, once the venue is deleted from the catalogue.
+const canPermanentlyDelete = computed(() => isVenueStaff.value && Boolean(venue.value?.deleted_at))
 const savedMessage = computed(() => {
   if (route.query.saved === 'created') return 'Venue added to the catalogue.'
   if (route.query.saved === 'updated') return 'Venue details saved.'
@@ -57,6 +65,23 @@ async function confirmDelete() {
   try {
     const result = await deleteVenue(venue.value.id)
     router.push({ name: 'venues', query: { deleted: deleteOutcomeMessage(result) } })
+  } catch (requestError) {
+    deleteError.value = requestError.message
+  } finally {
+    deleting.value = false
+  }
+}
+
+async function confirmPermanentDelete() {
+  deleting.value = true
+  deleteError.value = ''
+  try {
+    const name = venue.value.name
+    await permanentlyDeleteVenue(venue.value.id)
+    router.push({
+      name: 'venues',
+      query: { deleted: `${name} was permanently deleted. Past bookings still show its name.` },
+    })
   } catch (requestError) {
     deleteError.value = requestError.message
   } finally {
@@ -109,6 +134,27 @@ onMounted(loadVenue)
           </button>
           <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
             Keep venue
+          </button>
+        </div>
+        <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
+      </div>
+
+      <div v-if="canPermanentlyDelete && !confirmingDelete" class="staff-actions" data-test="permanent-actions">
+        <button type="button" class="btn danger" @click="confirmingDelete = true">Delete permanently</button>
+      </div>
+
+      <div v-if="canPermanentlyDelete && confirmingDelete" class="delete-panel" data-test="permanent-delete-panel">
+        <p><strong>Permanently delete {{ venue.name }}?</strong></p>
+        <p>
+          The venue's record will be removed for good and this can't be undone. Past bookings, including completed
+          and cancelled events', keep the venue's name.
+        </p>
+        <div class="panel-actions">
+          <button type="button" class="btn danger-solid" :disabled="deleting" @click="confirmPermanentDelete">
+            {{ deleting ? 'Deleting...' : 'Delete permanently' }}
+          </button>
+          <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
+            Keep record
           </button>
         </div>
         <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>

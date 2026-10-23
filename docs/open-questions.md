@@ -1151,10 +1151,6 @@ Reasoning for each item is in docs/design-decisions.md, "Venue Categories
 Reasoning for each item is in docs/design-decisions.md, "CRUD in Venue
 Catalogue (IS-61)".
 
-- **Deleting is a soft delete, with no restore.** A deleted venue leaves the
-  catalogue and can't be booked or edited, but stays on record for past
-  bookings. Please confirm, and say if Venue Staff should be able to restore
-  one.
 - **Pending bookings are released too, not just confirmed ones.** Please
   confirm "events that have booked the venue" includes requests still
   waiting on Venue Staff.

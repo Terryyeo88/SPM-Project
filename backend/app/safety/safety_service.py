@@ -43,6 +43,7 @@ from app.equipment.equipment_service import list_requests_for_event
 from app.events.transitions import TransitionConflictError, label, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+from app.venues.booking_service import with_venue_names
 
 TABLE = "safety_reviews"
 
@@ -201,7 +202,7 @@ def review_detail(review: SimpleNamespace) -> dict:
         **vars(review),
         **_flatten_names(names or {}),
         "event": event,
-        "venue_bookings": bookings,
+        "venue_bookings": with_venue_names(bookings),
         "equipment_requests": list_requests_for_event(review.event_id),
         "history": history,
     }

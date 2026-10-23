@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 // (absent in CI); these pure helpers never call it.
 vi.mock('./api', () => ({ apiDelete: vi.fn(), apiPost: vi.fn() }))
 
+import { apiDelete } from './api'
+
 import {
   changedFields,
   deleteOutcomeMessage,
@@ -11,6 +13,7 @@ import {
   formatOperatingHours,
   layoutOptions,
   newVenuePayload,
+  permanentlyDeleteVenue,
   validateVenueForm,
   venuePayload,
   venueToForm,
@@ -149,5 +152,13 @@ describe('deleteOutcomeMessage (IS-61 AC3/AC4)', () => {
     expect(message).toContain('2 bookings for ongoing events were released')
     expect(message).toContain('asked to book another venue')
     expect(message).toContain('1 session went back to planning')
+  })
+})
+
+describe('permanentlyDeleteVenue', () => {
+  it('calls the permanent delete route', async () => {
+    apiDelete.mockResolvedValue(null)
+    await permanentlyDeleteVenue('venue-1')
+    expect(apiDelete).toHaveBeenCalledWith('/venues/venue-1/permanent')
   })
 })

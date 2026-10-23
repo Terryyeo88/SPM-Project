@@ -1519,6 +1519,44 @@ So a deleted venue leaves the catalogue (`GET /venues`), can't be edited
 (409 `venue_deleted`) or booked, but `GET /venues/<id>` still returns it,
 marked deleted. There is no restore: the story doesn't ask for one.
 
+### Then a permanent delete
+
+So a deleted venue isn't left as a stale row, Venue Staff can permanently
+delete it: the catalogue's **Deleted** tab (`GET /venues/deleted`) lists
+deleted venues, and the venue's page offers **Delete permanently**
+(`DELETE /venues/<id>/permanent`, `venue.delete`). Same two-step shape as
+IS-60's room layouts. Migration `20261023200000_venue_permanent_delete.sql`.
+
+- **Past bookings keep the venue's name.** The booking's link to the venue
+  becomes NULL (`ON DELETE SET NULL`) and trigger `before_venue_delete`
+  copies the name into `venue_bookings.venue_name` first. Completed and
+  cancelled events, above all, still say where they were held. Only the
+  name is kept, not the venue's other details.
+- **Readers show the kept name.** `booking_service.with_venue_names` fills
+  the empty `venues(...)` embed from `venue_name` for the event's booking
+  list, the Venue Staff queue and the safety review. The booking review page
+  shows "Name (permanently deleted)" instead of loading the venue. The
+  overlap and conflict checks treat a booking with no venue as clashing with
+  nothing (they used to query `venue_id = None` and crash).
+- **An event's room layout is unaffected:** it lives on the event
+  (`events.room_layout`), not on the venue.
+- **Two guards, split between the app and the database.** The app requires
+  the venue to be deleted from the catalogue first. The database refuses
+  removing a venue an ongoing event still has a live booking on, whoever
+  runs the DELETE. "Deleted first" is deliberately not a database rule:
+  other stories' integration tests remove their throwaway venues with a
+  plain DELETE once their bookings are gone. Unlike a room layout, a venue
+  nothing uses is safe to remove either way.
+- **A booking can't become live without a venue.** A finished event's
+  pending request left on a removed venue can't be approved (trigger
+  `venue_bookings_refuse_deleted_venue`, extended).
+- **`released_at`.** The coordinator's alert used a released booking's
+  `updated_at` as its release time, but the SET NULL rewrites every booking
+  of the venue, which would have moved it and could bring back an alert the
+  coordinator had already dealt with. Released bookings now carry
+  `released_at`, set by `delete_venue()` (existing ones backfilled from
+  their release log entry), and the alert uses that.
+
 ### AC4: what "lose their booking" does
 
 Deleting runs one database function, `delete_venue()`, so the soft delete and

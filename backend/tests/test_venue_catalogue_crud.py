@@ -34,7 +34,7 @@ from app.authz import actions
 from app.authz.policy import can
 from app.events.transitions import TransitionConflictError
 from app.shared.errors import NotFoundError, ValidationError
-from app.venues.venue_service import VenueDeletedError
+from app.venues.venue_service import VenueDeletedError, VenuePermanentDeleteError
 from tests.factories import make_user
 from tests.fake_supabase import FakeSupabase
 
@@ -579,6 +579,8 @@ def test_route_ac3_venue_staff_delete_a_venue_as_themselves(client, signing_key,
         ("post", "/venues", "create_venue"),
         ("post", "/venues/venue-1", "update_venue"),
         ("delete", "/venues/venue-1", "delete_venue"),
+        ("get", "/venues/deleted", "list_deleted_venues"),
+        ("delete", "/venues/venue-1/permanent", "permanently_delete_venue"),
     ],
 )
 def test_route_only_venue_staff_add_edit_or_delete(client, signing_key, monkeypatch, role, method, path, patched):
@@ -588,3 +590,105 @@ def test_route_only_venue_staff_add_edit_or_delete(client, signing_key, monkeypa
     response = getattr(client, method)(path, json={"capacity": 1}, headers=_headers(signing_key))
 
     assert response.status_code == 403
+
+
+# -- permanent delete (the second step after deleting) -------------------------
+
+
+def test_permanent_delete_lists_only_deleted_venues(db):
+    db.tables["venues"].append(_venue(id="venue-2", name="Old Hall", deleted_at="2026-10-23T10:00:00+00:00"))
+
+    assert [venue["id"] for venue in service.list_deleted_venues()] == ["venue-2"]
+
+
+def test_permanent_delete_needs_the_venue_deleted_from_the_catalogue_first(db):
+    with pytest.raises(VenuePermanentDeleteError, match="must be deleted from the catalogue before"):
+        service.permanently_delete_venue("venue-1")
+    assert not [call for call in db.calls if call["op"] == "delete"]
+    assert len(db.tables["venues"]) == 1
+
+
+def test_permanent_delete_removes_a_deleted_venue(db):
+    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
+
+    service.permanently_delete_venue("venue-1")
+
+    [delete] = [call for call in db.calls if call["op"] == "delete"]
+    assert ("eq", "id", "venue-1") in delete["filters"]
+    assert db.tables["venues"] == []
+
+
+def test_permanent_delete_of_an_unknown_venue_is_not_found(db):
+    with pytest.raises(NotFoundError):
+        service.permanently_delete_venue("missing")
+
+
+def test_permanent_delete_turns_the_databases_refusal_into_a_409(db, monkeypatch):
+    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
+    table = db.table
+
+    def refusing_table(name):
+        query = table(name)
+        if name == "venues":
+            execute = query.execute
+
+            def refuse_delete():
+                if query.op == "delete":
+                    raise APIError(
+                        {
+                            "message": 'Venue "Grand Ballroom" still has bookings for ongoing events',
+                            "code": "23503",
+                            "hint": None,
+                            "details": None,
+                        }
+                    )
+                return execute()
+
+            query.execute = refuse_delete
+        return query
+
+    monkeypatch.setattr(db, "table", refusing_table)
+
+    with pytest.raises(VenuePermanentDeleteError, match="still has bookings for ongoing events"):
+        service.permanently_delete_venue("venue-1")
+
+
+def test_a_permanently_deleted_venues_bookings_still_show_its_name():
+    rows = [
+        {"id": "b-1", "venue_id": None, "venue_name": "Old Hall", "venues": None},
+        {"id": "b-2", "venue_id": "venue-1", "venue_name": None, "venues": {"name": "Grand Ballroom"}},
+    ]
+
+    shown = booking_service.with_venue_names(rows)
+
+    assert [row["venues"]["name"] for row in shown] == ["Old Hall", "Grand Ballroom"]
+
+
+def test_route_lists_deleted_venues_for_venue_staff(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["venue_staff"])
+    monkeypatch.setattr(routes_module, "list_deleted_venues", lambda: [_venue(deleted_at="2026-10-23T10:00:00+00:00")])
+
+    response = client.get("/venues/deleted", headers=_headers(signing_key))
+
+    assert response.status_code == 200
+    assert response.get_json()[0]["id"] == "venue-1"
+
+
+def test_route_permanently_deletes_with_204(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["venue_staff"])
+    seen = []
+    monkeypatch.setattr(routes_module, "permanently_delete_venue", seen.append)
+
+    response = client.delete("/venues/venue-1/permanent", headers=_headers(signing_key))
+
+    assert response.status_code == 204
+    assert seen == ["venue-1"]
+
+
+def test_route_permanent_delete_of_an_active_venue_is_a_409(client, signing_key, monkeypatch, db):
+    _mock_profile(monkeypatch, ["venue_staff"])
+
+    response = client.delete("/venues/venue-1/permanent", headers=_headers(signing_key))
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "venue_permanent_delete_refused"
