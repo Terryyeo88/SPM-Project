@@ -129,6 +129,13 @@ describe('payload round trip', () => {
     expect(session.registration_start_datetime).toBe('2026-11-01T09:30')
   })
 
+  it('reads the layout Venue Staff removed, but never sends it back', () => {
+    const session = sessionFromEvent({ id: 'e', status: 'rejected', room_layout: null, room_layout_removed: 'banquet' })
+    expect(session.room_layout).toBe('')
+    expect(session.room_layout_removed).toBe('banquet')
+    expect(sessionPayload(session)).not.toHaveProperty('room_layout_removed')
+  })
+
 })
 
 describe('groupIntoRequests', () => {

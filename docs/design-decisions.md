@@ -1368,3 +1368,128 @@ restrictions aren't recorded, so they're listed as the officer's own checks.
 **safety_review joins the status windows.** Cancel, change requests, and
 the IS-9 / IS-21 impact checks now include it: it sits between planning and
 confirmed, with arrangements already made.
+
+
+## Venue Categories (IS-60, Sprint 3, 2026-10-23)
+
+Story: "As a Venue staff, I want to record what type of venues are available
+so that I can properly categorize the venues." Most of what it asks for was
+already on `main` as the room layouts feature (`room_layouts` table,
+`/room-layouts` routes, `RoomLayoutsView.vue`). IS-60 adds the acceptance
+tests (`test_ac1_*` ... `test_ac5_*` in `test_room_layouts.py` and
+`test_room_layouts_integration.py`) and one migration,
+`20261023000000_rejected_sessions_release_room_layouts.sql`, for how
+rejected sessions are treated. The calls below are flagged in
+docs/open-questions.md.
+
+### Venue categories are the room layouts
+
+The story doesn't define a category. Room layouts (theatre, classroom,
+banquet, ...) are already the list of venue types that Venue Staff maintain:
+
+- venues list the layouts they support;
+- event requests pick one;
+- Venue Staff add, rename and delete them.
+
+The story's five criteria (create, edit, disable, delete only once disabled,
+delete only once no ongoing event uses it) match that feature's lifecycle
+one for one. A separate `venue_categories` table would be a second list of
+the same thing, which Venue Staff would have to keep in step. So IS-60 is
+met by room layouts, with no new table. The UI still says "Room Layouts".
+
+### "Disabling" is the soft delete, and it can be undone
+
+AC3's "disabling" and AC4's "disabled first" are the soft delete:
+`is_active = false`, through `DELETE /room-layouts/<id>`. A disabled layout:
+
+- is no longer offered on event forms;
+- can't be chosen for a new or changed session;
+- is still listed for Venue Staff, under "Deleted";
+- can be restored (`POST /room-layouts/<id>/restore`).
+
+The story doesn't mention restoring. It's kept because disabling is
+otherwise a one-way step taken while events still depend on the layout.
+
+### "Ongoing" means not completed, cancelled or rejected
+
+AC5 defines ongoing events as those "not completed or cancelled". Read
+literally, a rejected event counts as ongoing. A rejected session no
+organiser ever resubmits would then block the permanent delete indefinitely.
+
+A rejected session is back with its organiser to fix and resubmit, the same
+position as a draft, so it isn't ongoing either. Permanent delete is refused
+only while an event that is not completed, cancelled or rejected uses the
+layout. Drafts never hold one up: disabling clears the layout from them (next
+section). This departs from the AC's literal wording, so it's the first item
+under IS-60 in open-questions.md.
+
+### Drafts and rejected sessions lose a disabled layout; other events keep it
+
+AC3 lets a category be disabled while ongoing events use it. Those events
+(submitted through confirmed) keep their layout: their request was made, and
+is being planned, with it. A session still being written or fixed is
+different. Submitting needs an active layout, so the organiser would be
+refused at submit time anyway. The database clears the layout from them
+straight away:
+
+1. **When the layout is disabled:** every draft and rejected session using it
+   (`room_layout_soft_deleted`).
+2. **When a session is rejected while its layout is disabled:** that session
+   (`events_release_disabled_layout_on_reject`). Without this, a session under
+   review when the layout was disabled would come back to its organiser still
+   holding it.
+3. **When the layout is permanently deleted:** any rejected session still
+   holding it, e.g. one written straight to the table
+   (`before_room_layout_delete`).
+
+Restoring the layout doesn't put it back on those sessions: by then the
+organiser may already have picked another.
+
+### Telling the organiser why the layout is empty
+
+`events.room_layout_removed` keeps the name of a layout cleared in any of
+the three cases above:
+
+- **What the organiser sees:** while the session has no layout, the form
+  (`EventSessionFields.vue`, via `lib/roomLayouts.js::removedLayoutNotice`)
+  shows: *The room layout "X" is no longer available, so it has been removed
+  from this session. Please choose a new room layout.*
+- **When it's cleared:** as soon as a layout is set again
+  (`events_unflag_removed_room_layout`). Other edits leave it.
+- **Never sent from the form:** `sessionPayload` leaves it out, so the
+  database is the only thing that sets it.
+- **Not part of the event details:** it isn't one of the fields
+  `_from_database_event` returns, so it never appears in a change diff.
+
+### Not recorded in event_logs
+
+Clearing a layout from a draft or rejected session isn't logged. It's the
+database reacting to Venue Staff's change, and no user is editing the event;
+`event_logs.changed_by` expects one. The draft clearing that this extends was
+never logged either. Rejected sessions are submitted events, so this is an
+exception to "every change to a submitted event is logged", and is flagged.
+
+### Completed and cancelled events keep the name
+
+Permanently deleting a layout leaves its name on completed and cancelled
+events (`events.room_layout`); only `room_layout_id` becomes null (ON DELETE
+SET NULL). Their record of what was requested stays intact. This is
+unchanged from the room layouts migration.
+
+### Names are unique regardless of case
+
+"Theatre" can't be added beside "theatre"; the index is on `lower(name)`.
+A clash with a disabled layout says to restore it instead, because Venue
+Staff can't otherwise tell why the name is taken.
+
+### Who can manage them, and why others get 403, not 404
+
+`room_layout.manage` is Venue Staff only. Every other role gets
+`DENY_FORBIDDEN` (403), not a 404:
+
+- Layouts are shared reference data with no owner: their names are on every
+  venue's supported layouts and in every event form.
+- A 403 hides nothing that a 404 would. docs/authz-usage.md's case for a 404
+  (not revealing that a resource exists) doesn't apply.
+- `room_layout.list` gives the same 403 to roles that never work with
+  layouts (attendee, safety officer).

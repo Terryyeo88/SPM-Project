@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./api', () => ({ apiGet: vi.fn() }))
 
 import { apiGet } from './api'
-import { fetchRoomLayouts, roomLayoutOptions } from './roomLayouts'
+import { fetchRoomLayouts, removedLayoutNotice, roomLayoutOptions } from './roomLayouts'
 
 describe('fetchRoomLayouts', () => {
   beforeEach(() => apiGet.mockReset())
@@ -45,5 +45,18 @@ describe('roomLayoutOptions', () => {
 
   it('adds nothing for a session with no layout yet', () => {
     expect(roomLayoutOptions(['theatre'], '')).toHaveLength(1)
+  })
+})
+
+describe('removedLayoutNotice', () => {
+  it('names the layout Venue Staff removed while the session has none', () => {
+    expect(removedLayoutNotice({ room_layout: '', room_layout_removed: 'banquet' })).toBe(
+      'The room layout "banquet" is no longer available, so it has been removed from this session. Please choose a new room layout.',
+    )
+  })
+
+  it('is empty once a layout is chosen, or when none was removed', () => {
+    expect(removedLayoutNotice({ room_layout: 'theatre', room_layout_removed: 'banquet' })).toBe('')
+    expect(removedLayoutNotice({ room_layout: '', room_layout_removed: '' })).toBe('')
   })
 })

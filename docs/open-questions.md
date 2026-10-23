@@ -1112,3 +1112,36 @@ conventions Justin's View Reserved Equipment section documents
   the outcome, and a rejection's reason, under the request on the event page.
 - **The coordinator's page does not refresh itself** when Technical Support
   decide; they see the new quantity and allocated units after reloading.
+
+
+## Venue Categories (IS-60, 23 Oct)
+
+Reasoning for each item is in docs/design-decisions.md, "Venue Categories
+(IS-60)".
+
+- **Venue categories are the room layouts.** The story's "type of venues"
+  is implemented as the existing room layouts (theatre, classroom, ...)
+  rather than a separate category list. Please confirm a category isn't
+  meant to be something else, such as a venue type like "auditorium" or
+  "lab" independent of seating layout.
+- **Rejected events are not "ongoing".** AC5 says ongoing events are those
+  "not completed or cancelled". We also exclude rejected sessions, so a
+  rejected session never blocks permanently deleting a category. Please
+  confirm this departure from the AC's wording is acceptable.
+- **Drafts and rejected sessions lose a disabled category.** It is cleared
+  from them when it is disabled, when they are rejected while it is
+  disabled, and when it is permanently deleted; the organiser's form says
+  why it is empty. Other submitted events keep it. Please confirm.
+- **Restoring a category doesn't put it back** on the drafts and rejected
+  sessions it was cleared from; their organisers pick again. Please
+  confirm, or say if a restore should give it back to sessions that
+  haven't chosen another one yet.
+- **Clearing a rejected session's layout isn't in its change history.**
+  Nobody edits the event: it is the database reacting to Venue Staff
+  disabling or deleting the category. Please confirm, or say if it should
+  be logged (attributed to Venue Staff or to "system").
+- **"Disabling" is the soft delete, and can be undone.** AC3/AC4's
+  "disable" is the existing soft delete, which Venue Staff can also
+  restore; the story doesn't mention restoring. Please confirm.
+- **Category names are unique regardless of case.** "Theatre" and
+  "theatre" can't both exist. Please confirm.
