@@ -2,8 +2,9 @@
 HTTP routes for Attendee Registration (Justin). Attendee only.
 
   GET    /registrations/open                 upcoming sessions open to attendees
-                                             (confirmed, registration enabled),
-                                             public fields + places left
+                                             (confirmed, with or without
+                                             registration), public fields +
+                                             registration_needs + places left
   GET    /registrations/mine                 the caller's registrations, with
                                              status and waiting-list position
   GET    /registrations/sessions/<event_id>  one public session + places left +
