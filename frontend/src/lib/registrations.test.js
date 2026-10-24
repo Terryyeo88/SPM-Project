@@ -9,13 +9,37 @@ import {
   placesLabel,
   prefillFromProfile,
   registrationPayload,
+  registrationRequirementLabel,
   registrationState,
   registrationStatusLabel,
+  requiresRegistration,
   spotsFilled,
 } from './registrations'
 
 const NOW = new Date('2026-10-04T08:00:00Z')
-const OPEN = { registration_start_datetime: '2026-10-03T00:00:00Z', registration_end_datetime: '2026-11-02T15:59:00Z' }
+const OPEN = {
+  registration_needs: true,
+  registration_start_datetime: '2026-10-03T00:00:00Z',
+  registration_end_datetime: '2026-11-02T15:59:00Z',
+}
+
+describe('View Events Without Registration', () => {
+  it('only registration_needs === true counts as requiring registration', () => {
+    expect(requiresRegistration({ registration_needs: true })).toBe(true)
+    expect(requiresRegistration({ registration_needs: false })).toBe(false)
+    expect(requiresRegistration({ registration_needs: null })).toBe(false)
+    expect(requiresRegistration(null)).toBe(false)
+  })
+
+  it('labels every session one way or the other', () => {
+    expect(registrationRequirementLabel({ registration_needs: true })).toBe('Registration required')
+    expect(registrationRequirementLabel({ registration_needs: false })).toBe('No registration required')
+  })
+
+  it('gives no availability tag to a session without registration', () => {
+    expect(availabilityTag({ registration_needs: false, places_left: null }, NOW)).toBeNull()
+  })
+})
 
 describe('registrationState', () => {
   it('is open inside the window', () => {
@@ -40,8 +64,10 @@ describe('availabilityTag (the search-result card tag)', () => {
   })
 
   it('says when registration has not opened or has closed', () => {
-    expect(availabilityTag({ registration_start_datetime: '2026-10-04T10:00:00Z' }, NOW).label).toBe('Opens Soon')
-    expect(availabilityTag({ registration_end_datetime: '2026-10-03T00:00:00Z' }, NOW).label).toBe('Registration Closed')
+    expect(availabilityTag({ registration_needs: true, registration_start_datetime: '2026-10-04T10:00:00Z' }, NOW).label)
+      .toBe('Opens Soon')
+    expect(availabilityTag({ registration_needs: true, registration_end_datetime: '2026-10-03T00:00:00Z' }, NOW).label)
+      .toBe('Registration Closed')
   })
 })
 

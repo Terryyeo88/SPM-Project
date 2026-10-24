@@ -884,6 +884,11 @@ def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
 # Someone without the attendee role who can already see the event (its
 # organiser, coordinator, the Lead) gets a 403 instead.
 #
+# View Events Without Registration (Justin): attendees can also SEE
+# confirmed sessions that don't need registration (public fields only), so
+# for viewing, "public" is just "confirmed". Registering for one of those is
+# a 403, not a 404 -- the attendee can already see it exists.
+#
 # The registration PERIOD is not checked here: it's time-based, not a
 # property of (user, event), so the database function that records the
 # registration checks it (supabase/migrations/20261005000000_registrations.sql).
@@ -893,18 +898,30 @@ def _is_public_for_registration(event: Any) -> bool:
     return _event_status_in(event, "confirmed") and getattr(event, "registration_needs", None) is True
 
 
+def _is_public_to_attendees(event: Any) -> bool:
+    """Every confirmed session, whether or not it needs registration."""
+    return _event_status_in(event, "confirmed")
+
+
 def rule_event_register(user: Any, event: Any) -> Decision:
     if _has_role(user, "attendee"):
-        return Decision.ALLOW if _is_public_for_registration(event) else Decision.DENY_NOT_FOUND
+        if _is_public_for_registration(event):
+            return Decision.ALLOW
+        return Decision.DENY_FORBIDDEN if _is_public_to_attendees(event) else Decision.DENY_NOT_FOUND
     if rule_event_view(user, event) is Decision.ALLOW:
         return Decision.DENY_FORBIDDEN
     return Decision.DENY_NOT_FOUND
 
 
 def rule_event_view_public(user: Any, event: Any) -> Decision:
-    """The attendee's event page shows only public fields, so it has exactly
-    the same audience as registering: attendees, for public sessions."""
-    return rule_event_register(user, event)
+    """The attendee's event page shows only public fields: attendees may
+    see every confirmed session, with or without registration. Anything
+    else is a 404 to them."""
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW if _is_public_to_attendees(event) else Decision.DENY_NOT_FOUND
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
 
 
 def rule_registration_withdraw(user: Any, event: Any) -> Decision:

@@ -20,6 +20,20 @@ const PHONE_PATTERN = /^\+?[0-9][0-9 -]{5,18}[0-9]$/
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 export const NOTES_MAX_LENGTH = 500
 
+/**
+ * View Events Without Registration (Justin): the attendee's list holds every
+ * confirmed session, whether or not it needs registration. Those that don't
+ * have no Register button, places or waiting list.
+ */
+export function requiresRegistration(session) {
+  return session?.registration_needs === true
+}
+
+/** "Registration required" / "No registration required". */
+export function registrationRequirementLabel(session) {
+  return requiresRegistration(session) ? 'Registration required' : 'No registration required'
+}
+
 /** A session counts as "Almost Full" once this share of places is taken. */
 const ALMOST_FULL_SHARE = 0.8
 
@@ -40,9 +54,11 @@ export function registrationState(session, now = new Date()) {
 /**
  * The tag on a search-result card (wireframe: Open / Almost Full / Waitlist
  * Only), plus Opens Soon / Registration Closed for windows that aren't open.
- * tone: 'open' | 'warn' | 'full' | 'muted'.
+ * tone: 'open' | 'warn' | 'full' | 'muted'. null for a session that doesn't
+ * need registration (nothing to be open or full).
  */
 export function availabilityTag(session, now = new Date()) {
+  if (!requiresRegistration(session)) return null
   const state = registrationState(session, now)
   if (state === 'upcoming') return { label: 'Opens Soon', tone: 'muted' }
   if (state === 'closed') return { label: 'Registration Closed', tone: 'muted' }

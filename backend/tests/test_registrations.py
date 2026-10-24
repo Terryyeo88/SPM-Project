@@ -21,7 +21,7 @@ import app.registrations.registration_service as service
 import app.registrations.routes as routes_module
 from app.authz import actions
 from app.authz.policy import can
-from app.authz.rules import Decision, rule_event_register
+from app.authz.rules import Decision, rule_event_register, rule_event_view_public
 from app.shared.errors import NotFoundError, ValidationError
 from tests.factories import make_user
 
@@ -59,13 +59,37 @@ def test_attendee_may_register_for_a_confirmed_session_with_registration_enabled
         _session(status="approved"),
         _session(status="completed"),
         _session(status="cancelled"),
-        _session(registration_needs=False),
-        _session(registration_needs=None),
     ],
 )
 def test_attendee_cannot_register_unless_confirmed_and_enabled(event):
-    """AC1. To an attendee such a session doesn't exist: 404, not 403."""
+    """AC1. To an attendee an unconfirmed session doesn't exist: 404, not 403."""
     assert rule_event_register(ATTENDEE, event) is Decision.DENY_NOT_FOUND
+
+
+@pytest.mark.parametrize("registration_needs", [False, None])
+def test_attendee_cannot_register_for_a_session_without_registration(registration_needs):
+    """They can see it (View Events Without Registration), so 403, not 404."""
+    event = _session(registration_needs=registration_needs)
+    assert rule_event_register(ATTENDEE, event) is Decision.DENY_FORBIDDEN
+
+
+# -- View Events Without Registration ------------------------------------------
+
+
+@pytest.mark.parametrize("registration_needs", [True, False, None])
+def test_attendee_sees_every_confirmed_session_with_or_without_registration(registration_needs):
+    assert rule_event_view_public(ATTENDEE, _session(registration_needs=registration_needs)) is Decision.ALLOW
+
+
+@pytest.mark.parametrize("status", ["draft", "submitted", "planning", "approved", "completed", "cancelled"])
+def test_attendee_cannot_see_a_session_that_is_not_confirmed(status):
+    event = _session(status=status, registration_needs=False)
+    assert rule_event_view_public(ATTENDEE, event) is Decision.DENY_NOT_FOUND
+
+
+def test_only_attendees_use_the_attendee_event_page():
+    assert rule_event_view_public(ORGANISER, _session()) is Decision.DENY_FORBIDDEN
+    assert rule_event_view_public(COORDINATOR, _session()) is Decision.DENY_NOT_FOUND
 
 
 def test_only_attendees_register():
@@ -259,9 +283,9 @@ def test_open_sessions_carry_places_left(monkeypatch):
     def fake_sessions(from_date):
         seen["from"] = from_date
         return [
-            {"id": "full", "name": "Talk", "expected_attendance": 2},
-            {"id": "roomy", "name": "Talk", "expected_attendance": 50},
-            {"id": "unlimited", "name": "Talk", "expected_attendance": None},
+            {"id": "full", "name": "Talk", "expected_attendance": 2, "registration_needs": True},
+            {"id": "roomy", "name": "Talk", "expected_attendance": 50, "registration_needs": True},
+            {"id": "unlimited", "name": "Talk", "expected_attendance": None, "registration_needs": True},
         ]
 
     monkeypatch.setattr(service, "_db_public_sessions", fake_sessions)
@@ -282,6 +306,56 @@ def test_open_sessions_carry_places_left(monkeypatch):
     assert (sessions["full"]["places_left"], sessions["full"]["waitlist_count"]) == (0, 1)
     assert sessions["roomy"]["places_left"] == 49
     assert sessions["unlimited"]["places_left"] is None
+
+
+def test_open_sessions_include_sessions_without_registration_in_one_list(monkeypatch):
+    """Both kinds come back together, labelled by registration_needs; ones
+    without registration have no places and aren't counted."""
+    monkeypatch.setattr(
+        service,
+        "_db_public_sessions",
+        lambda from_date: [
+            {"id": "talk", "name": "Talk", "expected_attendance": 50, "registration_needs": True},
+            {"id": "fair", "name": "Career Fair", "expected_attendance": 300, "registration_needs": False},
+        ],
+    )
+    counted = {}
+
+    def fake_statuses(ids):
+        counted["ids"] = ids
+        return [{"event_id": "talk", "status": "confirmed"}]
+
+    monkeypatch.setattr(service, "_db_registration_statuses", fake_statuses)
+
+    sessions = {s["id"]: s for s in service.list_open_sessions(today=date(2026, 10, 4))}
+
+    assert set(sessions) == {"talk", "fair"}
+    assert counted["ids"] == ["talk"]
+    assert sessions["talk"]["places_left"] == 49
+    assert sessions["fair"]["registration_needs"] is False
+    assert (sessions["fair"]["capacity"], sessions["fair"]["places_left"]) == (None, None)
+
+
+def test_public_fields_carry_registration_needs_but_no_planning_details():
+    fields = {field.strip() for field in service._PUBLIC_FIELDS.split(",")}
+    assert "registration_needs" in fields
+    assert not fields & {"organizer_id", "coordinator_id", "status", "venue_id", "notes"}
+
+
+def test_session_page_without_registration_has_no_places(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "_db_sessions_by_id",
+        lambda ids: [{"id": "s1", "expected_attendance": 300, "registration_needs": False}],
+    )
+    monkeypatch.setattr(service, "_db_registration_statuses", lambda ids: [])
+    monkeypatch.setattr(service, "list_my_registrations", lambda attendee_id: [])
+
+    page = service.get_session("s1", "att-1")
+
+    assert page["places_left"] is None
+    assert page["capacity"] is None
+    assert page["my_registration"] is None
 
 
 def test_my_registrations_show_waiting_list_position_first_come_first_served(monkeypatch):
@@ -319,7 +393,9 @@ def test_my_registrations_show_waiting_list_position_first_come_first_served(mon
 
 
 def test_session_page_has_places_and_my_registration(monkeypatch):
-    monkeypatch.setattr(service, "_db_sessions_by_id", lambda ids: [{"id": "s1", "expected_attendance": 2}])
+    monkeypatch.setattr(
+        service, "_db_sessions_by_id", lambda ids: [{"id": "s1", "expected_attendance": 2, "registration_needs": True}]
+    )
     monkeypatch.setattr(service, "_db_registration_statuses", lambda ids: [{"event_id": "s1", "status": "confirmed"}])
     monkeypatch.setattr(
         service,
@@ -417,6 +493,20 @@ def test_session_page_is_hidden_from_attendees_unless_public(client, signing_key
     headers = _as(monkeypatch, signing_key, ["attendee"], "att-1")
     monkeypatch.setattr(routes_module, "load_session", lambda event_id: _session(status="planning"))
     assert client.get("/registrations/sessions/s1", headers=headers).status_code == 404
+
+
+def test_session_page_shows_a_confirmed_session_without_registration(client, signing_key, monkeypatch):
+    headers = _as(monkeypatch, signing_key, ["attendee"], "att-1")
+    monkeypatch.setattr(routes_module, "load_session", lambda event_id: _session(registration_needs=False))
+    monkeypatch.setattr(routes_module, "get_session", lambda event_id, attendee_id: {"id": event_id})
+    assert client.get("/registrations/sessions/s1", headers=headers).status_code == 200
+
+
+def test_registering_for_a_session_without_registration_is_refused(client, signing_key, monkeypatch):
+    headers = _as(monkeypatch, signing_key, ["attendee"], "att-1")
+    monkeypatch.setattr(routes_module, "load_session", lambda event_id: _session(registration_needs=False))
+    monkeypatch.setattr(routes_module, "register", lambda *a: pytest.fail("must not register"))
+    assert client.post("/registrations/s1", headers=headers, json=VALID).status_code == 403
 
 
 def test_only_attendees_withdraw(client, signing_key, monkeypatch):
