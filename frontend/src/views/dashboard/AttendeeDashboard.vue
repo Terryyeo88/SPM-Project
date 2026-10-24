@@ -6,8 +6,9 @@
  *                       typed, to browse everything) swaps the sections
  *                       below for a grid of session cards tagged Open /
  *                       Almost Full / Waitlist Only (or Opens Soon /
- *                       Registration Closed). Location isn't searchable
- *                       yet: no event has a venue until venue booking exists.
+ *                       Registration Closed). Each card shows the
+ *                       session's confirmed venue(s) (View Event Venue);
+ *                       searching by venue is deliberately not built.
  *                       The results hold every confirmed session, with or
  *                       without registration, each labelled "Registration
  *                       required" / "No registration required" (View Events
@@ -28,6 +29,7 @@ import {
   registrationStatusLabel,
   requiresRegistration,
   sessionWhen,
+  venueSummary,
 } from '../../lib/registrations'
 
 const sessions = ref([])
@@ -166,6 +168,13 @@ onMounted(load)
         <router-link v-for="s in results" :key="s.id" :to="eventLink(s.id)" class="card">
           <span class="card-name">{{ s.name }}</span>
           <span class="muted small">{{ sessionWhen(s, formatDateRange) }}</span>
+          <span class="venue small">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+            </svg>
+            {{ venueSummary(s) }}
+          </span>
           <span class="requirement" :class="{ 'requirement-none': !requiresRegistration(s) }">
             {{ registrationRequirementLabel(s) }}
           </span>
@@ -245,6 +254,7 @@ onMounted(load)
 .card-name { font-size: 14px; font-weight: 700; color: #222; line-height: 1.3; }
 .card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; }
 .view { font-size: 12px; font-weight: 600; color: #333; }
+.venue { display: flex; align-items: center; gap: 5px; color: #555; }
 .requirement { font-size: 12px; font-weight: 600; color: #2a4f8f; }
 .requirement-none { color: #5a5a5a; }
 .tag { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 3px 10px; }

@@ -635,6 +635,22 @@ confirmed events they can simply turn up to.
   registered or waitlisted attendees.
 
 
+## View Event Venue (Justin, 2026-10-24)
+
+- **Confirmed bookings only, every one of them.** Each session in
+  `GET /registrations/open` and `GET /registrations/sessions/<id>` carries
+  `venues: [{name, location}]` from its confirmed `venue_bookings`. An event
+  can use several venues (Week 7 #3), so all are listed (by name, each venue
+  once). Pending, rejected and cancelled bookings never appear.
+- **Name and location only.** Booking status, requester and notes stay
+  internal (briefing 8b).
+- **A permanently deleted venue** keeps its name on the booking (IS-61), so
+  the name still shows, without a location.
+- **No venue yet** shows as "Venue to be confirmed".
+- **No searching by venue.** The briefing's general Search and Filtering
+  lists venue as an example criterion, but no story asks for it.
+
+
 ## Booking conflicts (IS-16, Terry, Sprint 2, 2026-10-05)
 
 Stacked on Venue Booking Request / Approval (PR #18). Josiah's table and

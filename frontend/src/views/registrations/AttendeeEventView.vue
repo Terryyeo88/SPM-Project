@@ -16,8 +16,9 @@
  * registration); DELETE /registrations/<id> to withdraw. Withdrawing a
  * confirmed place moves the first person on the waiting list up.
  *
- * The wireframe's event image, venue and category aren't shown: events have
- * none of those yet.
+ * Venue (View Event Venue): every confirmed venue, name and location, or
+ * "Venue to be confirmed". The wireframe's event image and category aren't
+ * shown: events have neither yet.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -31,6 +32,7 @@ import {
   requiresRegistration,
   sessionWhen,
   spotsFilled,
+  venueLines,
 } from '../../lib/registrations'
 import AppNavBar from '../../components/AppNavBar.vue'
 import RegistrationForm from '../../components/RegistrationForm.vue'
@@ -119,6 +121,13 @@ onMounted(load)
             <div class="about">
               <span class="label">About this event</span>
               <p>{{ session.description || 'No description yet.' }}</p>
+            </div>
+            <div class="about">
+              <span class="label">{{ venueLines(session).length > 1 ? 'Venues' : 'Venue' }}</span>
+              <ul v-if="venueLines(session).length" class="venues">
+                <li v-for="line in venueLines(session)" :key="line">{{ line }}</li>
+              </ul>
+              <p v-else>Venue to be confirmed</p>
             </div>
             <div v-if="needsRegistration" class="about">
               <span class="label">Registration period</span>
@@ -242,6 +251,7 @@ hr { border: none; height: 1px; background: #e2e2e2; margin: 0; }
 .state-waitlisted { background: #f7efe1; border: 1px dashed #8a5a12; color: #8a5a12; }
 .state-none { background: #eef3fb; border: 1px dashed #2a4f8f; color: #2a4f8f; text-align: center; }
 .requirement { font-weight: 600; color: #2a4f8f; }
+.venues { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.65; color: #3a3a3a; }
 
 .btn { height: 46px; border-radius: 4px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
 .btn:disabled { opacity: 0.55; cursor: default; }

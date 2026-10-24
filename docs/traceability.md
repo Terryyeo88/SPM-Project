@@ -230,6 +230,19 @@ Story: As an Attendee, I want to see confirmed events that do not require regist
 | Events that are not confirmed are not shown to Attendees | `test_registrations.py::test_attendee_cannot_see_a_session_that_is_not_confirmed`, `::test_session_page_is_hidden_from_attendees_unless_public` | `rules.py::_is_public_to_attendees`; `_db_public_sessions` (`status = confirmed`) |
 | No internal planning information is shown | `test_registrations.py::test_public_fields_carry_registration_needs_but_no_planning_details` | `registration_service._PUBLIC_FIELDS` |
 
+## View Event Venue (Justin)
+
+Story: As an Attendee, I want to see the venue of each confirmed event, so that I know where to go when I attend. Unit tests: `test_registrations.py`, `frontend/src/lib/registrations.test.js`.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Each event in the list shows its venue name and location | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `registrations.test.js` (View Event Venue) | `registration_service.list_open_sessions` / `_confirmed_venues`; `registrations.js::venueSummary`; `AttendeeDashboard.vue` |
+| The event page shows the venue name and location | `test_registrations.py::test_the_event_page_shows_its_confirmed_venues` | `registration_service.get_session`; `registrations.js::venueLines`; `AttendeeEventView.vue` |
+| An event with more than one venue shows all its confirmed venues | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `::test_a_venue_is_listed_once_and_a_deleted_venue_keeps_its_name` | `registration_service._confirmed_venues` |
+| Only confirmed venue bookings are shown | Not unit-tested (a database filter); check manually on the local stack | `registration_service._db_confirmed_venues` (`status = confirmed`) |
+| A changed venue shows when the event is viewed again | read live on every request, nothing cached | `registration_service._db_confirmed_venues` |
+| No internal booking information is shown | `test_registrations.py::test_only_the_venue_name_and_location_are_sent` | `registration_service._venue` |
+
 ## Explicitly deferred (not tested because not built)
 
 - "An attendee cannot view another attendee's registration" — there is no

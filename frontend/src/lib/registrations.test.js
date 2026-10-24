@@ -14,6 +14,8 @@ import {
   registrationStatusLabel,
   requiresRegistration,
   spotsFilled,
+  venueLines,
+  venueSummary,
 } from './registrations'
 
 const NOW = new Date('2026-10-04T08:00:00Z')
@@ -53,6 +55,28 @@ describe('registrationState', () => {
 
   it('treats a session without a window as open', () => {
     expect(registrationState({}, NOW)).toBe('open')
+  })
+})
+
+describe('View Event Venue', () => {
+  const venues = [
+    { name: 'Auditorium', location: 'Level 1' },
+    { name: 'Seminar Room 2', location: 'Level 3' },
+  ]
+
+  it('shows each confirmed venue with its location', () => {
+    expect(venueLines({ venues })).toEqual(['Auditorium, Level 1', 'Seminar Room 2, Level 3'])
+    expect(venueLines({ venues: [{ name: 'Old Room', location: null }] })).toEqual(['Old Room'])
+  })
+
+  it('summarises one or several venues on a card', () => {
+    expect(venueSummary({ venues: venues.slice(0, 1) })).toBe('Auditorium, Level 1')
+    expect(venueSummary({ venues })).toBe('Auditorium, Level 1 + 1 more')
+  })
+
+  it('says the venue is still to be confirmed when there is none', () => {
+    expect(venueSummary({ venues: [] })).toBe('Venue to be confirmed')
+    expect(venueLines({})).toEqual([])
   })
 })
 
