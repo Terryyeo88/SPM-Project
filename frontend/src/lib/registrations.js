@@ -34,6 +34,22 @@ export function registrationRequirementLabel(session) {
   return requiresRegistration(session) ? 'Registration required' : 'No registration required'
 }
 
+/**
+ * View Event Venue (Justin): a session's confirmed venues, from the
+ * backend's `venues` list ([{ name, location }]), one line each:
+ * "Auditorium, Level 1". Empty until a venue is confirmed.
+ */
+export function venueLines(session) {
+  return (session?.venues ?? []).map((venue) => (venue.location ? `${venue.name}, ${venue.location}` : venue.name))
+}
+
+/** The venue line on a search-result card: one venue, or "Auditorium + 2 more". */
+export function venueSummary(session) {
+  const lines = venueLines(session)
+  if (!lines.length) return 'Venue to be confirmed'
+  return lines.length === 1 ? lines[0] : `${lines[0]} + ${lines.length - 1} more`
+}
+
 /** A session counts as "Almost Full" once this share of places is taken. */
 const ALMOST_FULL_SHARE = 0.8
 
@@ -85,8 +101,8 @@ export function placesLabel(session) {
 
 /**
  * Search, as on the dashboard wireframe: by event name (case-insensitive)
- * and/or date (a session running on that day). Location isn't searchable
- * yet -- no event has a venue until venue booking exists.
+ * and/or date (a session running on that day). Venues are shown on each
+ * result but aren't searched (not asked for).
  */
 export function filterSessions(sessions, { query = '', date = '' } = {}) {
   const needle = query.trim().toLowerCase()

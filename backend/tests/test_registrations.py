@@ -32,6 +32,12 @@ COORDINATOR = make_user(["event_coordinator"], user_id="coord-9")
 VALID = {"email": "ethan@example.com", "phone": "91234567", "notify_email": True, "notify_sms": False}
 
 
+@pytest.fixture(autouse=True)
+def _no_confirmed_venues(monkeypatch):
+    """Unit tests never reach the database: no venues unless a test says so."""
+    monkeypatch.setattr(service, "_db_confirmed_venues", lambda event_ids: [])
+
+
 def _session(status="confirmed", registration_needs=True, **overrides):
     return SimpleNamespace(
         id="s1",
@@ -356,6 +362,76 @@ def test_session_page_without_registration_has_no_places(monkeypatch):
     assert page["places_left"] is None
     assert page["capacity"] is None
     assert page["my_registration"] is None
+
+
+# -- View Event Venue ----------------------------------------------------------
+
+
+def test_open_sessions_show_every_confirmed_venue(monkeypatch):
+    """Each session lists its confirmed venues (several for one event, Week 7
+    #3); a session with none has an empty list."""
+    monkeypatch.setattr(
+        service,
+        "_db_public_sessions",
+        lambda from_date: [
+            {"id": "conf", "name": "Conference", "registration_needs": False},
+            {"id": "talk", "name": "Talk", "registration_needs": False},
+        ],
+    )
+    asked = {}
+
+    def fake_venues(event_ids):
+        asked["ids"] = event_ids
+        return [
+            {"event_id": "conf", "venue_name": None, "venues": {"name": "Seminar Room 2", "location": "Level 3"}},
+            {"event_id": "conf", "venue_name": None, "venues": {"name": "Auditorium", "location": "Level 1"}},
+        ]
+
+    monkeypatch.setattr(service, "_db_confirmed_venues", fake_venues)
+
+    sessions = {s["id"]: s for s in service.list_open_sessions(today=date(2026, 10, 4))}
+
+    assert asked["ids"] == ["conf", "talk"]
+    assert sessions["conf"]["venues"] == [
+        {"name": "Auditorium", "location": "Level 1"},
+        {"name": "Seminar Room 2", "location": "Level 3"},
+    ]
+    assert sessions["talk"]["venues"] == []
+
+
+def test_a_venue_is_listed_once_and_a_deleted_venue_keeps_its_name(monkeypatch):
+    rows = [
+        {"event_id": "s1", "venue_name": None, "venues": {"name": "Hall", "location": "L1"}},
+        {"event_id": "s1", "venue_name": None, "venues": [{"name": "Hall", "location": "L1"}]},
+        {"event_id": "s1", "venue_name": "Old Room", "venues": None},
+    ]
+    monkeypatch.setattr(service, "_db_confirmed_venues", lambda event_ids: rows)
+
+    assert service._confirmed_venues(["s1"])["s1"] == [
+        {"name": "Hall", "location": "L1"},
+        {"name": "Old Room", "location": None},
+    ]
+
+
+def test_the_event_page_shows_its_confirmed_venues(monkeypatch):
+    monkeypatch.setattr(service, "_db_sessions_by_id", lambda ids: [{"id": "s1", "registration_needs": False}])
+    monkeypatch.setattr(service, "_db_registration_statuses", lambda ids: [])
+    monkeypatch.setattr(service, "list_my_registrations", lambda attendee_id: [])
+    monkeypatch.setattr(
+        service,
+        "_db_confirmed_venues",
+        lambda event_ids: [{"event_id": "s1", "venue_name": None, "venues": {"name": "Hall", "location": "L1"}}],
+    )
+
+    assert service.get_session("s1", "att-1")["venues"] == [{"name": "Hall", "location": "L1"}]
+
+
+def test_only_the_venue_name_and_location_are_sent():
+    """No booking details (status, requester, notes) reach the attendee."""
+    venue = service._venue(
+        {"event_id": "s1", "venue_name": None, "venues": {"name": "Hall", "location": "L1", "capacity": 200}}
+    )
+    assert venue == {"name": "Hall", "location": "L1"}
 
 
 def test_my_registrations_show_waiting_list_position_first_come_first_served(monkeypatch):

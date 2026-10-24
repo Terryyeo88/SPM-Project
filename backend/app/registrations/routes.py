@@ -5,9 +5,11 @@ HTTP routes for Attendee Registration (Justin). Attendee only.
                                              (confirmed, with or without
                                              registration), public fields +
                                              registration_needs + places left
+                                             + confirmed venues (name, location)
   GET    /registrations/mine                 the caller's registrations, with
                                              status and waiting-list position
   GET    /registrations/sessions/<event_id>  one public session + places left +
+                                             confirmed venues +
                                              the caller's registration (or null)
   POST   /registrations/<event_id>           register. Body: {"email", "phone",
                                              "notify_email", "notify_sms",
