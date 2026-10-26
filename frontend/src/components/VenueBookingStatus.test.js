@@ -126,6 +126,32 @@ describe('VenueBookingStatus', () => {
     expect(wrapper.find('[role="status"]').text()).toContain('other venue bookings for this session are unchanged')
   })
 
+  it('warns, then refreshes the event, when cancelling reverts a confirmed event to planning', async () => {
+    const wrapper = await render([hall, room], 'confirmed')
+    await buttonIn(row(wrapper, 'booking-hall'), 'Cancel booking').trigger('click')
+    expect(wrapper.find('[data-test="reverts-to-planning"]').exists()).toBe(true)
+
+    apiPost.mockResolvedValueOnce({ ...hall, status: 'cancelled', event_reverted_to_planning: true })
+    apiGet.mockResolvedValueOnce({ id: 'session-1', status: 'planning' })
+    await row(wrapper, 'booking-hall').find('textarea').setValue('Venue fell through.')
+    await row(wrapper, 'booking-hall').find('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiGet).toHaveBeenLastCalledWith('/events/session-1')
+    expect(wrapper.emitted('updated')).toEqual([[{ id: 'session-1', status: 'planning' }]])
+    expect(wrapper.text()).toContain('it has gone back to planning')
+  })
+
+  it('does not refresh the event when it was not reverted', async () => {
+    apiPost.mockResolvedValueOnce({ ...hall, status: 'cancelled', event_reverted_to_planning: false })
+    const wrapper = await render([hall, room])
+
+    await cancelWithReason(wrapper, 'booking-hall', 'Moved.')
+
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.find('[data-test="reverts-to-planning"]').exists()).toBe(false)
+  })
+
   it('shows why a booking was cancelled', async () => {
     const wrapper = await render([{ ...hall, status: 'cancelled', cancellation: { reason: 'Moved.' } }])
     expect(row(wrapper, 'booking-hall').text()).toContain('Cancelled: Moved.')
