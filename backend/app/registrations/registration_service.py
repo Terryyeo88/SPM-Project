@@ -38,6 +38,16 @@ here is validation before that call and wording after it.
 Attendees only ever see a session's PUBLIC fields (_PUBLIC_FIELDS) -- the
 briefing: "an Attendee should not be able to view internal planning
 information".
+
+View Events Without Registration (Justin): attendees also see confirmed
+sessions that don't need registration, in the same list, each carrying
+`registration_needs` so the page can label it. Those have no places,
+counts or waiting list (capacity etc. are None).
+
+View Event Venue (Justin): each session in the list and on the event page
+carries `venues`, its CONFIRMED venue bookings as [{"name", "location"}]
+(a session may use several -- Week 7 #3). Only the venue's name and
+location are sent; nothing about the booking itself.
 """
 
 from __future__ import annotations
@@ -52,7 +62,7 @@ from app.shared.errors import NotFoundError, ValidationError
 _PUBLIC_FIELDS = (
     "id, shared_event_id, name, description, "
     "preferred_start_date, preferred_end_date, preferred_start_time, preferred_end_time, "
-    "expected_attendance, registration_start_datetime, registration_end_datetime"
+    "expected_attendance, registration_needs, registration_start_datetime, registration_end_datetime"
 )
 
 PHONE_PATTERN = re.compile(r"^\+?[0-9][0-9 \-]{5,18}[0-9]$")
@@ -187,6 +197,9 @@ def _counts(event_ids: list[str]) -> dict[str, dict[str, int]]:
 
 
 def _with_places(session: dict, counts: dict[str, int]) -> dict:
+    if session.get("registration_needs") is not True:
+        # Nothing to register for, so no places to count.
+        return {**session, "capacity": None, "confirmed_count": 0, "waitlist_count": 0, "places_left": None}
     capacity = session.get("expected_attendance")
     return {
         **session,
@@ -197,26 +210,58 @@ def _with_places(session: dict, counts: dict[str, int]) -> dict:
     }
 
 
+def _venue(row: dict) -> dict:
+    """{"name", "location"} for one confirmed booking. A permanently deleted
+    venue has no row any more (IS-61), only the name kept on the booking."""
+    venue = row.get("venues")
+    if isinstance(venue, list):
+        venue = venue[0] if venue else None
+    venue = venue or {}
+    return {"name": venue.get("name") or row.get("venue_name") or "Venue", "location": venue.get("location")}
+
+
+def _confirmed_venues(event_ids: list[str]) -> dict[str, list[dict]]:
+    """event_id -> its confirmed venues, by name, each venue once."""
+    venues = {event_id: [] for event_id in event_ids}
+    if not event_ids:
+        return venues
+    for row in _db_confirmed_venues(event_ids):
+        venue = _venue(row)
+        if venue not in venues[row["event_id"]]:
+            venues[row["event_id"]].append(venue)
+    for listed in venues.values():
+        listed.sort(key=lambda venue: (venue["name"].lower(), venue["location"] or ""))
+    return venues
+
+
 def list_open_sessions(today: date | None = None) -> list[dict]:
-    """Every upcoming session attendees may know about: confirmed, with
-    registration enabled, not yet started. Includes sessions whose window
-    hasn't opened yet or has closed, so the page can say so -- the window
-    itself is enforced when registering. Public fields only, plus places
-    left, soonest first."""
+    """Every upcoming session attendees may know about: confirmed and not
+    yet started, whether or not it needs registration (each carries
+    `registration_needs`). Includes sessions whose window hasn't opened yet
+    or has closed, so the page can say so -- the window itself is enforced
+    when registering. Public fields only, plus places left for sessions
+    that need registration, soonest first."""
     today = today or datetime.now(SINGAPORE_TZ).date()
     sessions = _db_public_sessions(today.isoformat())
-    counts = _counts([session["id"] for session in sessions])
-    return [_with_places(session, counts[session["id"]]) for session in sessions]
+    counts = _counts([session["id"] for session in sessions if session.get("registration_needs") is True])
+    venues = _confirmed_venues([session["id"] for session in sessions])
+    empty = {"confirmed": 0, "waitlisted": 0}
+    return [
+        {**_with_places(session, counts.get(session["id"], empty)), "venues": venues[session["id"]]}
+        for session in sessions
+    ]
 
 
 def get_session(event_id: str, attendee_id: str) -> dict:
     """One session's public fields and places left, plus the caller's own
     registration for it (or None), for the attendee's event page. Authorised
-    already (rule_event_view_public): confirmed with registration enabled."""
+    already (rule_event_view_public): confirmed, with or without
+    registration."""
     sessions = _db_sessions_by_id([event_id])
     if not sessions:
         raise NotFoundError("Event not found.")
     session = _with_places(sessions[0], _counts([event_id])[event_id])
+    session["venues"] = _confirmed_venues([event_id])[event_id]
     mine = next((r for r in list_my_registrations(attendee_id) if r["event_id"] == event_id), None)
     if mine:
         mine = {key: value for key, value in mine.items() if key != "session"}
@@ -289,7 +334,6 @@ def _db_public_sessions(from_date: str) -> list[dict]:
         supabase.table("events")
         .select(_PUBLIC_FIELDS)
         .eq("status", "confirmed")
-        .eq("registration_needs", True)
         .gte("preferred_start_date", from_date)
         .order("preferred_start_date")
         .execute()
@@ -299,6 +343,17 @@ def _db_public_sessions(from_date: str) -> list[dict]:
 
 def _db_sessions_by_id(event_ids: list[str]) -> list[dict]:
     result = supabase.table("events").select(_PUBLIC_FIELDS + ", status").in_("id", event_ids).execute()
+    return result.data or []
+
+
+def _db_confirmed_venues(event_ids: list[str]) -> list[dict]:
+    result = (
+        supabase.table("venue_bookings")
+        .select("event_id, venue_name, venues(name, location)")
+        .in_("event_id", event_ids)
+        .eq("status", "confirmed")
+        .execute()
+    )
     return result.data or []
 
 

@@ -610,6 +610,47 @@ Other decisions, from the story and the Week 2/4 clarifications:
   it through the anon/authenticated keys; only the backend's service role.
 
 
+## View Events Without Registration (Justin, 2026-10-24)
+
+The briefing makes registration optional per event ("Where enabled",
+"Where registration is required"), so attendees should also be able to see
+confirmed events they can simply turn up to.
+
+- **One list, no filter.** `GET /registrations/open` now returns every
+  upcoming confirmed session, with or without registration, each carrying
+  `registration_needs`. The dashboard shows them together, each labelled
+  "Registration required" or "No registration required".
+- **"Public to attendees" is now just "confirmed"** for viewing
+  (`rule_event_view_public`). Registering still needs confirmed *and*
+  `registration_needs = true`. An attendee registering for a confirmed
+  session without registration gets a 403, not a 404, because they can
+  already see it exists.
+- **No places for sessions without registration.** `capacity`,
+  `places_left` and the counts are null/0 for them, and they aren't
+  counted, so the page shows no spots bar, Register button or registration
+  period.
+- **No bookmarks and no notifications** for these events. Bookmarking isn't
+  a customer requirement. If it's added, decide whether bookmarked events
+  should notify, since the Attendee Notification story only notifies
+  registered or waitlisted attendees.
+
+
+## View Event Venue (Justin, 2026-10-24)
+
+- **Confirmed bookings only, every one of them.** Each session in
+  `GET /registrations/open` and `GET /registrations/sessions/<id>` carries
+  `venues: [{name, location}]` from its confirmed `venue_bookings`. An event
+  can use several venues (Week 7 #3), so all are listed (by name, each venue
+  once). Pending, rejected and cancelled bookings never appear.
+- **Name and location only.** Booking status, requester and notes stay
+  internal (briefing 8b).
+- **A permanently deleted venue** keeps its name on the booking (IS-61), so
+  the name still shows, without a location.
+- **No venue yet** shows as "Venue to be confirmed".
+- **No searching by venue.** The briefing's general Search and Filtering
+  lists venue as an example criterion, but no story asks for it.
+
+
 ## Booking conflicts (IS-16, Terry, Sprint 2, 2026-10-05)
 
 Stacked on Venue Booking Request / Approval (PR #18). Josiah's table and

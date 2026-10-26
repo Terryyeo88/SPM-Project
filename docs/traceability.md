@@ -217,6 +217,32 @@ Unit tests: `test_registrations.py` (rules, validation, service, routes), `front
 
 Not covered, because not built: notifications (see `docs/open-questions.md`).
 
+## View Events Without Registration (Justin)
+
+Story: As an Attendee, I want to see confirmed events that do not require registration alongside events that do, so that I know which events I can attend without signing up. Unit tests: `test_registrations.py`, `frontend/src/lib/registrations.test.js`.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| All confirmed events are shown together in one list, whether or not they require registration | `test_registrations.py::test_open_sessions_include_sessions_without_registration_in_one_list`, `::test_attendee_sees_every_confirmed_session_with_or_without_registration` | `registration_service.list_open_sessions` / `_db_public_sessions` (no `registration_needs` filter); `AttendeeDashboard.vue` |
+| Each event is labelled "Registration required" or "No registration required" | `registrations.test.js` (View Events Without Registration) | `registrations.js::registrationRequirementLabel`; `AttendeeDashboard.vue`, `AttendeeEventView.vue` |
+| An event without registration shows its details and no Register option | `test_registrations.py::test_session_page_shows_a_confirmed_session_without_registration`, `::test_session_page_without_registration_has_no_places`, `::test_registering_for_a_session_without_registration_is_refused`, `::test_attendee_cannot_register_for_a_session_without_registration` | `rules.py::rule_event_view_public` / `rule_event_register` (403); `AttendeeEventView.vue` |
+| An event that requires registration goes to the existing registration flow | existing Attendee Registration tests | `AttendeeEventView.vue` (unchanged Register path) |
+| Events that are not confirmed are not shown to Attendees | `test_registrations.py::test_attendee_cannot_see_a_session_that_is_not_confirmed`, `::test_session_page_is_hidden_from_attendees_unless_public` | `rules.py::_is_public_to_attendees`; `_db_public_sessions` (`status = confirmed`) |
+| No internal planning information is shown | `test_registrations.py::test_public_fields_carry_registration_needs_but_no_planning_details` | `registration_service._PUBLIC_FIELDS` |
+
+## View Event Venue (Justin)
+
+Story: As an Attendee, I want to see the venue of each confirmed event, so that I know where to go when I attend. Unit tests: `test_registrations.py`, `frontend/src/lib/registrations.test.js`.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Each event in the list shows its venue name and location | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `registrations.test.js` (View Event Venue) | `registration_service.list_open_sessions` / `_confirmed_venues`; `registrations.js::venueSummary`; `AttendeeDashboard.vue` |
+| The event page shows the venue name and location | `test_registrations.py::test_the_event_page_shows_its_confirmed_venues` | `registration_service.get_session`; `registrations.js::venueLines`; `AttendeeEventView.vue` |
+| An event with more than one venue shows all its confirmed venues | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `::test_a_venue_is_listed_once_and_a_deleted_venue_keeps_its_name` | `registration_service._confirmed_venues` |
+| Only confirmed venue bookings are shown | Not unit-tested (a database filter); check manually on the local stack | `registration_service._db_confirmed_venues` (`status = confirmed`) |
+| A changed venue shows when the event is viewed again | read live on every request, nothing cached | `registration_service._db_confirmed_venues` |
+| No internal booking information is shown | `test_registrations.py::test_only_the_venue_name_and_location_are_sent` | `registration_service._venue` |
+
 ## Explicitly deferred (not tested because not built)
 
 - "An attendee cannot view another attendee's registration" — there is no

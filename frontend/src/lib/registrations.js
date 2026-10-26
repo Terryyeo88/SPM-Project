@@ -20,6 +20,36 @@ const PHONE_PATTERN = /^\+?[0-9][0-9 -]{5,18}[0-9]$/
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 export const NOTES_MAX_LENGTH = 500
 
+/**
+ * View Events Without Registration (Justin): the attendee's list holds every
+ * confirmed session, whether or not it needs registration. Those that don't
+ * have no Register button, places or waiting list.
+ */
+export function requiresRegistration(session) {
+  return session?.registration_needs === true
+}
+
+/** "Registration required" / "No registration required". */
+export function registrationRequirementLabel(session) {
+  return requiresRegistration(session) ? 'Registration required' : 'No registration required'
+}
+
+/**
+ * View Event Venue (Justin): a session's confirmed venues, from the
+ * backend's `venues` list ([{ name, location }]), one line each:
+ * "Auditorium, Level 1". Empty until a venue is confirmed.
+ */
+export function venueLines(session) {
+  return (session?.venues ?? []).map((venue) => (venue.location ? `${venue.name}, ${venue.location}` : venue.name))
+}
+
+/** The venue line on a search-result card: one venue, or "Auditorium + 2 more". */
+export function venueSummary(session) {
+  const lines = venueLines(session)
+  if (!lines.length) return 'Venue to be confirmed'
+  return lines.length === 1 ? lines[0] : `${lines[0]} + ${lines.length - 1} more`
+}
+
 /** A session counts as "Almost Full" once this share of places is taken. */
 const ALMOST_FULL_SHARE = 0.8
 
@@ -40,9 +70,11 @@ export function registrationState(session, now = new Date()) {
 /**
  * The tag on a search-result card (wireframe: Open / Almost Full / Waitlist
  * Only), plus Opens Soon / Registration Closed for windows that aren't open.
- * tone: 'open' | 'warn' | 'full' | 'muted'.
+ * tone: 'open' | 'warn' | 'full' | 'muted'. null for a session that doesn't
+ * need registration (nothing to be open or full).
  */
 export function availabilityTag(session, now = new Date()) {
+  if (!requiresRegistration(session)) return null
   const state = registrationState(session, now)
   if (state === 'upcoming') return { label: 'Opens Soon', tone: 'muted' }
   if (state === 'closed') return { label: 'Registration Closed', tone: 'muted' }
@@ -69,8 +101,8 @@ export function placesLabel(session) {
 
 /**
  * Search, as on the dashboard wireframe: by event name (case-insensitive)
- * and/or date (a session running on that day). Location isn't searchable
- * yet -- no event has a venue until venue booking exists.
+ * and/or date (a session running on that day). Venues are shown on each
+ * result but aren't searched (not asked for).
  */
 export function filterSessions(sessions, { query = '', date = '' } = {}) {
   const needle = query.trim().toLowerCase()
