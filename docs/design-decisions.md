@@ -1076,9 +1076,37 @@ no booking could be cancelled. Added:
   window). Anyone else 404; a closed booking or event 403 with the reason.
   The loader attaches the event's coordinator_id/status to the booking.
 - The event's status is not changed by a cancel (see open-questions.md).
+  *Superseded 2026-10-26 -- see below.*
 - The page lists every booking of the session with its own Cancel, and
   offers "Request a venue" only while no booking is pending or confirmed
   (frontend only; see open-questions.md).
+
+### Cancelling a booking of a confirmed event reverts it to planning (2026-10-26)
+
+Answers the open question above: a confirmed event whose venue booking is
+cancelled goes back to planning, the same as a change to its details
+(AC10) -- its venue arrangements changed after confirmation, so it has to
+be re-checked (safety review) before it can be confirmed again.
+
+- `booking_service.cancel_booking` cancels the booking first, then
+  (`_revert_confirmed_event`) takes the existing `confirmed -> planning`
+  edge through `transitions.transition` -- no new edge. The status history
+  row is attributed to the coordinator, with the reason "Venue booking
+  cancelled after confirmation: <cancel reason>".
+- Any cancelled booking counts, pending or confirmed. Events in any other
+  status (planning, safety_review, ...) are left as they are; only
+  "confirmed" is reverted.
+- The transition is conditioned on the event status the route's loader
+  (`load_booking_with_event`) authorised against (`expected_from`). If the
+  event moved on in between, `TransitionConflictError` is swallowed: there
+  is nothing to revert, and the booking cancel -- already written -- still
+  stands rather than reporting a 409 for a change that did happen. Like
+  every transition, the booking write and the status write are separate
+  requests, not one transaction.
+- The response carries `event_reverted_to_planning`. `VenueBookingStatus.vue`
+  warns in the cancel form when the event is confirmed, and after a revert
+  re-fetches the event and emits `updated`, so `EventDetailsView.vue`
+  shows the new status.
 
 ### Equipment impacts: identical requests reported once (2026-10-19)
 
