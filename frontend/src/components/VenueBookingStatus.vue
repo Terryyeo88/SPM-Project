@@ -28,6 +28,9 @@ import { canCancelBooking } from '../lib/venueBookings'
 const props = defineProps({
   event: { type: Object, required: true },
 })
+// IS-9: cancelling a booking of a confirmed event reverts it to planning;
+// the page refreshes the event with the row passed here.
+const emit = defineEmits(['updated'])
 
 const bookings = ref([])
 const loading = ref(true)
@@ -87,6 +90,14 @@ async function confirmCancel(booking) {
     bookings.value = bookings.value.map((row) => (row.id === booking.id ? { ...row, ...cancelled } : row))
     cancelling.value = null
     success.value = 'Venue booking cancelled. Your other venue bookings for this session are unchanged.'
+    if (cancelled.event_reverted_to_planning) {
+      success.value += ' The event was confirmed, so it has gone back to planning.'
+      try {
+        emit('updated', await apiGet(`/events/${props.event.id}`))
+      } catch {
+        // The cancellation itself succeeded; a stale status corrects on reload.
+      }
+    }
   } catch (requestError) {
     cancelError.value = requestError.message
   } finally {
@@ -143,6 +154,9 @@ watch(() => props.event.id, () => {
             <textarea :id="`cancel-booking-${booking.id}`" v-model="cancelReason" rows="2"
               placeholder="e.g. moved the breakout session to another room." />
             <p class="muted small">Only this booking is cancelled. Any other venue bookings for this session stay as they are.</p>
+            <p v-if="event.status === 'confirmed'" class="muted small" data-test="reverts-to-planning">
+              This event is confirmed, so cancelling this booking sends it back to planning.
+            </p>
             <div class="panel-actions">
               <button type="submit" class="btn small reject-solid" :disabled="busy">
                 {{ busy ? 'Cancelling...' : 'Confirm Cancellation' }}

@@ -399,7 +399,7 @@ watch(() => route.params.eventId, (eventId) => {
             @applied="onChangeApplied"
           />
           <EventLogHistory :event="event" :refresh-key="logRefresh" />
-          <VenueBookingStatus :event="event" />
+          <VenueBookingStatus :event="event" @updated="onCoordinatorDecision" />
           <EquipmentBookingStatus :event="event" />
           <SafetyCheckStatus :event="event" @updated="onCoordinatorDecision" />
         </template>

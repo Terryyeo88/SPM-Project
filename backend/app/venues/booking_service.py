@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.events.event_service import SINGAPORE_TZ
+from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 
@@ -429,9 +430,14 @@ def cancel_booking(booking_id: str, booking: SimpleNamespace, cancelled_by: str,
     "Changes or cancellation of one venue arrangement should not
     automatically remove the other venue bookings": only this row is
     written, so every other booking for the session (pending or confirmed)
-    is untouched, and the event's own status doesn't change either. A
-    confirmed booking that's cancelled stops holding the venue at once (the
-    no-overlap constraint covers confirmed rows only).
+    is untouched. A confirmed booking that's cancelled stops holding the
+    venue at once (the no-overlap constraint covers confirmed rows only).
+
+    A confirmed event goes back to planning (confirmed -> planning, the same
+    IS-9 edge a details change takes): its venue arrangements changed after
+    confirmation. Any other event status is left as it is. The returned
+    booking carries `event_reverted_to_planning` so the caller can refresh
+    the event.
 
     authz (rule_venue_booking_cancel) has already checked the caller is the
     event's assigned coordinator and the booking is pending or confirmed.
@@ -454,4 +460,26 @@ def cancel_booking(booking_id: str, booking: SimpleNamespace, cancelled_by: str,
     _record_booking_status_change(booking_id, booking.status, "cancelled", cancelled_by, reason.strip())
     cancelled = result.data[0] if isinstance(result.data, list) else result.data
     _notify_booking_decision(cancelled, "cancelled")
+    cancelled["event_reverted_to_planning"] = _revert_confirmed_event(booking, cancelled_by, reason.strip())
     return cancelled
+
+
+def _revert_confirmed_event(booking: SimpleNamespace, actor: str, reason: str) -> bool:
+    """IS-9: a confirmed event whose venue booking is cancelled reverts to
+    planning. event_status comes from the route's loader
+    (load_booking_with_event); the transition is conditioned on it, so if
+    the event has moved on since, there's nothing to revert and the
+    cancellation still stands."""
+    if getattr(booking, "event_status", None) != "confirmed":
+        return False
+    try:
+        transition(
+            booking.event_id,
+            "planning",
+            actor,
+            reason=f"Venue booking cancelled after confirmation: {reason}",
+            expected_from="confirmed",
+        )
+    except TransitionConflictError:
+        return False
+    return True

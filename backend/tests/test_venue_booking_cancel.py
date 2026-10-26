@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.auth.context as context_module
+import app.events.transitions as transitions
 import app.venues.booking_service as booking_service
 import app.venues.routes as venues_routes
 from app.authz import actions
@@ -59,6 +60,7 @@ def fake(monkeypatch):
     ]
     monkeypatch.setattr(booking_service, "supabase", db)
     monkeypatch.setattr(venues_routes, "supabase", db)
+    monkeypatch.setattr(transitions, "supabase", db)
     return db
 
 
@@ -113,6 +115,54 @@ def test_the_event_status_is_not_changed_by_cancelling_a_booking(fake):
 
     assert fake.get("session-1")["status"] == "planning"
     assert [call for call in fake.calls if call["table"] == "events" and call["op"] == "update"] == []
+
+
+def _confirm_event(fake, event_id="session-1"):
+    fake.get(event_id)["status"] = "confirmed"
+
+
+def _ns_with_event(fake, booking_id):
+    booking = _ns(fake, booking_id)
+    booking.event_status = fake.get(booking.event_id)["status"]
+    return booking
+
+
+@pytest.mark.parametrize("booking_id", ["main-hall", "overflow-room"])
+def test_cancelling_a_booking_of_a_confirmed_event_reverts_it_to_planning(fake, booking_id):
+    _confirm_event(fake)
+
+    cancelled = cancel_booking(booking_id, _ns_with_event(fake, booking_id), COORDINATOR, "Moved.")
+
+    assert cancelled["event_reverted_to_planning"] is True
+    assert fake.get("session-1")["status"] == "planning"
+    assert fake.get("session-2")["status"] == "planning"
+    log = fake.tables["event_status_log"]
+    assert len(log) == 1
+    assert (log[0]["from_status"], log[0]["to_status"], log[0]["changed_by"]) == ("confirmed", "planning", COORDINATOR)
+    assert "Moved." in log[0]["reason"]
+
+
+@pytest.mark.parametrize("event_status", ["planning", "safety_review"])
+def test_an_event_that_is_not_confirmed_keeps_its_status(fake, event_status):
+    fake.get("session-1")["status"] = event_status
+
+    cancelled = cancel_booking("main-hall", _ns_with_event(fake, "main-hall"), COORDINATOR, "Moved.")
+
+    assert cancelled["event_reverted_to_planning"] is False
+    assert fake.get("session-1")["status"] == event_status
+    assert fake.tables.get("event_status_log", []) == []
+
+
+def test_the_cancellation_stands_if_the_event_moved_on_since_it_was_loaded(fake):
+    _confirm_event(fake)
+    stale = _ns_with_event(fake, "main-hall")
+    fake.get("session-1")["status"] = "completed"
+
+    cancelled = cancel_booking("main-hall", stale, COORDINATOR, "Moved.")
+
+    assert cancelled["event_reverted_to_planning"] is False
+    assert _row(fake, "main-hall")["status"] == "cancelled"
+    assert fake.get("session-1")["status"] == "completed"
 
 
 def test_a_cancellation_is_recorded_with_who_when_and_why(fake):
@@ -243,6 +293,19 @@ def test_the_route_cancels_one_booking_and_leaves_the_rest(client, signing_key, 
         "overflow-room": "pending",
         "other-session": "confirmed",
     }
+
+
+def test_the_route_reverts_a_confirmed_event_to_planning(client, signing_key, monkeypatch, fake):
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    _confirm_event(fake)
+
+    response = client.post(
+        "/venues/bookings/main-hall/cancel", headers=_auth(signing_key), json={"reason": "Venue fell through."}
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["event_reverted_to_planning"] is True
+    assert fake.get("session-1")["status"] == "planning"
 
 
 def test_the_route_needs_a_reason(client, signing_key, monkeypatch, fake):

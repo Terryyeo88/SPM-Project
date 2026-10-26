@@ -736,10 +736,14 @@ in docs/design-decisions.md; please confirm or correct:
   conflict needs the "I've reviewed these" tick. Should every touched
   arrangement need it before a significant change saves?
 
-- **Cancelling a venue booking doesn't change the event's status.** A
+- ~~**Cancelling a venue booking doesn't change the event's status.** A
   confirmed event that loses its only confirmed venue stays confirmed. A
   change to the event's details sends it back to planning (AC10); should
-  cancelling a confirmed booking of a confirmed event do the same?
+  cancelling a confirmed booking of a confirmed event do the same?~~
+  **Resolved 2026-10-26: yes.** Cancelling any venue booking (pending or
+  confirmed) of a confirmed event sends the event back to planning; other
+  statuses are unchanged. See `docs/design-decisions.md` §IS-9 "Cancelling
+  a booking of a confirmed event reverts it to planning".
 
 - **The current coordinator cancels, not the requester.** After the Lead
   reassigns an event, the new coordinator can cancel the old coordinator's
