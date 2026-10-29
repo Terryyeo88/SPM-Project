@@ -600,6 +600,7 @@ Unit: `test_notification_service.py`, `test_notifications_routes.py`,
 | Clicking one marks it read; "Mark all as read" marks the rest; the count comes from the response, not a refetch | `NotificationsView.test.js` ("clicking an unread one ...", "\"Mark all as read\" ...", "following a link ...", "keeps the item unread ... when marking it read fails") | `NotificationsView.vue`, `stores/notifications.js`, `lib/notifications.js` |
 | (design) A notification links to what it's about only where that page already exists and the caller can reach it; otherwise plain text | `lib/notifications.test.js` (`notificationLink`), `NotificationsView.test.js` ("... no page is plain text, not a dead link", "no link when the caller cannot reach the page") | `lib/notifications.js::ENTITY_ROUTES` / `notificationLink` |
 | Every authenticated role reaches the notifications page | `lib/roles.test.js` ("notifications route (IS-69)"), `router/index.test.js` ("/notifications ...", drift guard) | `lib/roles.js` `ROUTE_ACCESS` entry `notifications` |
+| A bell in the nav shows the unread count to every signed-in role and opens the page | `components/AppNavBar.test.js` ("AppNavBar notifications bell (IS-69)") | `AppNavBar.vue` bell (GET `/notifications/unread-count`), `stores/notifications.js` |
 
 Each guard above was mutation-tested by hand once (broken, confirmed caught,
 restored):

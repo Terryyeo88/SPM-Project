@@ -1888,6 +1888,11 @@ the response and doesn't refetch. It hands the count to a small Pinia store
   Following a link also marks the notification read.
 - **A link can still lead to a deleted entity.** There's no foreign key (see
   above), so the page it opens shows its own "not found".
+- **The bell** sits in `AppNavBar.vue` (Aaralyn's), beside the profile icon,
+  for every signed-in role. It fetches `GET /notifications/unread-count`
+  each time a page mounts the nav bar, and doesn't poll in between. It's its
+  own commit, pending Aaralyn's sign-off; without it the page still works,
+  reached by its URL.
 
 ### Out of scope
 
