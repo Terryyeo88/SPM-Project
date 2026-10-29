@@ -42,6 +42,7 @@ from postgrest.exceptions import APIError
 from app.equipment.equipment_service import list_requests_for_event
 from app.events.transitions import TransitionConflictError, label, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import NotFoundError, ValidationError
 from app.venues.booking_service import with_venue_names
 
@@ -283,9 +284,10 @@ def withdraw_pending_review(event_id: str, withdrawn_by: str, comment: str) -> d
 
 
 def _notify_safety_review(review: dict, what: str) -> None:
-    """Hook for the Notification System story (later sprint). No-op
-    placeholder, same shape as booking_service._notify_booking_decision."""
-    print(f"[notify] safety review {review.get('id')} {what}")
+    """Safety Officers (a submission, a withdrawal) or the session's
+    coordinator (a decision) get an in-app notification (IS-69,
+    notification_service.safety_review_changed)."""
+    notification_service.safety_review_changed(review, what)
 
 
 def _clean_comment(comment) -> str | None:
