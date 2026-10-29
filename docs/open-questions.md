@@ -1185,3 +1185,33 @@ Catalogue (IS-61)".
   the same reading as IS-60. Only those events' bookings are released when
   a venue is deleted; finished and rejected events keep their record.
   Please confirm rejected events shouldn't lose their booking too.
+
+## Notification System (IS-69, 27 Oct)
+
+- **The acceptance criteria are our reading.** IS-69's ticket text isn't in
+  the repo, so `docs/traceability.md` maps working criteria (stored per
+  user; own list, newest first, with an unread count; mark one or all read;
+  never anyone else's; a failure never undoes the action). Please confirm
+  or replace them with the ticket's own.
+- **In-app only; email and SMS are deferred.** No mail or SMS provider
+  exists, and registrations' `notify_email` / `notify_sms` choices aren't
+  read yet. Please confirm in-app is enough for now, or say which
+  notifications must also go by email or SMS.
+- **Decisions go to the session's current coordinator**, not whoever made
+  the request, since a reassigned session's new coordinator is the one who
+  acts. Please confirm.
+- **Nobody is told about their own action.** A coordinator cancelling their
+  own venue booking gets no notification, and Venue Staff aren't told
+  either. Please confirm, or say whether Venue Staff should be.
+- **A safety submission goes to every Safety Officer.** There's no
+  assignment step, so each gets their own copy. Please confirm.
+- **A failed notification is logged, not retried.** The action it was about
+  still succeeds. Please confirm that's acceptable, or whether some
+  notifications must be guaranteed (which needs a retry or outbox).
+- **No reminder notifications.** Nothing is sent on a schedule (e.g. before
+  an event starts). That needs a scheduler, which has no owner or ticket.
+  Please confirm reminders are out of scope.
+- **Still not notified** (no hook existed; the owning stories can now add
+  one `notify(...)` call each): the organiser on cancellation (IS-39, see
+  above), the coordinator on a new change request, and attendees promoted
+  off a waiting list. Please confirm which are needed.

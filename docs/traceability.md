@@ -574,3 +574,38 @@ Story: "As a Venue staff, I want to add, edit and delete venues so that I can ea
 | Only the backend can delete or change a venue: a signed-in user (even Venue Staff) calling the database directly can't run `delete_venue()` or write `venues` | `test_venue_catalogue_crud_integration.py::test_a_signed_in_user_cannot_call_delete_venue_directly`, `::test_a_signed_in_user_cannot_change_a_venue_directly` | migration's `revoke`/`grant` on `delete_venue()` (service role only), `venues` RLS (read policy only, `20260923000000_venues.sql`) |
 
 Each guard above was mutation-tested by hand once (broken, confirmed caught, restored): the `delete_venue()` grant, the deleted-venue trigger, `delete_venue()`'s event-status and booking-status filters, `venues_buffers_non_negative`, the not-deleted condition on edits, the pending condition on withdrawing a safety review, `expected_from` on the revert to planning, the catalogue's deleted filter, the backend's deleted-venue check on booking requests, and the alert's "newer booking" check.
+
+## Sprint 4 — Notification System (IS-69)
+
+The ticket's acceptance criteria aren't in the repo; the criteria below are
+our working reading, flagged in `docs/open-questions.md`. Backend only.
+Unit: `test_notification_service.py`, `test_notifications_routes.py`,
+`test_authz_notifications.py`, `test_notification_hook_*.py` (one per hook). Integration:
+`test_notifications_integration.py`. Design: `docs/design-decisions.md`
+(IS-69).
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A notification is stored for the person who needs to act, at each point a story said someone "is notified" | `test_notification_service.py::test_coordinator_assigned_*`, `::test_a_venue_booking_decision_*`, `::test_a_released_booking_*`, `::test_an_equipment_decision_*`, `::test_a_submission_or_withdrawal_*`, `::test_a_safety_decision_*`, `test_notification_hook_*.py` (all), `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_notifies_the_sessions_current_coordinator`, `::test_a_safety_submission_reaches_every_safety_officer` | `notification_service.py` (`coordinator_assigned`, `venue_booking_decided`, `venue_booking_released`, `equipment_request_decided`, `safety_review_changed`, `notify`), the five `_notify_*` hooks, migration `20261027000000_notifications.sql` |
+| (design) The session's current coordinator is told, not the requester; nobody is told about their own action; no coordinator means nobody | `test_notification_service.py::test_a_venue_booking_decision_goes_to_the_sessions_current_coordinator`, `::test_cancelling_a_booking_notifies_nobody`, `::test_a_session_with_no_coordinator_notifies_nobody`, `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_*` | `notification_service.py::_event`, `_notify_coordinator_of` |
+| Every authenticated role has notifications | `test_authz_notifications.py::test_every_authenticated_user_may_list_and_mark_all_their_own`, `test_notifications_routes.py::test_list_returns_the_callers_notifications_and_unread_count[*]` | `rules.py::rule_notification_list` / `rule_notification_mark_all_read` |
+| A user sees their own notifications, newest first, with an unread count | `test_notification_service.py::test_list_is_only_the_callers_own_newest_first`, `::test_list_can_be_unread_only`, `::test_list_is_capped`, `::test_unread_count_counts_only_the_callers_unread`, `test_notifications_routes.py::test_list_*`, `::test_unread_count`, `test_notifications_integration.py::test_list_is_newest_first` | `GET /notifications`, `GET /notifications/unread-count`, `notification_service.py::list_notifications` / `unread_count`, index `idx_notifications_recipient_created` / `idx_notifications_recipient_unread` |
+| A user can mark one notification read (again is a no-op that keeps the first read time) | `test_notification_service.py::test_mark_read_sets_read_at_and_drops_the_count`, `::test_marking_an_already_read_one_keeps_its_first_read_time`, `test_notifications_routes.py::test_mark_read_own`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/<id>/read`, `notification_service.py::mark_read` (conditioned on `read_at IS NULL`) |
+| A user can mark all their notifications read | `test_notification_service.py::test_mark_all_read_marks_only_the_callers_unread`, `test_notifications_routes.py::test_mark_all_read`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/read-all`, `notification_service.py::mark_all_read` |
+| A user can never see or change anyone else's notifications: through Flask (404) or directly against the database (RLS) | `test_authz_notifications.py::test_anyone_elses_notification_is_a_404_whatever_their_role`, `test_notifications_routes.py::test_mark_read_someone_elses_is_404_and_writes_nothing`, `::test_mark_read_missing_is_404`, `::test_every_route_needs_a_login`, `test_notification_service.py::test_mark_read_is_scoped_to_the_caller`, `::test_get_notification_missing_or_malformed_is_not_found`, `test_notifications_integration.py::test_a_signed_in_user_reads_only_their_own_notifications_directly`, `::test_a_signed_in_user_cannot_write_notifications_directly` | `rules.py::rule_notification_mark_read`, recipient scope in every `notification_service.py` query, policy `recipient reads own notifications` (no write policy) |
+| (design) A failure to notify never fails or undoes the action; the unit-test DB guard still fails loudly | `test_notification_service.py::test_a_failed_write_is_logged_and_swallowed`, `::test_a_base_exception_is_not_swallowed` | `notification_service.py::_best_effort` |
+| (design) A link is both halves or neither | `test_notifications_integration.py::test_a_link_is_both_halves_or_neither` | constraint `notifications_entity_complete` |
+
+Each guard above was mutation-tested by hand once (broken, confirmed caught,
+restored):
+
+- **The RLS read policy.** Loosened to `auth.role() = 'authenticated'`:
+  `test_a_signed_in_user_reads_only_their_own_notifications_directly` failed.
+- **`mark_read`'s `read_at IS NULL` condition.** Removed: one unit test and
+  one integration test failed.
+- **`list_notifications`' recipient scope.** Removed: three unit tests and
+  two integration tests failed.
+
+Not covered, because not built: the bell and list in the web app (a
+separate frontend change), email/SMS, reminders, and the notifications no
+hook existed for (see `docs/open-questions.md`).

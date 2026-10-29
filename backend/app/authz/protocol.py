@@ -48,3 +48,8 @@ class SafetyReviewLike(Protocol):
     id: str
     event_id: str
     status: str
+
+
+class NotificationLike(Protocol):
+    id: str
+    recipient_id: str
