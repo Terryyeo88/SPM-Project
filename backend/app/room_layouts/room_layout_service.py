@@ -1,15 +1,21 @@
 """Room layouts (theatre, classroom, ...): the list Venue Staff manage and
 event requests pick from. See supabase/migrations/20261012000000_room_layouts.sql
-for the table and the triggers behind it.
+for the table and the triggers behind it, and
+20261023000000_rejected_sessions_release_room_layouts.sql for how rejected
+sessions are treated.
+
+These are IS-60's venue categories; disabling a category is the soft delete.
 
 Deleting is two steps:
   - soft delete (is_active = false): the layout can't be picked for new
-    requests any more. Drafts using it have their layout cleared (database
-    trigger); submitted events keep it.
+    requests any more. Drafts and rejected sessions using it have their
+    layout cleared, with the cleared name kept in events.room_layout_removed
+    for the organiser's form (database trigger); other submitted events keep it.
   - permanent delete: only once it's soft-deleted AND every event still
-    using it is completed or cancelled. The database enforces both (whoever
-    runs the DELETE); this module turns its refusals into a 409. Events that
-    used the layout keep its name in events.room_layout.
+    using it is completed, cancelled or rejected. The database enforces both
+    (whoever runs the DELETE); this module turns its refusals into a 409.
+    Rejected sessions still holding it are cleared; completed and cancelled
+    events keep its name in events.room_layout.
 """
 
 from __future__ import annotations

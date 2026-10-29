@@ -9,13 +9,16 @@
  *   not open yet / closed -> says when
  *   registered            -> "You're registered" + Withdraw Registration
  *   waitlisted            -> "position #n" + Leave Waiting List
+ *   no registration needed -> says so, no Register button (View Events
+ *                            Without Registration)
  *
  * GET /registrations/sessions/<id> (public fields only, places, my
  * registration); DELETE /registrations/<id> to withdraw. Withdrawing a
  * confirmed place moves the first person on the waiting list up.
  *
- * The wireframe's event image, venue and category aren't shown: events have
- * none of those yet.
+ * Venue (View Event Venue): every confirmed venue, name and location, or
+ * "Venue to be confirmed". The wireframe's event image and category aren't
+ * shown: events have neither yet.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -24,9 +27,12 @@ import { formatDateRange } from '../../lib/coordinatorDashboard'
 import {
   formatSgt,
   placesLabel,
+  registrationRequirementLabel,
   registrationState,
+  requiresRegistration,
   sessionWhen,
   spotsFilled,
+  venueLines,
 } from '../../lib/registrations'
 import AppNavBar from '../../components/AppNavBar.vue'
 import RegistrationForm from '../../components/RegistrationForm.vue'
@@ -45,6 +51,7 @@ const mine = computed(() => session.value?.my_registration ?? null)
 const state = computed(() => (session.value ? registrationState(session.value) : 'closed'))
 const spots = computed(() => (session.value ? spotsFilled(session.value) : null))
 const full = computed(() => session.value?.places_left === 0)
+const needsRegistration = computed(() => requiresRegistration(session.value))
 
 async function load() {
   loading.value = true
@@ -108,6 +115,7 @@ onMounted(load)
                 </svg>
                 {{ sessionWhen(session, formatDateRange) }}
               </span>
+              <span class="meta-item requirement">{{ registrationRequirementLabel(session) }}</span>
             </div>
             <hr />
             <div class="about">
@@ -115,6 +123,13 @@ onMounted(load)
               <p>{{ session.description || 'No description yet.' }}</p>
             </div>
             <div class="about">
+              <span class="label">{{ venueLines(session).length > 1 ? 'Venues' : 'Venue' }}</span>
+              <ul v-if="venueLines(session).length" class="venues">
+                <li v-for="line in venueLines(session)" :key="line">{{ line }}</li>
+              </ul>
+              <p v-else>Venue to be confirmed</p>
+            </div>
+            <div v-if="needsRegistration" class="about">
               <span class="label">Registration period</span>
               <p>
                 {{ session.registration_start_datetime ? formatSgt(session.registration_start_datetime) : 'Open now' }}
@@ -134,7 +149,7 @@ onMounted(load)
               <span v-if="session.waitlist_count" class="muted small">{{ session.waitlist_count }} on the waiting list</span>
             </div>
 
-            <hr />
+            <hr v-if="spots" />
 
             <p v-if="message" class="success" role="status">{{ message }}</p>
 
@@ -171,6 +186,10 @@ onMounted(load)
               </div>
             </template>
 
+            <template v-else-if="!needsRegistration">
+              <div class="state state-none">No registration required</div>
+              <span class="muted small center">You can attend this event without signing up.</span>
+            </template>
             <template v-else-if="state === 'open'">
               <button type="button" class="btn primary" @click="formOpen = true">
                 {{ full ? 'Join Waiting List' : 'Register' }}
@@ -230,6 +249,9 @@ hr { border: none; height: 1px; background: #e2e2e2; margin: 0; }
 .state { border-radius: 4px; padding: 10px 12px; font-size: 13px; font-weight: 600; }
 .state-confirmed { background: #eaf5ec; border: 1px dashed #2f6b3f; color: #2f6b3f; }
 .state-waitlisted { background: #f7efe1; border: 1px dashed #8a5a12; color: #8a5a12; }
+.state-none { background: #eef3fb; border: 1px dashed #2a4f8f; color: #2a4f8f; text-align: center; }
+.requirement { font-weight: 600; color: #2a4f8f; }
+.venues { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.65; color: #3a3a3a; }
 
 .btn { height: 46px; border-radius: 4px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
 .btn:disabled { opacity: 0.55; cursor: default; }

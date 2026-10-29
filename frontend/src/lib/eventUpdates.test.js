@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  arrangementsOfPreview,
   describePreviewChanges,
   isNoChange,
   needsReview,
@@ -84,5 +85,49 @@ describe('savedMessage', () => {
 
   it('is plain otherwise', () => {
     expect(savedMessage('planning', { status: 'planning' })).toBe('Event details updated.')
+  })
+})
+
+describe('arrangementsOfPreview (IS-9: which already-made arrangements a change touches)', () => {
+  const venue = { area: 'venue', id: 'booking-1', title: 'Venue booking: Hall A', status: 'confirmed', fields: ['preferred_end_time'] }
+  const other = { area: 'venue', id: 'booking-2', title: 'Venue booking: Room B', status: 'pending', fields: ['preferred_end_time'] }
+  const registration = { area: 'registration', id: null, title: 'Attendee registrations (3 confirmed)', status: null, fields: ['expected_attendance', 'preferred_end_time'] }
+
+  it('is empty when the preview has none', () => {
+    expect(arrangementsOfPreview(preview())).toEqual([])
+    expect(arrangementsOfPreview(undefined)).toEqual([])
+  })
+
+  it('labels each arrangement and the details it depends on', () => {
+    const [entry] = arrangementsOfPreview(preview({ arrangements: [registration] }))
+    expect(entry).toEqual({
+      key: 'registration:',
+      area: 'registration',
+      areaLabel: 'Registration',
+      title: 'Attendee registrations (3 confirmed)',
+      status: null,
+      fields: 'Expected attendance, End time',
+      conflict: false,
+    })
+  })
+
+  it('marks only the venue booking an impact names as conflicting', () => {
+    const entries = arrangementsOfPreview(preview({
+      arrangements: [venue, other],
+      impacts: [{ area: 'venue', booking_id: 'booking-2', severity: 'conflict', issues: [] }],
+    }))
+    expect(entries.map((entry) => [entry.key, entry.conflict])).toEqual([['venue:booking-1', false], ['venue:booking-2', true]])
+  })
+
+  it('marks an area-wide impact against every arrangement in that area', () => {
+    const entries = arrangementsOfPreview(preview({
+      arrangements: [registration, venue],
+      impacts: [{ area: 'registration', severity: 'conflict', issues: [] }],
+    }))
+    expect(entries.map((entry) => entry.conflict)).toEqual([true, false])
+  })
+
+  it('makes a touched arrangement worth reviewing even with no conflict', () => {
+    expect(needsReview(preview({ arrangements: [venue] }))).toBe(true)
   })
 })

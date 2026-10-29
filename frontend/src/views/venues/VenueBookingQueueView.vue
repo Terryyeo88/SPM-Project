@@ -63,6 +63,7 @@ const EMPTY_MESSAGES = {
   confirmed: 'No confirmed bookings yet.',
   rejected: 'No rejected bookings.',
   released: 'No released bookings.',
+  cancelled: 'No cancelled bookings.',
 }
 
 onMounted(loadBookings)
@@ -153,6 +154,7 @@ onMounted(loadBookings)
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-rejected { color: #b42318; background: #fde8e6; }
 .status-released { color: #6a6a6a; background: #eeeeee; }
+.status-cancelled { color: #6a6a6a; background: #eeeeee; }
 
 @media (max-width: 600px) {
   .row { flex-direction: column; align-items: flex-start; }

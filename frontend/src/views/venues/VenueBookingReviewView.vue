@@ -13,8 +13,9 @@
  * enforcement regardless of what this page shows.
  *
  * Suitability panel: capacity/layout/accessibility are a pure client-side
- * comparison (lib/venueSuitability.js) between the event session already
- * fetched and the venue already fetched -- no new endpoint needed. The
+ * comparison (lib/venueSuitability.js) between the event session's details
+ * (embedded in the booking as `event`, since Venue Staff can't open the
+ * event itself) and the venue already fetched -- no new endpoint needed. The
  * turnaround-conflict half is server-computed (booking.conflict, from
  * app.venues.booking_service.get_booking) since it needs cross-booking
  * knowledge only the backend has.
@@ -47,6 +48,9 @@ const isPending = computed(() => booking.value?.status === 'pending')
 const canDecide = computed(() => isVenueStaff.value && isPending.value)
 
 const suitability = computed(() => (event.value && venue.value ? checkSuitability(event.value, venue.value) : []))
+const deletedVenueLabel = computed(() =>
+  booking.value?.venue_name ? `${booking.value.venue_name} (permanently deleted)` : '',
+)
 
 function time(value) {
   return value ? value.slice(0, 5) : ''
@@ -57,12 +61,13 @@ async function load() {
   loadError.value = ''
   try {
     booking.value = await apiGet(`/venues/bookings/${route.params.bookingId}`)
-    const [loadedEvent, loadedVenue] = await Promise.all([
-      apiGet(`/events/${booking.value.event_id}`),
-      apiGet(`/venues/${booking.value.venue_id}`),
-    ])
-    event.value = loadedEvent
-    venue.value = loadedVenue
+    // The session's details come embedded in the booking (booking.event):
+    // Venue Staff may read the booking but not GET /events/<id> itself.
+    // Kept in its own ref because approve/reject return the bare booking row.
+    event.value = booking.value.event ?? null
+    // IS-61: a permanently deleted venue leaves the booking with no venue_id,
+    // only its name (venue_name) -- nothing to fetch.
+    venue.value = booking.value.venue_id ? await apiGet(`/venues/${booking.value.venue_id}`) : null
   } catch (requestError) {
     loadError.value = requestError.message
   } finally {
@@ -128,7 +133,7 @@ onMounted(load)
         <template v-else-if="booking">
           <div class="page-heading">
             <h1 class="page-title">{{ event?.name }}</h1>
-            <span class="page-subtitle">{{ venue?.name }}</span>
+            <span class="page-subtitle">{{ venue?.name ?? deletedVenueLabel }}</span>
           </div>
           <span class="status" :class="`status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
 
@@ -159,7 +164,8 @@ onMounted(load)
             </div>
             <div class="detail-row">
               <span class="muted">Requested venue</span>
-              <span class="value">{{ venue?.name }} (capacity {{ venue?.capacity }})</span>
+              <span v-if="venue" class="value">{{ venue.name }} (capacity {{ venue.capacity }})</span>
+              <span v-else class="value">{{ deletedVenueLabel }}</span>
             </div>
           </section>
 

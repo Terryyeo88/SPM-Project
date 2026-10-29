@@ -4,9 +4,11 @@ what a unit test structurally cannot prove:
 
 1. The 'released' enum value round-trips for real (the isolated-migration
    requirement for ALTER TYPE ... ADD VALUE actually holds on db reset).
-2. update_venue_settings never retroactively changes an existing booking
-   (the snapshot-immutability invariant venue_service.py's own docstring
-   states as a proof, not an assumption).
+2. update_venue (IS-61's edit path, which tentative_hold_minutes editing
+   was folded into after merging with main -- see
+   docs/design-decisions.md) never retroactively changes an existing
+   booking (the snapshot-immutability invariant venue_service.py's own
+   docstring states as a proof, not an assumption).
 3. The confirm-time guard against venue_blocks works against a real
    venue_blocks row (not just a fake).
 4. release_bookings_for_event (cancel) actually writes 'released' and the
@@ -35,7 +37,7 @@ from app.shared.errors import NotFoundError, ValidationError
 from app.venues.block_service import create_venue_block
 from app.venues.booking_release import release_bookings_for_event
 from app.venues.booking_service import confirm_booking, has_live_confirmed_booking
-from app.venues.venue_service import update_venue_settings
+from app.venues.venue_service import update_venue
 from tests.conftest import is_local_supabase
 
 pytestmark = pytest.mark.integration
@@ -163,7 +165,7 @@ def test_editing_venue_settings_does_not_change_existing_booking(fixtures):
     event = fixtures.create_event()
     booking = fixtures.create_booking(event["id"], venue["id"], setup_minutes=30, turnaround_minutes=30)
 
-    update_venue_settings(venue["id"], {"setup_minutes": 999, "turnaround_minutes": 999, "tentative_hold_minutes": 999})
+    update_venue(venue["id"], {"setup_minutes": 999, "turnaround_minutes": 999, "tentative_hold_minutes": 999})
 
     refetched = supabase.table("venue_bookings").select("*").eq("id", booking["id"]).execute().data[0]
     assert refetched["setup_minutes"] == 30
@@ -173,7 +175,7 @@ def test_editing_venue_settings_does_not_change_existing_booking(fixtures):
 def test_update_venue_settings_rejects_a_non_positive_value_for_real(fixtures):
     venue = fixtures.create_venue()
     with pytest.raises(ValidationError):
-        update_venue_settings(venue["id"], {"setup_minutes": 0})
+        update_venue(venue["id"], {"setup_minutes": 0})
 
 
 # -- 3. confirm-time guard against a real venue_blocks row -------------------

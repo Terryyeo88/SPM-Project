@@ -162,3 +162,82 @@ export function allocatedEquipment(requests, eventStatus) {
 export function equipmentTypeLabel(type) {
   return (type ?? '').charAt(0).toUpperCase() + (type ?? '').slice(1)
 }
+
+// -- Record Equipment Request for Event (IS-17) ---------------------------
+
+/** One blank line on the request form. `key` is only for v-for. */
+let _lineKey = 0
+export function newRequestLine() {
+  _lineKey += 1
+  return { key: _lineKey, equipment_type_id: '', quantity: '', technical_requirements: '' }
+}
+
+/**
+ * Checks the request form's lines the way the backend will
+ * (app.equipment.equipment_service._validate_request_items), so the
+ * coordinator sees the problem next to the field instead of as a failed
+ * submit. Returns { valid, formError, lineErrors } where lineErrors[i] is
+ * { type?, quantity? }.
+ *
+ * AC: "System prevents submitting a request if quantity is missing or zero
+ * for a selected equipment item". Quantity must be a whole number of at
+ * least 1; a type may appear on one line only.
+ */
+export function validateRequestLines(lines) {
+  const lineErrors = (lines ?? []).map(() => ({}))
+  if (!lines || lines.length === 0) {
+    return { valid: false, formError: 'Add at least one equipment item.', lineErrors }
+  }
+  const seen = new Set()
+  lines.forEach((line, index) => {
+    if (!line.equipment_type_id) {
+      lineErrors[index].type = 'Choose an equipment type.'
+    } else if (seen.has(line.equipment_type_id)) {
+      lineErrors[index].type = 'This type is already on the request.'
+    } else {
+      seen.add(line.equipment_type_id)
+    }
+    const quantity = Number(line.quantity)
+    if (line.quantity === '' || line.quantity === null || !Number.isInteger(quantity) || quantity < 1) {
+      lineErrors[index].quantity = 'Enter a whole number of at least 1.'
+    }
+  })
+  const valid = lineErrors.every((errors) => Object.keys(errors).length === 0)
+  return { valid, formError: '', lineErrors }
+}
+
+/** The POST body for a validated set of lines. */
+export function buildRequestPayload(lines) {
+  return {
+    items: lines.map((line) => ({
+      equipment_type_id: line.equipment_type_id,
+      quantity: Number(line.quantity),
+      technical_requirements: (line.technical_requirements ?? '').trim() || null,
+    })),
+  }
+}
+
+// Update quantity on an existing equipment reservation (IS-43).
+// Same rule as rule_equipment_change_create: only while the event is live.
+export const CHANGEABLE_EVENT_STATUSES = ['planning', 'safety_review', 'confirmed']
+
+/**
+ * Check the new quantity typed for a change request. It must be a whole
+ * number of at least 1 and different from the current one. Returns
+ * { valid, quantity, error }.
+ */
+export function validateChangeQuantity(raw, current) {
+  const quantity = Number(raw)
+  if (raw === '' || raw === null || raw === undefined || !Number.isInteger(quantity) || quantity < 1) {
+    return { valid: false, quantity: null, error: 'Enter a whole number of at least 1.' }
+  }
+  if (quantity === current) {
+    return { valid: false, quantity, error: `The quantity is already ${current}.` }
+  }
+  return { valid: true, quantity, error: '' }
+}
+
+/** "projector: 2 → 3" */
+export function describeChange(change) {
+  return `${change.type}: ${change.old_quantity} → ${change.new_quantity}`
+}

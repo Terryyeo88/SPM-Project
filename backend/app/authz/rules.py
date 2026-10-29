@@ -543,6 +543,27 @@ def rule_venue_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue.create / venue.edit / venue.delete (IS-61) -----------------------
+# Source: "As a Venue staff, I want to add, edit and delete venues". Venue
+# Staff only. Everyone else gets 403, not 404: venues are shared inventory
+# every coordinator can already list, so there's no existence to hide (same
+# reasoning as rule_room_layout_manage).
+
+
+def rule_venue_create(user: Any, venue: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_venue_edit(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_create(user, venue)
+
+
+def rule_venue_delete(user: Any, venue: Any = None) -> Decision:
+    return rule_venue_create(user, venue)
+
+
 # -- venue.calendar_view (Nawaz, Sprint 2: IS-11) --------------------------
 # Same event_coordinator/venue_staff pair as rule_venue_view above -- see
 # actions.py's VENUE_CALENDAR_VIEW comment for why this isn't just a
@@ -557,17 +578,11 @@ def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
-# -- venue.manage / venue.block (Josiah, Sprint 3) -------------------------
-# Source: see VENUE_MANAGE/VENUE_BLOCK in actions.py. Role-only, exact
-# shape of rule_room_layout_manage below -- a venue, like a room layout,
-# has no owner relationship to check, so "does this role get to do this
-# at all" is the whole question.
-
-
-def rule_venue_manage(user: Any, resource: Any = None) -> Decision:
-    if _has_role(user, "venue_staff"):
-        return Decision.ALLOW
-    return Decision.DENY_FORBIDDEN
+# -- venue.block (Josiah, Sprint 3) -----------------------------------------
+# Source: see VENUE_BLOCK in actions.py. Role-only, exact shape of
+# rule_room_layout_manage below -- a venue, like a room layout, has no
+# owner relationship to check, so "does this role get to do this at all"
+# is the whole question.
 
 
 def rule_venue_block(user: Any, resource: Any = None) -> Decision:
@@ -658,6 +673,34 @@ def rule_venue_booking_reject(user: Any, booking: Any) -> Decision:
     return rule_venue_booking_approve(user, booking)
 
 
+# -- venue_booking.cancel (IS-9) --------------------------------------------
+# Source: IS-9 "Changes or cancellation of one venue arrangement should not
+# automatically remove the other venue bookings." The event's CURRENT
+# assigned coordinator (not necessarily whoever requested the booking --
+# the Lead may have reassigned the event since) cancels one booking that
+# is still pending or confirmed, until the event itself is completed or
+# cancelled (the same window rule_event_edit gives the coordinator). The
+# resource is the booking with its event's coordinator_id and status
+# attached (app.venues.routes.load_booking_with_event).
+
+
+def rule_venue_booking_cancel(user: Any, booking: Any) -> Decision:
+    if not (_has_role(user, "event_coordinator") and booking.event_coordinator_id == user.id):
+        return Decision.DENY_NOT_FOUND
+    if not _booking_status_in(booking, "pending", "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    if booking.event_status in _COORDINATOR_EDIT_CLOSED:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def explain_venue_booking_cancel_denial(user: Any, booking: Any) -> str:
+    """The reason given with a 403 from rule_venue_booking_cancel."""
+    if booking.event_status in _COORDINATOR_EDIT_CLOSED:
+        return f"This event is {booking.event_status}, so its venue bookings can no longer be changed."
+    return f"This booking is already {booking.status}, so it can't be cancelled."
+
+
 # -- equipment.* / equipment_request.* (Nawaz, Sprint 2: IS-18) -------------
 # Source: Check Equipment Availability -- "As a Technical Support Staff,
 # I want to check whether sufficient equipment is available...". Equipment
@@ -687,6 +730,111 @@ def rule_equipment_view(user: Any, resource: Any = None) -> Decision:
 
 
 def rule_equipment_request_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff") or _has_role(user, "event_coordinator"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
+def rule_equipment_request_create(user: Any, event: Any) -> Decision:
+    """Record Equipment Request for Event (IS-17). Resource is the EVENT
+    (session) the equipment is for, not a request. Exact mirror of
+    rule_venue_booking_create: only that event's assigned coordinator (a
+    stranger gets the same 404 as a missing event), and only while it is
+    in "planning" -- a coordinator starts planning themselves, and a
+    request raised before then, or after the event has moved on, would be
+    committing equipment to an arrangement that is not being made."""
+    if not (_has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event)):
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "planning"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_request_accept(user: Any, request: Any) -> Decision:
+    """Accept an equipment request and reserve stock (IS-19). Technical
+    Support Staff only (anyone else gets the same 404 as the availability
+    check). The AC: "Only requests in a 'pending' status can be accepted".
+    Also only while the request's event is still in planning: a request on
+    a cancelled event (or one that has moved on) must not take stock, and
+    the safety-review gate already requires no pending request by then."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) != "planning":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_request_reject(user: Any, request: Any) -> Decision:
+    """Reject an equipment request with a reason (IS-41). Technical Support
+    Staff only (anyone else gets the same 404 as accept), and only a
+    pending request. Unlike accept, the event's status is NOT checked: a
+    pending request left behind on a cancelled or moved-on event must
+    still be clearable from Technical Support's queue -- rejecting takes
+    no stock, so there is nothing to protect."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- equipment_change.* (IS-43) ----------------------------------------------
+# The event may have moved on from "planning" since the request was accepted
+# (safety review, confirmed), and a change to its equipment is still
+# legitimate then; it is not once the event is cancelled, completed or
+# rejected. `request` below is the equipment request for create, and the
+# change request (carrying event_status) for accept/reject.
+CHANGEABLE_EVENT_STATUSES = ("planning", "safety_review", "confirmed")
+
+
+def rule_equipment_change_create(user: Any, request: Any) -> Decision:
+    """The coordinator who raised the request asks to change a line's
+    quantity. Only a CONFIRMED request has reservations to change (a
+    pending one is still just a request -- Technical Support decide it as
+    it stands)."""
+    if not (_has_role(user, "event_coordinator") and request.requested_by == user.id):
+        return Decision.DENY_NOT_FOUND
+    if request.status != "confirmed":
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_change_list(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "technical_support_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_NOT_FOUND
+
+
+def rule_equipment_change_accept(user: Any, change: Any) -> Decision:
+    """Technical Support only; a pending change only; and not once the
+    event is cancelled/completed/rejected, because accepting moves stock."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    if getattr(change, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_change_reject(user: Any, change: Any) -> Decision:
+    """Like accept, but with no event-status gate: rejecting moves no stock,
+    and a pending change on a cancelled event should still be clearable."""
+    if not _has_role(user, "technical_support_staff"):
+        return Decision.DENY_NOT_FOUND
+    if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+def rule_equipment_type_list(user: Any, resource: Any = None) -> Decision:
+    """The equipment catalogue (kinds, not units) is what a coordinator
+    picks from on the request form; Technical Support Staff see it too.
+    Role-only, nothing per-row: a type name is not sensitive."""
     if _has_role(user, "technical_support_staff") or _has_role(user, "event_coordinator"):
         return Decision.ALLOW
     return Decision.DENY_FORBIDDEN
@@ -749,6 +897,11 @@ def rule_coordinator_list(user: Any, resource: Any = None) -> Decision:
 # Someone without the attendee role who can already see the event (its
 # organiser, coordinator, the Lead) gets a 403 instead.
 #
+# View Events Without Registration (Justin): attendees can also SEE
+# confirmed sessions that don't need registration (public fields only), so
+# for viewing, "public" is just "confirmed". Registering for one of those is
+# a 403, not a 404 -- the attendee can already see it exists.
+#
 # The registration PERIOD is not checked here: it's time-based, not a
 # property of (user, event), so the database function that records the
 # registration checks it (supabase/migrations/20261005000000_registrations.sql).
@@ -758,18 +911,30 @@ def _is_public_for_registration(event: Any) -> bool:
     return _event_status_in(event, "confirmed") and getattr(event, "registration_needs", None) is True
 
 
+def _is_public_to_attendees(event: Any) -> bool:
+    """Every confirmed session, whether or not it needs registration."""
+    return _event_status_in(event, "confirmed")
+
+
 def rule_event_register(user: Any, event: Any) -> Decision:
     if _has_role(user, "attendee"):
-        return Decision.ALLOW if _is_public_for_registration(event) else Decision.DENY_NOT_FOUND
+        if _is_public_for_registration(event):
+            return Decision.ALLOW
+        return Decision.DENY_FORBIDDEN if _is_public_to_attendees(event) else Decision.DENY_NOT_FOUND
     if rule_event_view(user, event) is Decision.ALLOW:
         return Decision.DENY_FORBIDDEN
     return Decision.DENY_NOT_FOUND
 
 
 def rule_event_view_public(user: Any, event: Any) -> Decision:
-    """The attendee's event page shows only public fields, so it has exactly
-    the same audience as registering: attendees, for public sessions."""
-    return rule_event_register(user, event)
+    """The attendee's event page shows only public fields: attendees may
+    see every confirmed session, with or without registration. Anything
+    else is a 404 to them."""
+    if _has_role(user, "attendee"):
+        return Decision.ALLOW if _is_public_to_attendees(event) else Decision.DENY_NOT_FOUND
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
 
 
 def rule_registration_withdraw(user: Any, event: Any) -> Decision:

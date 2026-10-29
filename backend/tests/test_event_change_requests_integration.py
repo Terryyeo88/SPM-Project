@@ -78,8 +78,8 @@ def confirmed_event():
     try:
         yield SimpleNamespace(**event), organizer, coordinator
     finally:
-        # event_logs first: it has no FK to events (only shared_event_id), and it
-        # references the profiles. event_change_requests cascades from
+        # event_logs first: it references the profiles (its event_id FK to
+        # events is ON DELETE SET NULL, so it wouldn't be removed with them). event_change_requests cascades from
         # events, but its requested_by/reviewed_by FKs to profiles do not.
         supabase.table("event_logs").delete().eq("shared_event_id", event["shared_event_id"]).execute()
         supabase.table("events").delete().eq("id", event["id"]).execute()
@@ -124,9 +124,14 @@ def test_change_request_round_trips_and_approval_writes_the_event(confirmed_even
     # field; approve_change_request records no acknowledged impacts on the log.
     assert entry["significance"] == "significant"
     assert entry["acknowledged_impacts"] is None
+    # The session the change was made on (20261019400000_event_logs_session.sql),
+    # so the Change History can say which session it was.
+    assert entry["event_id"] == event.id
+    assert requested["event_id"] == event.id
     assert set(entry) == {
         "event_log_id",
         "shared_event_id",
+        "event_id",
         "changes",
         "changed_by",
         "changed_at",

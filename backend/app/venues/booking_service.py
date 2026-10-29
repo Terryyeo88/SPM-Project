@@ -1,4 +1,6 @@
-"""Business logic for venue booking requests and their approval/rejection.
+"""Business logic for venue booking requests and their approval/rejection,
+and (IS-9) the coordinator cancelling one booking without touching the
+session's others (cancel_booking).
 
 Implements "Request Venue Booking" (Venue Booking Request, Josiah, Sprint
 2) and "Approve Venue Bookings" (Venue Booking Approval, Josiah, Sprint
@@ -28,11 +30,15 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.events.event_service import SINGAPORE_TZ
+from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
 from app.venues.booking_release import release_expired_hold, touch_expired_holds
 
-BOOKING_STATUSES = {"pending", "confirmed", "rejected", "released"}
+BOOKING_STATUSES = {"pending", "confirmed", "rejected", "released", "cancelled"}
+# A booking the coordinator may still cancel (cancel_booking): one still
+# holding, or waiting to hold, the venue.
+CANCELLABLE_BOOKING_STATUSES = ("pending", "confirmed")
 
 # Statuses that count as "this booking is actively holding the venue" for
 # overlap purposes. Deliberately CONFIRMED ONLY -- not pending -- this is
@@ -93,6 +99,9 @@ def _get_venue(venue_id: str) -> dict:
     result = supabase.table("venues").select("*").eq("id", venue_id).maybe_single().execute()
     if result is None or not result.data:
         raise ValidationError("venue_id does not reference an existing venue.")
+    if result.data.get("deleted_at"):
+        # IS-61. The database refuses it too (trg_venue_bookings_refuse_deleted_venue).
+        raise ValidationError(f'Venue "{result.data["name"]}" has been deleted from the venue catalogue.')
     return result.data
 
 
@@ -118,6 +127,8 @@ def _confirmed_overlap_exists(
     below), so it's where lazy expiry gets enforced for free, before the
     UPDATE that would otherwise hit IS-16's exclusion constraint. See
     app.venues.booking_release and docs/design-decisions.md."""
+    if venue_id is None:
+        return False  # IS-61: the venue was permanently deleted; nothing to overlap
     result = (
         supabase.table("venue_bookings")
         .select("*")
@@ -178,25 +189,32 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     booking_start = session_start - timedelta(minutes=setup)
     booking_end = session_end + timedelta(minutes=turnaround)
 
-    result = (
-        supabase.table("venue_bookings")
-        .insert(
-            {
-                "event_id": event.id,
-                "venue_id": venue_id,
-                "status": "pending",
-                "requested_by": requested_by,
-                # Snapshotted at creation time -- see the migration's own
-                # comment on why this isn't re-read from the venue later.
-                "setup_minutes": setup,
-                "turnaround_minutes": turnaround,
-                "booking_start": booking_start.isoformat(),
-                "booking_end": booking_end.isoformat(),
-            }
+    try:
+        result = (
+            supabase.table("venue_bookings")
+            .insert(
+                {
+                    "event_id": event.id,
+                    "venue_id": venue_id,
+                    "status": "pending",
+                    "requested_by": requested_by,
+                    # Snapshotted at creation time -- see the migration's own
+                    # comment on why this isn't re-read from the venue later.
+                    "setup_minutes": setup,
+                    "turnaround_minutes": turnaround,
+                    "booking_start": booking_start.isoformat(),
+                    "booking_end": booking_end.isoformat(),
+                }
+            )
+            .select("*")
+            .execute()
         )
-        .select("*")
-        .execute()
-    )
+    except APIError as exc:
+        # IS-61: the venue was deleted between the check above and the insert
+        # (trg_venue_bookings_refuse_deleted_venue).
+        if exc.code == "23514":
+            raise ValidationError(exc.message) from exc
+        raise
     if not result.data:
         raise ValidationError("The venue booking database operation did not return a booking.")
     booking = result.data[0] if isinstance(result.data, list) else result.data
@@ -212,15 +230,24 @@ def _attach_rejection_reasons(rows: list[dict]) -> list[dict]:
     view it") needs this join. Exact mirror of
     app.events.event_service._attach_rejections, same reasoning: only the
     LATEST rejection of a given booking, since in principle it could be
-    rejected, a fresh request made, and rejected again."""
-    rejected_ids = [row["id"] for row in rows if row.get("status") == "rejected"]
-    if not rejected_ids:
-        return rows
+    rejected, a fresh request made, and rejected again.
+
+    IS-9: likewise `cancellation` ({"reason", "cancelled_at",
+    "cancelled_by"}) on each cancelled booking (cancel_booking)."""
+    _attach_status_reason(rows, "rejected", "rejection")
+    _attach_status_reason(rows, "cancelled", "cancellation")
+    return rows
+
+
+def _attach_status_reason(rows: list[dict], status: str, key: str) -> None:
+    ids = [row["id"] for row in rows if row.get("status") == status]
+    if not ids:
+        return
     result = (
         supabase.table("venue_booking_status_log")
         .select("booking_id, reason, changed_at, profiles(name)")
-        .in_("booking_id", rejected_ids)
-        .eq("to_status", "rejected")
+        .in_("booking_id", ids)
+        .eq("to_status", status)
         .execute()
     )
     latest = {}
@@ -228,13 +255,24 @@ def _attach_rejection_reasons(rows: list[dict]) -> list[dict]:
         latest[entry["booking_id"]] = entry  # later entries overwrite earlier ones
     for row in rows:
         entry = latest.get(row["id"])
-        if row.get("status") == "rejected" and entry:
-            row["rejection"] = {
+        if row.get("status") == status and entry:
+            row[key] = {
                 "reason": entry.get("reason"),
-                "rejected_at": entry.get("changed_at"),
-                "rejected_by": (entry.get("profiles") or {}).get("name"),
+                f"{status}_at": entry.get("changed_at"),
+                f"{status}_by": (entry.get("profiles") or {}).get("name"),
             }
-    return rows
+
+
+# The event-session details a booking is judged against, embedded as
+# `event` in get_booking. Venue Staff decide on bookings but can't open the
+# event itself (rule_event_view), so they get exactly these fields -- what
+# the booking review page shows and checks suitability against -- and
+# nothing else about the request (same "only what the entry needs" stance
+# as app.venues.calendar_service's events(name, status) embed).
+BOOKING_EVENT_FIELDS = (
+    "id, name, status, description, purpose, preferred_start_date, preferred_end_date, "
+    "preferred_start_time, preferred_end_time, expected_attendance, room_layout, accessibility_needs"
+)
 
 
 def _attach_release_reasons(rows: list[dict]) -> list[dict]:
@@ -271,10 +309,17 @@ def _attach_release_reasons(rows: list[dict]) -> list[dict]:
 
 
 def get_booking(booking_id: str) -> dict:
-    result = supabase.table("venue_bookings").select("*").eq("id", booking_id).maybe_single().execute()
+    result = (
+        supabase.table("venue_bookings")
+        .select(f"*, events({BOOKING_EVENT_FIELDS})")
+        .eq("id", booking_id)
+        .maybe_single()
+        .execute()
+    )
     if result is None or not result.data:
         raise NotFoundError("Venue booking not found.")
     booking = release_expired_hold(result.data)
+    booking["event"] = booking.pop("events", None)
     # Read-only conflict/blocked flags, surfaced BEFORE a decision is
     # made (not just enforced when confirm_booking is actually called),
     # so Venue Staff see the same conflicts a confirm attempt would hit --
@@ -294,16 +339,30 @@ def get_booking(booking_id: str) -> dict:
     return _attach_release_reasons([booking])[0]
 
 
+def with_venue_names(rows: list[dict]) -> list[dict]:
+    """IS-61: a booking whose venue was permanently deleted has no venue_id
+    (so the venues(...) embed comes back empty) and keeps the venue's name in
+    venue_name. Fills the embed from it, so every list still shows which
+    venue a past booking was for. Rows whose venue still exists are left as
+    they are."""
+    for row in rows:
+        if row.get("venues") is None and row.get("venue_name"):
+            row["venues"] = {"name": row["venue_name"]}
+    return rows
+
+
 def list_bookings_for_event(event_id: str) -> list[dict]:
+    # venues(name): a session may hold several bookings (IS-9), so the
+    # coordinator needs to tell them apart.
     result = (
         supabase.table("venue_bookings")
-        .select("*")
+        .select("*, venues(name)")
         .eq("event_id", event_id)
         .order("created_at", desc=True)
         .execute()
     )
     rows = touch_expired_holds(result.data or [])
-    rows = _attach_rejection_reasons(rows)
+    rows = _attach_rejection_reasons(with_venue_names(rows))
     return _attach_release_reasons(rows)
 
 
@@ -365,7 +424,7 @@ def list_bookings(user, status: str | None = None) -> list[dict]:
     # a row that's actually expired. Touching the whole scoped set first
     # means the filter always sees current, not stale, state.
     result = query.order("created_at", desc=True).execute()
-    rows = touch_expired_holds(result.data or [])
+    rows = touch_expired_holds(with_venue_names(result.data or []))
     if status is not None:
         rows = [row for row in rows if row.get("status") == status]
     return rows
@@ -432,6 +491,9 @@ def _decide_booking(
             raise ValidationError(
                 "This venue already has a confirmed booking overlapping this period -- it cannot be confirmed."
             ) from exc
+        # IS-61: the venue has been deleted (trg_venue_bookings_refuse_deleted_venue).
+        if exc.code == "23514":
+            raise ValidationError(exc.message) from exc
         raise
     if not result.data:
         raise ValidationError("This booking is no longer pending -- refresh to see its current status.")
@@ -492,3 +554,64 @@ def reject_booking(booking_id: str, booking: SimpleNamespace, decided_by: str, r
     decided = _decide_booking(booking_id, booking, "rejected", decided_by, reason.strip())
     _notify_booking_decision(decided, "rejected")
     return decided
+
+
+def cancel_booking(booking_id: str, booking: SimpleNamespace, cancelled_by: str, reason) -> dict:
+    """IS-9: the assigned coordinator cancels ONE venue booking -> "cancelled".
+
+    "Changes or cancellation of one venue arrangement should not
+    automatically remove the other venue bookings": only this row is
+    written, so every other booking for the session (pending or confirmed)
+    is untouched. A confirmed booking that's cancelled stops holding the
+    venue at once (the no-overlap constraint covers confirmed rows only).
+
+    A confirmed event goes back to planning (confirmed -> planning, the same
+    IS-9 edge a details change takes): its venue arrangements changed after
+    confirmation. Any other event status is left as it is. The returned
+    booking carries `event_reverted_to_planning` so the caller can refresh
+    the event.
+
+    authz (rule_venue_booking_cancel) has already checked the caller is the
+    event's assigned coordinator and the booking is pending or confirmed.
+    The write is conditioned on that status too, so a cancel racing a
+    Venue Staff decision can't overwrite a status it never saw. The reason
+    is required and goes into venue_booking_status_log, with who and when.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to cancel a venue booking.")
+    result = (
+        supabase.table("venue_bookings")
+        .update({"status": "cancelled"})
+        .eq("id", booking_id)
+        .eq("status", booking.status)
+        .select("*")
+        .execute()
+    )
+    if not result.data:
+        raise ValidationError("This booking changed while you were cancelling it -- refresh to see its current status.")
+    _record_booking_status_change(booking_id, booking.status, "cancelled", cancelled_by, reason.strip())
+    cancelled = result.data[0] if isinstance(result.data, list) else result.data
+    _notify_booking_decision(cancelled, "cancelled")
+    cancelled["event_reverted_to_planning"] = _revert_confirmed_event(booking, cancelled_by, reason.strip())
+    return cancelled
+
+
+def _revert_confirmed_event(booking: SimpleNamespace, actor: str, reason: str) -> bool:
+    """IS-9: a confirmed event whose venue booking is cancelled reverts to
+    planning. event_status comes from the route's loader
+    (load_booking_with_event); the transition is conditioned on it, so if
+    the event has moved on since, there's nothing to revert and the
+    cancellation still stands."""
+    if getattr(booking, "event_status", None) != "confirmed":
+        return False
+    try:
+        transition(
+            booking.event_id,
+            "planning",
+            actor,
+            reason=f"Venue booking cancelled after confirmation: {reason}",
+            expected_from="confirmed",
+        )
+    except TransitionConflictError:
+        return False
+    return True

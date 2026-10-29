@@ -12,12 +12,17 @@
  * A cancelled event's confirmed requests read "Released" and list no
  * units (lib/equipment.js eventRequestStatus / allocatedEquipment).
  *
+ * Quantity changes (IS-43): under a confirmed request, the coordinator can
+ * ask Technical Support to change a line's quantity (EquipmentChangeRequests).
+ *
  * Data: GET /events/<id>/equipment-requests
  * (app.equipment.equipment_service.list_requests_for_event).
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet } from '../lib/api'
+import EquipmentChangeRequests from './EquipmentChangeRequests.vue'
 import {
+  CHANGEABLE_EVENT_STATUSES,
   allocatedEquipment,
   equipmentTypeLabel,
   eventRequestStatus,
@@ -34,6 +39,16 @@ const loading = ref(true)
 const error = ref('')
 
 const allocated = computed(() => allocatedEquipment(requests.value, props.event.status))
+// Same status precondition as rule_equipment_request_create: a request
+// can only be raised once the event is in planning -- an approved event is
+// moved there first with Start Planning (Record Equipment Request, IS-17).
+// Same preconditions as rule_equipment_change_create (IS-43): a confirmed
+// request, while the event is still live.
+const canChange = computed(() => CHANGEABLE_EVENT_STATUSES.includes(props.event.status))
+const confirmedRequests = computed(() => requests.value.filter((request) => request.status === 'confirmed'))
+
+const canRequest = computed(() => props.event.status === 'planning')
+
 const isReleased = computed(
   () => props.event.status === 'cancelled' && requests.value.some((request) => request.status === 'confirmed'),
 )
@@ -83,6 +98,9 @@ watch(() => [props.event.id, props.event.status], load)
                 <span class="status" :class="`status-${eventRequestStatus(request, event.status).key}`">
                   {{ eventRequestStatus(request, event.status).label }}
                 </span>
+                <p v-if="request.status === 'rejected'" class="rejection">
+                  Reason: {{ request.rejection_reason ?? 'No reason was recorded.' }}
+                </p>
               </td>
             </tr>
           </tbody>
@@ -106,6 +124,24 @@ watch(() => [props.event.id, props.event.status], load)
       <p v-else-if="isReleased" class="muted small">
         This event was cancelled, so its reserved equipment has been released.
       </p>
+
+      <EquipmentChangeRequests
+        v-for="request in confirmedRequests"
+        :key="`changes-${request.id}`"
+        :request="request"
+        :can-change="canChange"
+      />
+
+      <p v-if="event.status === 'approved'" class="muted small">
+        Start planning (under Your Decision) to request equipment.
+      </p>
+      <router-link
+        v-if="canRequest"
+        :to="{ name: 'request-equipment', params: { eventId: event.id } }"
+        class="btn small primary"
+      >
+        {{ requests.length ? 'Request more equipment' : 'Request Equipment' }}
+      </router-link>
     </template>
   </section>
 </template>
@@ -126,10 +162,17 @@ tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 
 .status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; white-space: nowrap; }
+.rejection { margin: 6px 0 0; font-size: 12px; color: #a33f3f; white-space: pre-wrap; }
 .status-pending { background: #f7efe1; color: #8a5a12; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }
 .status-released { background: #eeeeee; color: #5a5a5a; }
+
+.btn.small.primary {
+  align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;
+  background: #2568e8; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  text-decoration: none; display: inline-flex; align-items: center;
+}
 
 .allocated { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #dcdcdc; border-radius: 6px; padding: 14px 16px; }
 .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

@@ -153,39 +153,10 @@ def test_get_route_rejects_unauthenticated(client):
     assert response.status_code == 401
 
 
-# -- POST /venues/<venue_id>/settings (Josiah, Sprint 3) ---------------------
-
-
-def test_update_settings_route_succeeds_for_venue_staff(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["venue_staff"])
-    monkeypatch.setattr(routes_module, "update_venue_settings", lambda venue_id, body: {**_SAMPLE_VENUE, **body})
-
-    token = signing_key.make_token(sub="user-1")
-    response = client.post(
-        "/venues/venue-1/settings", headers={"Authorization": f"Bearer {token}"}, json={"setup_minutes": 15}
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["setup_minutes"] == 15
-
-
-def test_update_settings_route_denies_event_coordinator(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["event_coordinator"])
-    monkeypatch.setattr(
-        routes_module, "update_venue_settings", lambda *a: (_ for _ in ()).throw(AssertionError("should not be called"))
-    )
-
-    token = signing_key.make_token(sub="user-1")
-    response = client.post(
-        "/venues/venue-1/settings", headers={"Authorization": f"Bearer {token}"}, json={"setup_minutes": 15}
-    )
-
-    assert response.status_code == 403
-
-
-def test_update_settings_route_rejects_unauthenticated(client):
-    response = client.post("/venues/venue-1/settings", json={"setup_minutes": 15})
-    assert response.status_code == 401
+# tentative_hold_minutes editing is folded into POST /venues/<venue_id>
+# (IS-61's update_venue, VENUE_EDIT) after the merge with main -- see
+# docs/design-decisions.md -- so its route coverage lives in
+# test_venue_catalogue_crud.py, not here.
 
 
 # -- GET/POST /venues/<venue_id>/blocks (Josiah, Sprint 3) -------------------

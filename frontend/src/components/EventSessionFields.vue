@@ -12,7 +12,7 @@ import {
   validateQuantities,
   validateRegistrationWindow,
 } from '../lib/eventSessions'
-import { fetchRoomLayouts, roomLayoutOptions } from '../lib/roomLayouts'
+import { fetchRoomLayouts, removedLayoutNotice, roomLayoutOptions } from '../lib/roomLayouts'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -122,7 +122,8 @@ function onRegistrationToggle() {
           <option value="" disabled>Select a layout</option>
           <option v-for="layout in layoutOptions" :key="layout.value" :value="layout.value">{{ layout.label }}</option>
         </select>
-        <span v-if="session.errors.room_layout" class="field-error">{{ session.errors.room_layout }}</span>
+        <span v-if="removedLayoutNotice(session)" class="field-error" role="alert" data-test="removed-layout">{{ removedLayoutNotice(session) }}</span>
+        <span v-else-if="session.errors.room_layout" class="field-error">{{ session.errors.room_layout }}</span>
         <span v-else-if="layoutsError" class="field-error">Couldn't load room layouts: {{ layoutsError }}</span>
       </label>
     </div>

@@ -1,19 +1,24 @@
 """HTTP routes for the venue catalogue (View Venue Catalogue, Nawaz,
 Sprint 1), venue bookings (Venue Booking Request / Approval, Josiah,
-Sprint 2), and (Sprint 3, Josiah) venue settings editing + venue blocking.
-Read-only catalogue: GET /venues (list, optionally filtered by ?status=)
-and GET /venues/<venue_id> (single record).
+Sprint 2), venue blocking (Sprint 3, Josiah), and IS-61's venue CRUD:
+
+  POST   /venues              -- add a venue
+  POST   /venues/<venue_id>   -- edit a venue (only the fields sent change,
+                                  tentative_hold_minutes included -- Sprint 3)
+  DELETE /venues/<venue_id>   -- delete it; releases ongoing events' bookings
+  GET    /venues/deleted      -- deleted venues, waiting to be permanently deleted
+  DELETE /venues/<venue_id>/permanent -- permanently delete a deleted venue
 
 Booking routes use a static "/bookings" prefix, declared BEFORE the
 catalogue's own dynamic "/<venue_id>" route below -- otherwise Flask
 would match "/venues/bookings" as "/venues/<venue_id>" with
 venue_id="bookings", same static-before-dynamic care already taken for
-/events/coordinators vs /events/<event_id>. The settings/blocks routes
-below DON'T have this problem -- they're nested UNDER the dynamic
-segment (/<venue_id>/settings, /<venue_id>/blocks), a strictly more
-specific pattern than the bare /<venue_id>, so Flask/Werkzeug matches
-them correctly regardless of declaration order; still declared after
-/<venue_id>/calendar for readability, not because order matters here."""
+/events/coordinators vs /events/<event_id>. The blocks routes below
+DON'T have this problem -- they're nested UNDER the dynamic segment
+(/<venue_id>/blocks), a strictly more specific pattern than the bare
+/<venue_id>, so Flask/Werkzeug matches them correctly regardless of
+declaration order; still declared after /<venue_id>/calendar for
+readability, not because order matters here."""
 
 from __future__ import annotations
 
@@ -25,26 +30,40 @@ from app.auth.context import current_user
 from app.authz.actions import (
     VENUE_BLOCK,
     VENUE_BOOKING_APPROVE,
+    VENUE_BOOKING_CANCEL,
     VENUE_BOOKING_LIST,
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
     VENUE_CALENDAR_VIEW,
+    VENUE_CREATE,
+    VENUE_DELETE,
+    VENUE_EDIT,
     VENUE_LIST,
-    VENUE_MANAGE,
     VENUE_VIEW,
 )
 from app.authz.decorators import require
+from app.extensions import supabase
 from app.shared.errors import ValidationError
 from app.venues.block_service import create_venue_block, list_venue_blocks
 from app.venues.booking_service import (
     BOOKING_STATUSES,
+    cancel_booking,
     confirm_booking,
     get_booking,
     list_bookings,
     reject_booking,
 )
 from app.venues.calendar_service import get_venue_calendar
-from app.venues.venue_service import VENUE_STATUSES, get_venue, list_venues, update_venue_settings
+from app.venues.venue_service import (
+    VENUE_STATUSES,
+    create_venue,
+    delete_venue,
+    get_venue,
+    list_deleted_venues,
+    list_venues,
+    permanently_delete_venue,
+    update_venue,
+)
 
 venues_bp = Blueprint("venues", __name__, url_prefix="/venues")
 
@@ -83,6 +102,30 @@ def reject_venue_booking_route(booking, booking_id):
     return jsonify(rejected), 200
 
 
+# IS-9: the assigned coordinator cancels one booking (reason required). Only
+# that booking changes -- the session's other bookings are left as they are.
+# Static path -- must come before GET /venues/<venue_id> below.
+@venues_bp.route("/bookings/<booking_id>/cancel", methods=["POST"])
+@require(VENUE_BOOKING_CANCEL, loader=lambda booking_id: load_booking_with_event(booking_id))
+def cancel_venue_booking_route(booking, booking_id):
+    body = request.get_json(silent=True) or {}
+    cancelled = cancel_booking(booking_id, booking, current_user().id, body.get("reason"))
+    return jsonify(cancelled), 200
+
+
+def load_booking_with_event(booking_id: str) -> SimpleNamespace:
+    """load_booking plus the booking's event's coordinator_id and status
+    (as event_coordinator_id / event_status), which rule_venue_booking_cancel
+    needs: the event's current coordinator cancels, not whoever requested
+    the booking."""
+    booking = load_booking(booking_id)
+    rows = supabase.table("events").select("coordinator_id, status").eq("id", booking.event_id).execute().data or []
+    event = rows[0] if rows else {}
+    booking.event_coordinator_id = event.get("coordinator_id")
+    booking.event_status = event.get("status")
+    return booking
+
+
 def load_booking(booking_id: str) -> SimpleNamespace:
     """Loader for @require -- fetches the booking (via get_booking, which
     also raises NotFoundError for a missing row) and exposes it as a
@@ -92,6 +135,16 @@ def load_booking(booking_id: str) -> SimpleNamespace:
     an unused attribute, same as any other dict field no rule happens to
     read."""
     return SimpleNamespace(**get_booking(booking_id))
+
+
+# IS-61: venues deleted from the catalogue but not yet permanently deleted,
+# for Venue Staff to permanently delete. Same action as deleting (venue.delete):
+# only those who can delete need to see what's waiting to be removed.
+# Static path -- must come before GET /venues/<venue_id> below.
+@venues_bp.route("/deleted", methods=["GET"])
+@require(VENUE_DELETE)
+def list_deleted_venues_route():
+    return jsonify(list_deleted_venues()), 200
 
 
 @venues_bp.route("", methods=["GET"])
@@ -109,6 +162,34 @@ def get_venue_route(venue, venue_id):
     return jsonify(venue), 200
 
 
+@venues_bp.route("", methods=["POST"])
+@require(VENUE_CREATE)
+def create_venue_route():
+    return jsonify(create_venue(request.get_json(silent=True))), 201
+
+
+# POST, not PATCH, for an edit -- same as POST /room-layouts/<id>.
+@venues_bp.route("/<venue_id>", methods=["POST"])
+@require(VENUE_EDIT)
+def update_venue_route(venue_id):
+    return jsonify(update_venue(venue_id, request.get_json(silent=True))), 200
+
+
+@venues_bp.route("/<venue_id>", methods=["DELETE"])
+@require(VENUE_DELETE)
+def delete_venue_route(venue_id):
+    return jsonify(delete_venue(venue_id, current_user().id)), 200
+
+
+# The second step: remove a venue already deleted from the catalogue. Same
+# action as deleting, as IS-60's permanent delete shares room_layout.manage.
+@venues_bp.route("/<venue_id>/permanent", methods=["DELETE"])
+@require(VENUE_DELETE)
+def permanently_delete_venue_route(venue_id):
+    permanently_delete_venue(venue_id)
+    return "", 204
+
+
 # View Venue Availability Calendar (Nawaz, Sprint 2, IS-11). `start`/`end`
 # (YYYY-MM-DD, half-open-ish -- see calendar_service.get_venue_calendar's
 # own docstring) are both required: the AC's "chosen day, week, or month"
@@ -123,16 +204,6 @@ def get_venue_calendar_route(venue, venue_id):
     if not start or not end:
         raise ValidationError("Both 'start' and 'end' query parameters (YYYY-MM-DD) are required.")
     return jsonify(get_venue_calendar(venue_id, start, end)), 200
-
-
-# Request Venue Booking with Setup and Turnaround Time (Josiah, Sprint 3,
-# Week 7 #1) -- Venue Staff edit a venue's own timing settings. No loader
-# needed (role-only, like room_layout.manage) -- an unknown venue_id 404s
-# from inside update_venue_settings itself.
-@venues_bp.route("/<venue_id>/settings", methods=["POST"])
-@require(VENUE_MANAGE)
-def update_venue_settings_route(venue_id):
-    return jsonify(update_venue_settings(venue_id, request.get_json(silent=True))), 200
 
 
 # Venue Becomes Unavailable After Booking (Josiah, Sprint 3, Week 7 #2).

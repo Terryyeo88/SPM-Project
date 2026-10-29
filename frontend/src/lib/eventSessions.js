@@ -77,6 +77,8 @@ export function emptySession() {
     expected_attendance: '',
     accessibility_needs: [],
     room_layout: '',
+    // Read-only: the layout Venue Staff's delete cleared from this session (see removedLayoutNotice).
+    room_layout_removed: '',
     equipment: [],
     registration_needs: false,
     registration_start_datetime: '',
@@ -96,6 +98,7 @@ export function sessionFromEvent(row) {
     expected_attendance: row.expected_attendance || '',
     accessibility_needs: (row.accessibility_needs || []).map((entry) => ({ ...entry })),
     room_layout: row.room_layout || '',
+    room_layout_removed: row.room_layout_removed || '',
     equipment: (row.equipment_needed?.equipment || []).map((entry) => ({ ...entry })),
     registration_needs: row.registration_needs || false,
     registration_start_datetime: isoToLocalInput(row.registration_start_datetime),

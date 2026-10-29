@@ -350,6 +350,145 @@ def test_ac3_from_planning_on_impacts_are_checked(fake, status):
         update_event(_event(fake), {"expected_attendance": 150}, COORDINATOR)
 
 
+def test_ac3_identical_equipment_requests_are_reported_once_not_once_each(fake):
+    """Two pending requests for the same window would each produce the same
+    sentence; they're reported once, with how many requests it covers."""
+    _request_equipment(fake, status="pending")
+    _request_equipment(fake, status="pending")
+    fake.tables["equipment_requests"][1]["id"] = "equipment-request-2"
+
+    impacts = preview_event_update(
+        _event(fake),
+        {
+            "preferred_start_date": LATER,
+            "preferred_end_date": LATER,
+            "equipment": [{"item": "projector", "quantity": 1}],
+        },
+    )["impacts"]
+
+    issues = next(impact for impact in impacts if impact["area"] == "equipment")["issues"]
+    assert len(issues) == 2
+    assert len(set(issues)) == 2
+    assert issues[0].startswith("The 2 pending equipment requests cover ")
+    assert issues[0].endswith("They will not move automatically.")
+    assert issues[1].startswith("The 2 pending equipment requests were made for the previous equipment list")
+
+
+def test_ac3_a_single_equipment_request_is_described_in_the_singular(fake):
+    _request_equipment(fake, status="pending")
+
+    impacts = preview_event_update(_event(fake), {"preferred_start_date": LATER, "preferred_end_date": LATER})[
+        "impacts"
+    ]
+
+    issues = next(impact for impact in impacts if impact["area"] == "equipment")["issues"]
+    assert len(issues) == 1
+    assert issues[0].startswith("The pending equipment request covers ")
+    assert issues[0].endswith("It will not move automatically.")
+
+
+def test_ac3_arrangements_that_still_fit_are_presented_too(fake):
+    """AC3: a significant change is shown against every arrangement it
+    touches, even one it doesn't break -- a later finish that still falls
+    inside the venue booking and equipment window is "touched", not "fine
+    to ignore"."""
+    _book_venue(fake, end="18:30")
+    _request_equipment(fake)
+    fake.tables["equipment_requests"][0]["needed_end"] = f"{FUTURE}T18:30:00+08:00"
+
+    preview = preview_event_update(_event(fake), {"preferred_end_time": "18:00"})
+
+    assert preview["impacts"] == []
+    assert preview["arrangements"] == [
+        {
+            "area": "venue",
+            "id": "booking-1",
+            "title": "Venue booking: Hall booking-1",
+            "status": "confirmed",
+            "fields": ["preferred_end_time"],
+        },
+        {
+            "area": "equipment",
+            "id": "equipment-request-1",
+            "title": "Equipment request",
+            "status": "confirmed",
+            "fields": ["preferred_end_time"],
+        },
+    ]
+    assert _writes(fake) == [] and _logs(fake) == []
+
+
+def test_ac3_registrations_are_presented_when_attendance_changes(fake):
+    """AC3 (registration): a change to expected attendance touches the
+    venue booking (capacity) and the registrations already taken."""
+    _book_venue(fake)
+    fake.tables["registrations"] = [
+        {"event_id": "session-1", "status": "confirmed"},
+        {"event_id": "session-1", "status": "confirmed"},
+        {"event_id": "session-1", "status": "waitlisted"},
+    ]
+
+    arrangements = preview_event_update(_event(fake), {"expected_attendance": 150})["arrangements"]
+
+    assert [(item["area"], item["fields"]) for item in arrangements] == [
+        ("venue", ["expected_attendance"]),
+        ("registration", ["expected_attendance"]),
+    ]
+    assert arrangements[1]["title"] == "Attendee registrations (2 confirmed, 1 waitlisted)"
+
+
+def test_ac3_an_equipment_change_touches_equipment_requests_not_the_venue(fake):
+    _book_venue(fake)
+    _request_equipment(fake, status="pending")
+
+    arrangements = preview_event_update(_event(fake), {"equipment": [{"item": "microphone", "quantity": 2}]})[
+        "arrangements"
+    ]
+
+    assert [(item["area"], item["status"]) for item in arrangements] == [("equipment", "pending")]
+
+
+def test_ac3_an_ordinary_change_touches_no_arrangement(fake):
+    _book_venue(fake)
+    _request_equipment(fake)
+    fake.tables["registrations"] = [{"event_id": "session-1", "status": "confirmed"}]
+
+    assert preview_event_update(_event(fake), {"name": "Community Summit"})["arrangements"] == []
+
+
+def test_ac3_cancelled_and_rejected_arrangements_are_not_presented(fake):
+    """Only arrangements still in place count: a cancelled or rejected
+    booking holds nothing the change could touch."""
+    _book_venue(fake, "booking-cancelled", status="cancelled")
+    _book_venue(fake, "booking-rejected", status="rejected")
+    _book_venue(fake, "booking-live")
+
+    arrangements = preview_event_update(_event(fake), {"preferred_start_time": "09:30"})["arrangements"]
+
+    assert [item["id"] for item in arrangements] == ["booking-live"]
+
+
+@pytest.mark.parametrize("status", ["under_review", "approved"])
+def test_ac3_no_arrangements_are_presented_before_planning(fake, status):
+    fake.rows[0]["status"] = status
+    _book_venue(fake)
+
+    assert preview_event_update(_event(fake), {"expected_attendance": 150})["arrangements"] == []
+
+
+def test_ac3_arrangements_are_presented_through_the_preview_route(client, signing_key, monkeypatch, fake):
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    _book_venue(fake)
+
+    response = client.post(
+        "/events/session-1/update-preview", headers=_auth(signing_key, COORDINATOR), json={"expected_attendance": 150}
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.get_json()["arrangements"]] == ["booking-1"]
+    assert fake.get("session-1")["expected_attendance"] == 100
+
+
 # -- AC4: what, who, when ---------------------------------------------------------
 
 

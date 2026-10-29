@@ -722,6 +722,55 @@ in docs/design-decisions.md; please confirm or correct:
   when a significant change affects their arrangements; depends on the
   Notification System story.
 
+### Added 19 Oct (AC3 and AC9 completed)
+
+- **Edit window vs the team's note on the story.** The note reads: the
+  coordinator edits from under review to confirmed; the organiser edits
+  only a draft. `rule_event_edit` is wider on both sides: the organiser can
+  also edit a **rejected** session (the resubmit flow depends on it), and
+  the coordinator can edit in any status except completed/cancelled
+  (including draft/submitted/rejected, and safety_review). Left as is --
+  should either branch be narrowed?
+
+- **Touched-but-unbroken arrangements are shown, not acknowledged.** Only a
+  conflict needs the "I've reviewed these" tick. Should every touched
+  arrangement need it before a significant change saves?
+
+- ~~**Cancelling a venue booking doesn't change the event's status.** A
+  confirmed event that loses its only confirmed venue stays confirmed. A
+  change to the event's details sends it back to planning (AC10); should
+  cancelling a confirmed booking of a confirmed event do the same?~~
+  **Resolved 2026-10-26: yes.** Cancelling any venue booking (pending or
+  confirmed) of a confirmed event sends the event back to planning; other
+  statuses are unchanged. See `docs/design-decisions.md` §IS-9 "Cancelling
+  a booking of a confirmed event reverts it to planning".
+
+- **The current coordinator cancels, not the requester.** After the Lead
+  reassigns an event, the new coordinator can cancel the old coordinator's
+  bookings. Viewing a single booking (`rule_venue_booking_view`, IS-14) is
+  still requester-only, so the new coordinator can cancel a booking whose
+  page they can't open. Should view follow the current coordinator too?
+  (IS-14's rule -- Josiah's call.)
+
+- **"Request a venue" is hidden while a booking is pending or confirmed --
+  in the page only.** `POST /events/<id>/venue-bookings` still accepts a
+  second booking for the session. Enforce it in the backend too?
+
+- **Change History: older entries have no session.** Entries written before
+  `event_logs.event_id` existed are labelled only when the request has a
+  single session; on a multi-session request they show no session badge.
+
+- **"All sessions" means an applied shared-detail change.** A coordinator's
+  name/description/purpose-only change reaches every open session, so it is
+  labelled "All sessions"; completed/cancelled sessions it skipped are not
+  called out. An organiser's request is labelled with its own session.
+
+- **Migrations `20261019300000_venue_booking_cancel.sql` and
+  `20261019400000_event_logs_session.sql` must be applied before
+  deploying.** The backend writes `event_logs.event_id` on every logged
+  change; PostgREST refuses an insert naming a missing column, so edits and
+  change requests fail until it exists.
+
 ## Shared calendar extraction (16 Oct)
 
 - **Test gap: no venue calendar test pins the overlap boundary.** In a hand
@@ -950,3 +999,242 @@ Known gaps, not built:
 - **No seeded demo data for a tentatively-held, about-to-expire booking.**
   To demo expiry, confirm a booking, then either wait out its hold or
   adjust `confirmed_at`/`hold_minutes` directly in the database.
+
+## Record Equipment Request for Event (IS-17, Nawaz, 19 Oct)
+
+Source: IS-17's AC (specify an event and one or more items; quantity per
+item; free-text technical requirements per item; blocked when a quantity is
+missing or zero; viewable later; created as Pending and visible to Technical
+Support), plus Aaralyn's IS-9 note ("whoever builds that feature should
+require planning too"). No new migration: `equipment_requests` and
+`equipment_request_items` already exist (IS-18).
+
+- **Planning only.** `rule_equipment_request_create` is a mirror of
+  `rule_venue_booking_create`: the event's assigned coordinator, and the
+  event must be in `planning`. A stranger gets the same 404 as a missing
+  event. This is our reading of Aaralyn's note, not something a story
+  states; relaxing it is one line in the rule.
+- **The coordinator does not enter dates.** The request is for one session
+  (the `events` row), so `needed_start`/`needed_end` are that session's own
+  window, snapshotted the same way a venue booking snapshots its period
+  (`booking_service._event_window`: Singapore time, missing end time = end
+  of day). The form shows them but does not ask for them. If a coordinator
+  later needs equipment for only part of a session, the request would need
+  its own period fields.
+- **No setup/turnaround buffer.** A venue booking pads the session with the
+  venue's setup and turnaround minutes. Equipment has no such per-type
+  figure in the schema, so the request is exactly the session's window.
+- **One line per type.** Matches `unique(request_id, equipment_type_id)`. A
+  repeated type is rejected with a message rather than merged, so the
+  coordinator sees it. Quantity must be a whole number of at least 1;
+  technical requirements are optional and capped at 2000 characters (our
+  limit, the column is unbounded `text`).
+- **Several requests per session are allowed.** "Request more equipment"
+  adds another request rather than editing the first. Editing or cancelling
+  a pending request is not in this story and is not built.
+- **Writes are two inserts, not a transaction.** The request row, then its
+  lines. If the lines fail, the request row is deleted again so Technical
+  Support is not left a request that asks for nothing. Not tested against a
+  real database (the project's integration tests need a local Supabase,
+  which was not available when this was written).
+- **Coordinators can now read the equipment catalogue** (`GET
+  /equipment/types`, kinds only, not units) because the form needs it and
+  `equipment.list` is Technical Support only. Types are not sensitive.
+- **Nothing is reserved.** A new request is Pending with no reservation rows
+  (IS-19, Accept, writes those). Technical Support already sees it in their
+  queue (IS-18); no notification is sent (no notification system exists yet).
+- **The create-event form's `equipment_needed` list is unchanged** and does
+  not create a request. Still open: whether it should.
+
+## Accept an Equipment Request and Reserve Stock (IS-19, Nawaz, 19 Oct)
+
+Source: the Reservation story's first AC ("Accepting a request changes its
+status to confirmed", "Available quantity for that equipment is reduced by
+the reserved amount, scoped to the event's date and time", "Only requests in
+a pending status can be accepted"). No new migration. Implements the three
+conventions Justin's View Reserved Equipment section documents
+("Conventions this relies on", `docs/design-decisions.md`).
+
+- **One reservation row per unit.** A request for 2 projectors writes 2 rows,
+  each naming a unit. The request becomes `confirmed` only after those rows
+  are written, and each row copies the request's `needed_start`/`needed_end`.
+- **The available quantity is not stored.** It still falls out of counting
+  reservation rows (IS-18's check, the IS-47 calendar and the exclusion
+  constraint all read the same rows), so there is no counter to keep in step.
+- **Accepted whole or not at all.** If any line is short, nothing is
+  reserved and the error says which type and by how much. A partial accept
+  (give them 1 of the 2 projectors) is not built; the Technical Support
+  user's other option is to reject, which is IS-41.
+- **Which units a request gets.** Lowest asset tag first, so it is
+  predictable. Nothing lets Technical Support pick specific units; if that
+  is wanted it is a change to this story, not a new one.
+- **Only while the event is in `planning`.** `rule_equipment_request_accept`
+  refuses a request whose event is cancelled, approved, in safety review or
+  later. The safety-review submit already requires no pending equipment
+  request, so a pending request on an event past planning is a leftover
+  (e.g. the event was cancelled), and accepting it would take stock for
+  nothing. This is our reading, not a story rule.
+- **Two ways it can lose a race, both handled.** Two people accepting the
+  same request: the status update is conditioned on `pending`, the loser's
+  units are deleted again and it gets "no longer pending". Two different
+  requests going for the same unit: the exclusion constraint refuses the
+  second insert and nothing is half-reserved. Neither has been exercised
+  against a real database (no local Supabase was available).
+- **No transaction.** The REST client gives none, so a crash between
+  writing the reservations and flipping the status could leave reservations
+  on a request that is still `pending`. Re-accepting it would then fail on
+  the exclusion constraint (its own units are already held), so a leftover
+  like that needs its reservation rows deleted by hand. Not guarded beyond
+  the clean-up above.
+- **No notification.** `_notify_request_decision` is a no-op placeholder
+  like the venue one; the Notification System story is not built.
+- **Reject, warn on shortfall, and quantity changes** are IS-41 and IS-43,
+  not here.
+
+## Get Warned and Reject When Requested Quantity Exceeds Availability (IS-41, Nawaz, 19 Oct)
+
+- **Needs a migration, unlike IS-17 and IS-19.** `equipment_requests` had a
+  `rejected` status but nowhere to keep the explanation the story requires.
+  `20261019100000_equipment_request_rejection.sql` adds `rejection_reason`,
+  `decided_by`, `decided_at`, plus a CHECK that a rejected request has a
+  non-blank reason and no other request has one (added `NOT VALID`, so it
+  only applies to new and updated rows). Each request is decided once, so
+  the reason lives on the request rather than in a status-log table; if a
+  later story reopens rejected requests, that is when to add a log table.
+  Must be applied in the Supabase SQL Editor before the reject button works.
+- **"Warned" is the existing availability check.** IS-18 already shows
+  requested vs available per line and flags shortfalls. IS-41 adds the
+  suggestion to reject (shown only when something is short) and keeps Accept
+  disabled in that case, which IS-19 already did.
+- **Rejecting is allowed even when stock is fine.** The story's trigger is a
+  shortfall, but Technical Support may have other reasons (equipment needed
+  elsewhere, unclear requirements), so the only requirement is a reason. If
+  the team wants reject limited to shortfalls, it is one extra check in
+  `rule_equipment_request_reject`.
+- **No event-status check on reject.** Accept requires the event to be in
+  `planning`; reject does not, so a pending request left on a cancelled
+  event can be cleared. Rejecting takes no stock, so there is nothing to
+  protect.
+- **"Sent to the Event Coordinator"** is the stored reason shown in the
+  coordinator's Equipment Booking section, plus `_notify_request_decision`,
+  which is still a print placeholder. No notification system exists yet;
+  wiring it up is a one-line change when one does.
+- **Accepting does not write `decided_by`/`decided_at`.** IS-19 predates the
+  columns and a confirmed request already shows its reservation rows.
+  Say if the team wants those filled for accepts too.
+
+## Update Quantity on an Existing Equipment Reservation (IS-43, Nawaz, 19 Oct)
+
+- **Needs a migration.** `20261019200000_equipment_change_requests.sql` adds
+  `equipment_change_requests`: one row per ask, against one line of a request
+  (`request_item_id`), with `old_quantity`, `new_quantity`, a status
+  (pending/accepted/rejected), `rejection_reason`, `decided_by`, `decided_at`.
+  A partial unique index allows only one pending ask per line. Must be applied
+  in the Supabase SQL Editor before any of this works.
+- **The ask is stored and does not touch the confirmed request.** The story
+  has the coordinator "request" a change and Technical Staff accept or reject
+  it, so the ask needs a record Technical Support can review. Until it is
+  accepted the request's quantity and reservations are exactly as they were,
+  the same "goes through review first" stance Justin's Event Change Request
+  story takes for event details.
+- **"Triggers a recalculation" is computed whenever the ask is read.** Nothing
+  is stored: each pending ask comes back with a fresh `check` (units that could
+  cover the request vs the quantity asked for), the same way IS-18's check is
+  fresh. That number includes the units the request already holds, because the
+  availability check leaves a request's own reservations out of "held by
+  others". A decrease is always accommodated.
+- **Accepting an increase** reserves the extra units, lowest free asset tag
+  first, copying the request's period. **Accepting a decrease** releases the
+  surplus units, highest asset tags first. Technical Support cannot choose
+  which units; say if the team wants that.
+- **Whole-line quantity changes only.** Changing the date/time or adding a new
+  type is not covered by this story; for a new type the coordinator uses
+  "Request more equipment" (IS-17). A change to the date/time would follow the
+  event's own change flow.
+- **Allowed while the event is `planning`, `safety_review` or `confirmed`.**
+  Accept requires the event to still be in one of those; a cancelled,
+  completed or rejected event's change can only be rejected (to clear it).
+  A pending request cannot have a change asked for: Technical Support decide
+  it as it stands.
+- **Only the coordinator who raised the request can ask.** Same as who can
+  view it. If the assigned coordinator can differ from the requester, this
+  needs widening.
+- **No transaction.** Accept writes the extra reservations, claims the ask
+  (conditioned on still pending), then updates the line, and undoes the earlier
+  steps if a later one fails. The exclusion constraint is the backstop if
+  another request takes a unit meanwhile. The real-database behaviour is
+  untested.
+- **Notification** uses the same `_notify_request_decision` placeholder as
+  accept/reject ("change accepted" / "change rejected"). The coordinator sees
+  the outcome, and a rejection's reason, under the request on the event page.
+- **The coordinator's page does not refresh itself** when Technical Support
+  decide; they see the new quantity and allocated units after reloading.
+
+
+## Venue Categories (IS-60, 23 Oct)
+
+Reasoning for each item is in docs/design-decisions.md, "Venue Categories
+(IS-60)".
+
+- **Venue categories are the room layouts.** The story's "type of venues"
+  is implemented as the existing room layouts (theatre, classroom, ...)
+  rather than a separate category list. Please confirm a category isn't
+  meant to be something else, such as a venue type like "auditorium" or
+  "lab" independent of seating layout.
+- **Rejected events are not "ongoing".** AC5 says ongoing events are those
+  "not completed or cancelled". We also exclude rejected sessions, so a
+  rejected session never blocks permanently deleting a category. Please
+  confirm this departure from the AC's wording is acceptable.
+- **Drafts and rejected sessions lose a disabled category.** It is cleared
+  from them when it is disabled, when they are rejected while it is
+  disabled, and when it is permanently deleted; the organiser's form says
+  why it is empty. Other submitted events keep it. Please confirm.
+- **Restoring a category doesn't put it back** on the drafts and rejected
+  sessions it was cleared from; their organisers pick again. Please
+  confirm, or say if a restore should give it back to sessions that
+  haven't chosen another one yet.
+- **Clearing a rejected session's layout isn't in its change history.**
+  Nobody edits the event: it is the database reacting to Venue Staff
+  disabling or deleting the category. Please confirm, or say if it should
+  be logged (attributed to Venue Staff or to "system").
+- **"Disabling" is the soft delete, and can be undone.** AC3/AC4's
+  "disable" is the existing soft delete, which Venue Staff can also
+  restore; the story doesn't mention restoring. Please confirm.
+- **Category names are unique regardless of case.** "Theatre" and
+  "theatre" can't both exist. Please confirm.
+
+## CRUD in Venue Catalogue (IS-61, 23 Oct)
+
+Reasoning for each item is in docs/design-decisions.md, "CRUD in Venue
+Catalogue (IS-61)".
+
+- **Pending bookings are released too, not just confirmed ones.** Please
+  confirm "events that have booked the venue" includes requests still
+  waiting on Venue Staff.
+- **Confirmed sessions go back to planning** when they lose their venue
+  (as IS-9 does when a confirmed event's details change), so the coordinator
+  can book again. Please confirm.
+- **A session under a safety check also goes back to planning**, and its
+  pending safety review is closed as "changes requested" by the Venue Staff
+  member who deleted the venue. Please confirm, or say how the Safety
+  Officer should be involved.
+- **The alert is on the event page only.** No email or push notification
+  exists in the app yet. Please confirm that is enough for now.
+- **Facilities and accessibility provisions are fixed lists** (the ones
+  event requests choose from), so Venue Staff pick rather than type them.
+  Please confirm, or say if Venue Staff need to add new kinds.
+- **Edits don't re-check existing bookings.** Lowering capacity or removing
+  a layout or accessibility provision from a venue leaves its bookings as
+  they are. Please confirm.
+- **Venue Staff can't set operating hours.** They're left out of the add
+  and edit form because nothing else in the app relies on them (the venue
+  calendar only shows them as a note). New venues have no set hours. Please
+  confirm, or say if Venue Staff need to manage them.
+- **New venues are always "available".** The form has no status field, so
+  a venue is added as available and an edit never changes its status.
+  Please confirm, or say if Venue Staff need to set it (e.g. a venue added
+  while still under maintenance).
+- **"Ongoing events" (AC4) means not completed, cancelled or rejected** --
+  the same reading as IS-60. Only those events' bookings are released when
+  a venue is deleted; finished and rejected events keep their record.
+  Please confirm rejected events shouldn't lose their booking too.

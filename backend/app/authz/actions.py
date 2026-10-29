@@ -78,9 +78,7 @@ REGISTRATION_LIST = "registration.list"
 # -- venues (Nawaz, Sprint 1: View Venue Catalogue) ---------------------
 # Source: "As an Event Coordinator, I want to see venue details so that
 # I can find the appropriate venue for the event request." The catalogue
-# is read-only in Sprint 1 -- no venue.create/edit/delete actions exist
-# yet because no story asks for them; whoever builds venue management
-# later should add those the same way, sourced the same way.
+# was read-only in Sprint 1; IS-61 added venue.create/edit/delete below.
 #
 # Both role-only, same shape as EVENT_LIST/EVENT_CREATE (see that
 # section's warning above `rule_event_list` in rules.py) -- a venue
@@ -92,6 +90,15 @@ REGISTRATION_LIST = "registration.list"
 
 VENUE_VIEW = "venue.view"
 VENUE_LIST = "venue.list"
+
+# -- venue management (IS-61: CRUD in Venue Catalogue) -----------------------
+# Source: "As a Venue staff, I want to add, edit and delete venues so that I
+# can easily manage what venues ConnectSphere currently has." Role-only, like
+# VENUE_LIST: a venue has no owner. Three actions, not one "manage", per
+# rules.py's "WHY SEPARATE ACTIONS" -- each AC is its own decision.
+VENUE_CREATE = "venue.create"
+VENUE_EDIT = "venue.edit"
+VENUE_DELETE = "venue.delete"
 
 # -- venue calendar (Nawaz, Sprint 2: View Venue Availability Calendar,
 # IS-11) ------------------------------------------------------------
@@ -112,19 +119,19 @@ VENUE_LIST = "venue.list"
 
 VENUE_CALENDAR_VIEW = "venue.calendar_view"
 
-# -- venue management (Josiah, Sprint 3) ---------------------------------
-# Source: "Request Venue Booking with Setup and Turnaround Time" (Week 7
-# #1) -- Venue Staff edit a venue's setup_minutes/turnaround_minutes/
-# tentative_hold_minutes, the first write path VENUE_VIEW's own 2024
-# comment above anticipated ("whoever builds venue management later
-# should add those actions the same way"). "Venue Becomes Unavailable
-# After Booking" (Week 7 #2) -- Venue Staff create/list blocks on a
-# venue. Two separate actions, not one, even though both are venue_staff-
-# only today -- venues and venue_blocks are different resource types,
-# same reasoning ROOM_LAYOUT_LIST/ROOM_LAYOUT_MANAGE's own split from
-# VENUE_VIEW/VENUE_LIST already established for a similar audience.
+# -- venue.block (Josiah, Sprint 3) ---------------------------------------
+# Source: "Venue Becomes Unavailable After Booking" (Week 7 #2) -- Venue
+# Staff create/list blocks on a venue. Not folded into VENUE_EDIT (IS-61):
+# venues and venue_blocks are different resource types, same reasoning
+# ROOM_LAYOUT_LIST/ROOM_LAYOUT_MANAGE's own split from VENUE_VIEW/
+# VENUE_LIST already established for a similar audience.
+#
+# tentative_hold_minutes (Week 7 #1, "Request Venue Booking with Setup
+# and Turnaround Time") is edited through VENUE_EDIT above, alongside
+# setup_minutes/turnaround_minutes -- IS-61 landed on main as the venue
+# catalogue's one write path while this was in progress, so there is no
+# separate VENUE_MANAGE action here; see docs/design-decisions.md.
 
-VENUE_MANAGE = "venue.manage"
 VENUE_BLOCK = "venue.block"
 
 # -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
@@ -141,6 +148,9 @@ VENUE_BOOKING_VIEW = "venue_booking.view"
 VENUE_BOOKING_LIST = "venue_booking.list"
 VENUE_BOOKING_APPROVE = "venue_booking.approve"
 VENUE_BOOKING_REJECT = "venue_booking.reject"
+# venue_booking.cancel (IS-9): the event's assigned coordinator cancels one
+# pending or confirmed booking; the session's other bookings stay as they are.
+VENUE_BOOKING_CANCEL = "venue_booking.cancel"
 
 # -- equipment (Nawaz, Sprint 2: IS-18 Check Equipment Availability) --------
 # Source: "As a Technical Support Staff, I want to check whether sufficient
@@ -161,6 +171,28 @@ EQUIPMENT_VIEW = "equipment.view"
 EQUIPMENT_REQUEST_LIST = "equipment_request.list"
 EQUIPMENT_REQUEST_VIEW = "equipment_request.view"
 EQUIPMENT_REQUEST_CHECK_AVAILABILITY = "equipment_request.check_availability"
+
+# -- record equipment request (IS-17: Record Equipment Request for Event) ---
+#   equipment_request.create -- the assigned coordinator, while the event is
+#       in "planning" (same gate as venue_booking.create; Aaralyn's IS-9
+#       note asks whoever builds this to require planning).
+#   equipment_type.list -- the catalogue of kinds of equipment a request can
+#       name, which the request form needs and equipment.list (Technical
+#       Support only) does not give a coordinator.
+EQUIPMENT_REQUEST_CREATE = "equipment_request.create"
+# equipment_request.accept (IS-19): Technical Support Staff accept a pending
+# request and reserve units for it. Reject is the separate IS-41 action.
+EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
+# equipment_request.reject (IS-41): Technical Support Staff reject a pending
+# request with an explanation the coordinator can read.
+EQUIPMENT_REQUEST_REJECT = "equipment_request.reject"
+# equipment_change.* (IS-43): the coordinator asks to change the quantity on
+# an already-confirmed request line; Technical Support accept or reject it.
+EQUIPMENT_CHANGE_CREATE = "equipment_change.create"
+EQUIPMENT_CHANGE_LIST = "equipment_change.list"
+EQUIPMENT_CHANGE_ACCEPT = "equipment_change.accept"
+EQUIPMENT_CHANGE_REJECT = "equipment_change.reject"
+EQUIPMENT_TYPE_LIST = "equipment_type.list"
 
 # -- equipment calendar (IS-47: View Equipment Availability Calendar) -------
 # Source: IS-47 AC1 "A technical support staff member can open an equipment

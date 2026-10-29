@@ -1,32 +1,55 @@
 <script setup>
 /**
- * Venue Staff settings editing (Josiah, Sprint 3, Week 7 #1) lives here
- * as a small inline section -- not a separate page -- since the page
- * already identifies the one venue being edited and doesn't currently
- * even display these three fields. "Block this venue" (Week 7 #2) is a
- * link to its own focused form (BlockVenueView.vue), the same
- * reachability pattern RequestVenueBookingView.vue already uses from
- * EventDetailsView.vue.
+ * One venue's details (View Venue Catalogue). IS-61: Venue Staff also edit
+ * it (VenueFormView.vue) or delete it from here. Deleting releases the
+ * bookings of ongoing events that booked it; their coordinators are alerted
+ * on the event page (VenueRemovedAlert.vue). A deleted venue is still shown
+ * when opened by link (an old booking's venue), marked as deleted, without
+ * the edit/delete actions; Venue Staff can then permanently delete it (its
+ * past bookings keep its name).
+ *
+ * "Block this venue" (Sprint 3, Josiah, Week 7 #2) is a link to its own
+ * focused form (BlockVenueView.vue), the same reachability pattern
+ * RequestVenueBookingView.vue already uses from EventDetailsView.vue --
+ * not folded into the Edit venue form above, since blocking isn't an edit
+ * to the venue's own record. tentative_hold_minutes (Week 7 #1) IS part
+ * of the venue's own record, so it's edited through VenueFormView.vue
+ * alongside setup_minutes/turnaround_minutes, not a separate form here --
+ * see docs/design-decisions.md for why this merged that way.
  */
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { apiGet } from '../../lib/api'
+import { ROLES, hasAnyRole } from '../../lib/roles'
+import {
+  deleteOutcomeMessage,
+  deleteVenue,
+  formatOperatingHours,
+  permanentlyDeleteVenue,
+} from '../../lib/venueCatalogue'
 import { useAuthStore } from '../../stores/auth'
-import { updateVenueSettings } from '../../lib/venues'
 import AppNavBar from '../../components/AppNavBar.vue'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const venue = ref(null)
 const loading = ref(true)
 const error = ref('')
 
-const isVenueStaff = computed(() => auth.roles.includes('venue_staff'))
-const editing = ref(false)
-const settingsForm = reactive({ setup_minutes: null, turnaround_minutes: null, tentative_hold_minutes: null })
-const saving = ref(false)
-const saveError = ref('')
-const saveSuccess = ref('')
+const isVenueStaff = computed(() => hasAnyRole(auth.roles, [ROLES.VENUE_STAFF]))
+const canManage = computed(() => isVenueStaff.value && venue.value && !venue.value.deleted_at)
+// The second step, once the venue is deleted from the catalogue.
+const canPermanentlyDelete = computed(() => isVenueStaff.value && Boolean(venue.value?.deleted_at))
+const savedMessage = computed(() => {
+  if (route.query.saved === 'created') return 'Venue added to the catalogue.'
+  if (route.query.saved === 'updated') return 'Venue details saved.'
+  return ''
+})
+
+const confirmingDelete = ref(false)
+const deleting = ref(false)
+const deleteError = ref('')
 
 function formatList(value) {
   if (!value || value.length === 0) return 'None listed'
@@ -45,35 +68,33 @@ async function loadVenue() {
   }
 }
 
-function startEditing() {
-  saveError.value = ''
-  saveSuccess.value = ''
-  settingsForm.setup_minutes = venue.value.setup_minutes
-  settingsForm.turnaround_minutes = venue.value.turnaround_minutes
-  settingsForm.tentative_hold_minutes = venue.value.tentative_hold_minutes
-  editing.value = true
-}
-
-function cancelEditing() {
-  editing.value = false
-}
-
-async function saveSettings() {
-  saveError.value = ''
-  saveSuccess.value = ''
-  saving.value = true
+async function confirmDelete() {
+  deleting.value = true
+  deleteError.value = ''
   try {
-    venue.value = await updateVenueSettings(venue.value.id, {
-      setup_minutes: settingsForm.setup_minutes,
-      turnaround_minutes: settingsForm.turnaround_minutes,
-      tentative_hold_minutes: settingsForm.tentative_hold_minutes,
-    })
-    editing.value = false
-    saveSuccess.value = 'Venue settings updated. Existing bookings keep their original values -- only new bookings use the new settings.'
+    const result = await deleteVenue(venue.value.id)
+    router.push({ name: 'venues', query: { deleted: deleteOutcomeMessage(result) } })
   } catch (requestError) {
-    saveError.value = requestError.message
+    deleteError.value = requestError.message
   } finally {
-    saving.value = false
+    deleting.value = false
+  }
+}
+
+async function confirmPermanentDelete() {
+  deleting.value = true
+  deleteError.value = ''
+  try {
+    const name = venue.value.name
+    await permanentlyDeleteVenue(venue.value.id)
+    router.push({
+      name: 'venues',
+      query: { deleted: `${name} was permanently deleted. Past bookings still show its name.` },
+    })
+  } catch (requestError) {
+    deleteError.value = requestError.message
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -88,6 +109,10 @@ onMounted(loadVenue)
     <p v-if="loading">Loading venue...</p>
     <p v-else-if="error" class="error" role="alert">{{ error }}</p>
     <template v-else-if="venue">
+      <p v-if="savedMessage" class="saved" role="status">{{ savedMessage }}</p>
+      <p v-if="venue.deleted_at" class="deleted-banner" role="status" data-test="venue-deleted">
+        This venue has been deleted from the catalogue. It can no longer be booked.
+      </p>
       <header>
         <div>
           <p class="eyebrow">Venue</p>
@@ -96,14 +121,62 @@ onMounted(loadVenue)
         <strong class="status" :class="`status-${venue.status}`">{{ venue.status }}</strong>
       </header>
 
+      <div v-if="canManage" class="staff-actions" data-test="staff-actions">
+        <router-link :to="{ name: 'venue-edit', params: { venueId: venue.id } }" class="btn neutral">
+          Edit venue
+        </router-link>
+        <button v-if="!confirmingDelete" type="button" class="btn danger" @click="confirmingDelete = true">
+          Delete venue
+        </button>
+      </div>
+
+      <div v-if="canManage && confirmingDelete" class="delete-panel" data-test="delete-panel">
+        <p><strong>Delete {{ venue.name }}?</strong></p>
+        <p>
+          It will be removed from the venue catalogue and can no longer be booked. Ongoing events that have
+          booked it will lose their booking, and their coordinators will be asked to book another venue.
+          Confirmed events go back to planning. Completed, cancelled and rejected events keep their record.
+        </p>
+        <div class="panel-actions">
+          <button type="button" class="btn danger-solid" :disabled="deleting" @click="confirmDelete">
+            {{ deleting ? 'Deleting...' : 'Delete venue' }}
+          </button>
+          <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
+            Keep venue
+          </button>
+        </div>
+        <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
+      </div>
+
+      <div v-if="canPermanentlyDelete && !confirmingDelete" class="staff-actions" data-test="permanent-actions">
+        <button type="button" class="btn danger" @click="confirmingDelete = true">Delete permanently</button>
+      </div>
+
+      <div v-if="canPermanentlyDelete && confirmingDelete" class="delete-panel" data-test="permanent-delete-panel">
+        <p><strong>Permanently delete {{ venue.name }}?</strong></p>
+        <p>
+          The venue's record will be removed for good and this can't be undone. Past bookings, including completed
+          and cancelled events', keep the venue's name.
+        </p>
+        <div class="panel-actions">
+          <button type="button" class="btn danger-solid" :disabled="deleting" @click="confirmPermanentDelete">
+            {{ deleting ? 'Deleting...' : 'Delete permanently' }}
+          </button>
+          <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
+            Keep record
+          </button>
+        </div>
+        <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
+      </div>
+
       <dl>
         <dt>Location</dt><dd>{{ venue.location }}</dd>
         <dt>Maximum capacity</dt><dd>{{ venue.capacity }}</dd>
         <dt>Supported room layouts</dt><dd>{{ formatList(venue.supported_layouts) }}</dd>
         <dt>Facilities</dt><dd>{{ formatList(venue.facilities) }}</dd>
         <dt>Accessibility provisions</dt><dd>{{ formatList(venue.accessibility_features) }}</dd>
-        <dt>Setup time</dt><dd>{{ venue.setup_minutes }} minutes</dd>
-        <dt>Turnaround time</dt><dd>{{ venue.turnaround_minutes }} minutes</dd>
+        <dt>Operating hours</dt><dd>{{ formatOperatingHours(venue.operating_hours_start, venue.operating_hours_end) }}</dd>
+        <dt>Setup / turnaround</dt><dd>{{ venue.setup_minutes }} / {{ venue.turnaround_minutes }} minutes</dd>
         <dt>Tentative hold duration</dt><dd>{{ venue.tentative_hold_minutes }} minutes</dd>
       </dl>
 
@@ -119,37 +192,6 @@ onMounted(loadVenue)
         The status badge above is a manually-set Sprint 1 flag, kept for a quick at-a-glance read. For a real
         day/week/month view of bookings and blocked periods, see the availability calendar.
       </p>
-
-      <section v-if="isVenueStaff" class="settings-section">
-        <div class="settings-header">
-          <h2>Venue Settings</h2>
-          <button v-if="!editing" type="button" class="edit-btn" @click="startEditing">Edit</button>
-        </div>
-        <p class="notice settings-notice">
-          Editing these only affects NEW bookings -- existing bookings keep the values they were made with.
-        </p>
-
-        <form v-if="editing" class="settings-form" novalidate @submit.prevent="saveSettings">
-          <label>
-            Setup time (minutes)
-            <input v-model.number="settingsForm.setup_minutes" type="number" min="1" required />
-          </label>
-          <label>
-            Turnaround time (minutes)
-            <input v-model.number="settingsForm.turnaround_minutes" type="number" min="1" required />
-          </label>
-          <label>
-            Tentative hold duration (minutes)
-            <input v-model.number="settingsForm.tentative_hold_minutes" type="number" min="1" required />
-          </label>
-          <div class="settings-actions">
-            <button type="submit" :disabled="saving">{{ saving ? 'Saving...' : 'Save' }}</button>
-            <button type="button" :disabled="saving" @click="cancelEditing">Cancel</button>
-          </div>
-          <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
-        </form>
-        <p v-else-if="saveSuccess" class="success" role="status">{{ saveSuccess }}</p>
-      </section>
     </template>
   </main>
   </div>
@@ -176,17 +218,21 @@ dd { margin: 0; text-transform: capitalize; }
 .calendar-link { color: #1f5fae; }
 .block-link { color: #b42318; }
 .calendar-link:hover, .block-link:hover { text-decoration: underline; }
-
-.settings-section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; }
-.settings-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-.settings-header h2 { margin: 0; font-size: 1.1rem; }
-.settings-notice { margin-top: .5rem; }
-.edit-btn, .settings-actions button { font: inherit; padding: .4rem .9rem; border: 1px solid #1f5fae; border-radius: 4px; background: #fff; color: #1f5fae; cursor: pointer; }
-.settings-actions button[type="submit"] { background: #1f5fae; color: #fff; }
-.settings-actions button:disabled { opacity: .6; cursor: not-allowed; }
-.settings-form { display: flex; flex-direction: column; gap: .9rem; margin-top: 1rem; max-width: 360px; }
-.settings-form label { display: flex; flex-direction: column; gap: .3rem; font-weight: 600; font-size: .9rem; }
-.settings-form input { font: inherit; padding: .4rem .6rem; border: 1px solid #cbd5e1; border-radius: 4px; }
-.settings-actions { display: flex; gap: .75rem; margin-top: .25rem; }
+.saved { padding: .6rem .75rem; background: #eaf5ec; color: #2f6b3f; border-radius: 4px; }
+.deleted-banner { padding: .75rem; background: #f5e6e6; color: #a33f3f; border-radius: 4px; font-weight: 600; }
+.staff-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+.delete-panel {
+  margin-top: 1rem; padding: .9rem 1rem; background: #fbf1f1; border: 1px solid #d9a3a3; border-radius: 6px;
+}
+.delete-panel p { margin: 0 0 .5rem; }
+.panel-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+.btn {
+  min-height: 36px; padding: 0 14px; border-radius: 4px; font: inherit; font-size: .85rem; font-weight: 700;
+  cursor: pointer; display: inline-flex; align-items: center; text-decoration: none; background: #fff;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.neutral { border: 1px solid #b8b8b8; color: #444; }
+.danger { border: 1px solid #a33f3f; color: #a33f3f; }
+.danger-solid { border: none; background: #a33f3f; color: #fff; }
 @media (max-width: 560px) { dl { grid-template-columns: 1fr; } }
 </style>

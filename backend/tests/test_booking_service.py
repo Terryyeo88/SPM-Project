@@ -240,6 +240,36 @@ def test_get_booking_raises_not_found_for_missing_id(fake_db):
         service_module.get_booking("does-not-exist")
 
 
+def test_get_booking_embeds_the_event_details_as_event(fake_db):
+    """Venue Staff can't open the event itself (rule_event_view), so the
+    booking carries the session details the review page needs."""
+    details = {"id": "event-1", "name": "Tech Symposium", "expected_attendance": 150, "room_layout": "theatre"}
+    fake_db.tables["venue_bookings"] = [{**_booking(status="pending"), "events": details}]
+
+    booking = service_module.get_booking("booking-1")
+
+    assert booking["event"] == details
+    assert "events" not in booking
+
+
+def test_booking_event_fields_are_only_what_the_review_needs():
+    fields = {field.strip() for field in service_module.BOOKING_EVENT_FIELDS.split(",")}
+    assert fields == {
+        "id",
+        "name",
+        "status",
+        "description",
+        "purpose",
+        "preferred_start_date",
+        "preferred_end_date",
+        "preferred_start_time",
+        "preferred_end_time",
+        "expected_attendance",
+        "room_layout",
+        "accessibility_needs",
+    }
+
+
 def test_get_booking_conflict_is_false_with_no_other_confirmed_booking(fake_db):
     fake_db.tables["venue_bookings"] = [_booking(status="pending")]
 
@@ -369,6 +399,19 @@ def test_list_bookings_for_event_newest_first(fake_db):
     assert [b["id"] for b in bookings] == ["new", "old"]
 
 
+def test_list_bookings_for_event_fills_in_the_venue_name_for_a_permanently_deleted_venue(fake_db):
+    """Same IS-61 fallback as list_bookings -- see that function's own
+    sibling test for why this needs its own assertion, not just trust by
+    inspection, after merging with main."""
+    fake_db.tables["venue_bookings"] = [
+        _booking("orphaned", venue_id=None, venues=None, venue_name="Old Annex"),
+    ]
+
+    [booking] = service_module.list_bookings_for_event("event-1")
+
+    assert booking["venues"] == {"name": "Old Annex"}
+
+
 # -- has_live_confirmed_booking (confirm_event's gate, Sprint 3) -------------
 
 
@@ -459,6 +502,21 @@ def test_list_bookings_status_filter_narrows_within_role_scope(fake_db):
 def test_list_bookings_rejects_an_unknown_status_filter(fake_db):
     with pytest.raises(ValidationError, match="status must be one of"):
         service_module.list_bookings(make_user(["venue_staff"]), "archived")
+
+
+def test_list_bookings_fills_in_the_venue_name_for_a_permanently_deleted_venue(fake_db):
+    """IS-61: list_bookings must still run every row through
+    with_venue_names (merged alongside this sprint's touch_expired_holds
+    -- see docs/design-decisions.md), not just the booking queue's own
+    local venue embed -- a permanently-deleted venue has venue_id=None
+    and no venues(...) embed at all, only the booking's own venue_name."""
+    fake_db.tables["venue_bookings"] = [
+        _booking("orphaned", venue_id=None, venues=None, venue_name="Old Annex", requested_by="coord-1"),
+    ]
+
+    [booking] = service_module.list_bookings(make_user(["event_coordinator"], user_id="coord-1"))
+
+    assert booking["venues"] == {"name": "Old Annex"}
 
 
 def test_list_bookings_for_a_user_without_a_listing_role_is_empty_and_never_queries(fake_db):

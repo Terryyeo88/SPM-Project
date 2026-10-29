@@ -615,6 +615,47 @@ Other decisions, from the story and the Week 2/4 clarifications:
   it through the anon/authenticated keys; only the backend's service role.
 
 
+## View Events Without Registration (Justin, 2026-10-24)
+
+The briefing makes registration optional per event ("Where enabled",
+"Where registration is required"), so attendees should also be able to see
+confirmed events they can simply turn up to.
+
+- **One list, no filter.** `GET /registrations/open` now returns every
+  upcoming confirmed session, with or without registration, each carrying
+  `registration_needs`. The dashboard shows them together, each labelled
+  "Registration required" or "No registration required".
+- **"Public to attendees" is now just "confirmed"** for viewing
+  (`rule_event_view_public`). Registering still needs confirmed *and*
+  `registration_needs = true`. An attendee registering for a confirmed
+  session without registration gets a 403, not a 404, because they can
+  already see it exists.
+- **No places for sessions without registration.** `capacity`,
+  `places_left` and the counts are null/0 for them, and they aren't
+  counted, so the page shows no spots bar, Register button or registration
+  period.
+- **No bookmarks and no notifications** for these events. Bookmarking isn't
+  a customer requirement. If it's added, decide whether bookmarked events
+  should notify, since the Attendee Notification story only notifies
+  registered or waitlisted attendees.
+
+
+## View Event Venue (Justin, 2026-10-24)
+
+- **Confirmed bookings only, every one of them.** Each session in
+  `GET /registrations/open` and `GET /registrations/sessions/<id>` carries
+  `venues: [{name, location}]` from its confirmed `venue_bookings`. An event
+  can use several venues (Week 7 #3), so all are listed (by name, each venue
+  once). Pending, rejected and cancelled bookings never appear.
+- **Name and location only.** Booking status, requester and notes stay
+  internal (briefing 8b).
+- **A permanently deleted venue** keeps its name on the booking (IS-61), so
+  the name still shows, without a location.
+- **No venue yet** shows as "Venue to be confirmed".
+- **No searching by venue.** The briefing's general Search and Filtering
+  lists venue as an example criterion, but no story asks for it.
+
+
 ## Booking conflicts (IS-16, Terry, Sprint 2, 2026-10-05)
 
 Stacked on Venue Booking Request / Approval (PR #18). Josiah's table and
@@ -994,6 +1035,122 @@ session with a pending or confirmed request is a "conflict" naming the
 request's period. Without a request it stays a "check manually", as before.
 Technical support is still "check manually" -- there are no assignment
 records yet.
+
+### AC3 completed: every arrangement a change touches, conflict or not (2026-10-19)
+
+The preview only listed an arrangement when the change broke it (`impacts`),
+so a significant change that touched a venue booking, an equipment request
+or registrations without breaking them read "nothing is affected". The AC
+asks for "which already-made arrangements it touches", so the preview now
+also returns `arrangements` (`change_impact.touched_arrangements`): every
+pending/confirmed venue booking, pending/confirmed equipment request and the
+session's registrations that depend on a changed field --
+
+  venue         timing, expected attendance, room layout, accessibility needs
+  equipment     timing, equipment
+  registration  timing, registration window/needed, expected attendance
+
+The page lists them under "Arrangements this change touches", each marked
+"Still fits" or "Conflict". Only conflicts (`impacts`) still need the
+acknowledgement tick: requiring it for an arrangement the change doesn't
+break would make the coordinator confirm nothing. Same status window as the
+impact check (`IMPACT_CHECKED_STATUSES`, planning on); rejected and
+cancelled arrangements hold nothing, so they aren't listed.
+
+### AC9 completed: cancelling one venue booking (2026-10-19)
+
+AC9 ("changes or cancellation of one venue arrangement should not
+automatically remove the other venue bookings") had no cancel to test --
+no booking could be cancelled. Added:
+
+- A `cancelled` booking status (`20261019300000_venue_booking_cancel.sql`),
+  not a delete: the booking stays in the session's history. The IS-16
+  no-overlap constraint covers `confirmed` rows only, so a cancelled booking
+  frees the venue at once; the calendar, conflict and safety checks already
+  filter on pending/confirmed.
+- `POST /venues/bookings/<id>/cancel` -> `booking_service.cancel_booking`:
+  one `UPDATE ... WHERE id = <booking> AND status = <the status authz saw>`,
+  so only that row changes and a cancel racing a Venue Staff decision is
+  refused, not overwritten (same race-proofing as `_decide_booking`). A
+  reason is required; who/when/why go to `venue_booking_status_log`, like
+  approve/reject, and the coordinator reads it back as `cancellation`.
+- `venue_booking.cancel` (`rule_venue_booking_cancel`): the event's
+  **current** assigned coordinator -- not the booking's requester, who may
+  have been reassigned away by the Lead -- for a pending/confirmed booking,
+  until the event is completed or cancelled (the coordinator's edit
+  window). Anyone else 404; a closed booking or event 403 with the reason.
+  The loader attaches the event's coordinator_id/status to the booking.
+- The event's status is not changed by a cancel (see open-questions.md).
+  *Superseded 2026-10-26 -- see below.*
+- The page lists every booking of the session with its own Cancel, and
+  offers "Request a venue" only while no booking is pending or confirmed
+  (frontend only; see open-questions.md).
+
+### Cancelling a booking of a confirmed event reverts it to planning (2026-10-26)
+
+Answers the open question above: a confirmed event whose venue booking is
+cancelled goes back to planning, the same as a change to its details
+(AC10) -- its venue arrangements changed after confirmation, so it has to
+be re-checked (safety review) before it can be confirmed again.
+
+- `booking_service.cancel_booking` cancels the booking first, then
+  (`_revert_confirmed_event`) takes the existing `confirmed -> planning`
+  edge through `transitions.transition` -- no new edge. The status history
+  row is attributed to the coordinator, with the reason "Venue booking
+  cancelled after confirmation: <cancel reason>".
+- Any cancelled booking counts, pending or confirmed. Events in any other
+  status (planning, safety_review, ...) are left as they are; only
+  "confirmed" is reverted.
+- The transition is conditioned on the event status the route's loader
+  (`load_booking_with_event`) authorised against (`expected_from`). If the
+  event moved on in between, `TransitionConflictError` is swallowed: there
+  is nothing to revert, and the booking cancel -- already written -- still
+  stands rather than reporting a 409 for a change that did happen. Like
+  every transition, the booking write and the status write are separate
+  requests, not one transaction.
+- The response carries `event_reverted_to_planning`. `VenueBookingStatus.vue`
+  warns in the cancel form when the event is confirmed, and after a revert
+  re-fetches the event and emits `updated`, so `EventDetailsView.vue`
+  shows the new status.
+
+### Equipment impacts: identical requests reported once (2026-10-19)
+
+The equipment impact wrote its sentences once per request, and they don't
+name the request, so two pending requests for the same window produced the
+same lines twice. Requests with the same status (and, for timing, the same
+window) are now grouped: one sentence each, saying how many it covers ("The
+2 pending equipment requests cover ...").
+
+### Venue Staff read a booking's event details through the booking (2026-10-19)
+
+The booking review page fetched `GET /events/<id>`, which `rule_event_view`
+refuses to Venue Staff (404), so the page failed for the very role that
+decides on bookings -- since IS-14. Rather than widen event.view to Venue
+Staff (who would then see every field of every event), `get_booking` embeds
+just the session details the review shows and checks suitability against
+(`booking_service.BOOKING_EVENT_FIELDS`), as `event` -- the same "only what
+the entry needs" embed the venue calendar uses. The page no longer calls
+`/events/<id>`.
+
+### Change History names the session; paged (2026-10-19)
+
+`event_logs` was keyed by the request only, so a multi-session request's
+history couldn't say which session changed. `event_logs.event_id`
+(`20261019400000_event_logs_session.sql`, nullable, ON DELETE SET NULL so the
+audit trail outlives a deleted session) is written by all three log writers.
+Entries from before the column are backfilled only where the request has a
+single session -- the only case that is unambiguous.
+
+`list_event_logs` adds `session`: "Session N" numbered in the order the
+session list shows (`_session_sort_key`), within the organiser's own request
+(same scope as `apply_shared_details`); "All sessions" for an applied change
+to shared details only (name/description/purpose), which reaches every
+session; none for a single-session request or an older unlabelled entry. A
+request is still about the session it was made for.
+
+Pagination is client-side, 5 per page, newest first, back to page 1 on
+reload: a request's history is small and already loaded in one call, so
+server paging would add an API shape change for no gain.
 
 ## Shared calendar module (refactor, 2026-10-16)
 
@@ -1454,3 +1611,311 @@ each gained only a `touch_expired_holds` / `release_expired_hold` call
 ahead of their own existing logic -- no changes to either teammate's own
 decisions. Flagged in the PR for their explicit sign-off, same discipline
 already used for Terry's cross-file commit earlier this sprint.
+
+## Venue Categories (IS-60, Sprint 3, 2026-10-23)
+
+Story: "As a Venue staff, I want to record what type of venues are available
+so that I can properly categorize the venues." Most of what it asks for was
+already on `main` as the room layouts feature (`room_layouts` table,
+`/room-layouts` routes, `RoomLayoutsView.vue`). IS-60 adds the acceptance
+tests (`test_ac1_*` ... `test_ac5_*` in `test_room_layouts.py` and
+`test_room_layouts_integration.py`) and one migration,
+`20261023000000_rejected_sessions_release_room_layouts.sql`, for how
+rejected sessions are treated. The calls below are flagged in
+docs/open-questions.md.
+
+### Venue categories are the room layouts
+
+The story doesn't define a category. Room layouts (theatre, classroom,
+banquet, ...) are already the list of venue types that Venue Staff maintain:
+
+- venues list the layouts they support;
+- event requests pick one;
+- Venue Staff add, rename and delete them.
+
+The story's five criteria (create, edit, disable, delete only once disabled,
+delete only once no ongoing event uses it) match that feature's lifecycle
+one for one. A separate `venue_categories` table would be a second list of
+the same thing, which Venue Staff would have to keep in step. So IS-60 is
+met by room layouts, with no new table. The UI still says "Room Layouts".
+
+### "Disabling" is the soft delete, and it can be undone
+
+AC3's "disabling" and AC4's "disabled first" are the soft delete:
+`is_active = false`, through `DELETE /room-layouts/<id>`. A disabled layout:
+
+- is no longer offered on event forms;
+- can't be chosen for a new or changed session;
+- is still listed for Venue Staff, under "Deleted";
+- can be restored (`POST /room-layouts/<id>/restore`).
+
+The story doesn't mention restoring. It's kept because disabling is
+otherwise a one-way step taken while events still depend on the layout.
+
+### "Ongoing" means not completed, cancelled or rejected
+
+AC5 defines ongoing events as those "not completed or cancelled". Read
+literally, a rejected event counts as ongoing. A rejected session no
+organiser ever resubmits would then block the permanent delete indefinitely.
+
+A rejected session is back with its organiser to fix and resubmit, the same
+position as a draft, so it isn't ongoing either. Permanent delete is refused
+only while an event that is not completed, cancelled or rejected uses the
+layout. Drafts never hold one up: disabling clears the layout from them (next
+section). This departs from the AC's literal wording, so it's the first item
+under IS-60 in open-questions.md.
+
+### Drafts and rejected sessions lose a disabled layout; other events keep it
+
+AC3 lets a category be disabled while ongoing events use it. Those events
+(submitted through confirmed) keep their layout: their request was made, and
+is being planned, with it. A session still being written or fixed is
+different. Submitting needs an active layout, so the organiser would be
+refused at submit time anyway. The database clears the layout from them
+straight away:
+
+1. **When the layout is disabled:** every draft and rejected session using it
+   (`room_layout_soft_deleted`).
+2. **When a session is rejected while its layout is disabled:** that session
+   (`events_release_disabled_layout_on_reject`). Without this, a session under
+   review when the layout was disabled would come back to its organiser still
+   holding it.
+3. **When the layout is permanently deleted:** any rejected session still
+   holding it, e.g. one written straight to the table
+   (`before_room_layout_delete`).
+
+Restoring the layout doesn't put it back on those sessions: by then the
+organiser may already have picked another.
+
+### Telling the organiser why the layout is empty
+
+`events.room_layout_removed` keeps the name of a layout cleared in any of
+the three cases above:
+
+- **What the organiser sees:** while the session has no layout, the form
+  (`EventSessionFields.vue`, via `lib/roomLayouts.js::removedLayoutNotice`)
+  shows: *The room layout "X" is no longer available, so it has been removed
+  from this session. Please choose a new room layout.*
+- **When it's cleared:** as soon as a layout is set again
+  (`events_unflag_removed_room_layout`). Other edits leave it.
+- **Never sent from the form:** `sessionPayload` leaves it out, so the
+  database is the only thing that sets it.
+- **Not part of the event details:** it isn't one of the fields
+  `_from_database_event` returns, so it never appears in a change diff.
+
+### Not recorded in event_logs
+
+Clearing a layout from a draft or rejected session isn't logged. It's the
+database reacting to Venue Staff's change, and no user is editing the event;
+`event_logs.changed_by` expects one. The draft clearing that this extends was
+never logged either. Rejected sessions are submitted events, so this is an
+exception to "every change to a submitted event is logged", and is flagged.
+
+### Completed and cancelled events keep the name
+
+Permanently deleting a layout leaves its name on completed and cancelled
+events (`events.room_layout`); only `room_layout_id` becomes null (ON DELETE
+SET NULL). Their record of what was requested stays intact. This is
+unchanged from the room layouts migration.
+
+### Names are unique regardless of case
+
+"Theatre" can't be added beside "theatre"; the index is on `lower(name)`.
+A clash with a disabled layout says to restore it instead, because Venue
+Staff can't otherwise tell why the name is taken.
+
+### Who can manage them, and why others get 403, not 404
+
+`room_layout.manage` is Venue Staff only. Every other role gets
+`DENY_FORBIDDEN` (403), not a 404:
+
+- Layouts are shared reference data with no owner: their names are on every
+  venue's supported layouts and in every event form.
+- A 403 hides nothing that a 404 would. docs/authz-usage.md's case for a 404
+  (not revealing that a resource exists) doesn't apply.
+- `room_layout.list` gives the same 403 to roles that never work with
+  layouts (attendee, safety officer).
+
+## CRUD in Venue Catalogue (IS-61, Sprint 3, 2026-10-23)
+
+Story: "As a Venue staff, I want to add, edit and delete venues so that I can
+easily manage what venues ConnectSphere currently has." Built on the existing
+`public.venues` table: `POST /venues` (add), `POST /venues/<id>` (edit),
+`DELETE /venues/<id>` (delete), in `app/venues/venue_service.py`, plus
+migration `20261023100000_venue_catalogue_crud.sql`. Frontend:
+`VenueFormView.vue` (add/edit), the staff actions on `VenueDetailView.vue`,
+and `VenueRemovedAlert.vue` on the coordinator's event page. The calls below
+are flagged in docs/open-questions.md.
+
+### Deleting is a soft delete
+
+`venues.deleted_at` / `deleted_by`, not a `DELETE`:
+
+- `venue_bookings.venue_id` references the venue with no `ON DELETE`, so a
+  real delete is refused while any booking, even a finished event's, points
+  at it. Cascading instead would erase where completed events were held.
+- The booking review page loads a booking's venue by id
+  (`GET /venues/<id>`), which has to keep working for old bookings.
+
+So a deleted venue leaves the catalogue (`GET /venues`), can't be edited
+(409 `venue_deleted`) or booked, but `GET /venues/<id>` still returns it,
+marked deleted. There is no restore: the story doesn't ask for one.
+
+### Then a permanent delete
+
+So a deleted venue isn't left as a stale row, Venue Staff can permanently
+delete it: the catalogue's **Deleted** tab (`GET /venues/deleted`) lists
+deleted venues, and the venue's page offers **Delete permanently**
+(`DELETE /venues/<id>/permanent`, `venue.delete`). Same two-step shape as
+IS-60's room layouts. Migration `20261023200000_venue_permanent_delete.sql`.
+
+- **Past bookings keep the venue's name.** The booking's link to the venue
+  becomes NULL (`ON DELETE SET NULL`) and trigger `before_venue_delete`
+  copies the name into `venue_bookings.venue_name` first. Completed and
+  cancelled events, above all, still say where they were held. Only the
+  name is kept, not the venue's other details.
+- **Readers show the kept name.** `booking_service.with_venue_names` fills
+  the empty `venues(...)` embed from `venue_name` for the event's booking
+  list, the Venue Staff queue and the safety review. The booking review page
+  shows "Name (permanently deleted)" instead of loading the venue. The
+  overlap and conflict checks treat a booking with no venue as clashing with
+  nothing (they used to query `venue_id = None` and crash).
+- **An event's room layout is unaffected:** it lives on the event
+  (`events.room_layout`), not on the venue.
+- **Two guards, split between the app and the database.** The app requires
+  the venue to be deleted from the catalogue first. The database refuses
+  removing a venue an ongoing event still has a live booking on, whoever
+  runs the DELETE. "Deleted first" is deliberately not a database rule:
+  other stories' integration tests remove their throwaway venues with a
+  plain DELETE once their bookings are gone. Unlike a room layout, a venue
+  nothing uses is safe to remove either way.
+- **A booking can't become live without a venue.** A finished event's
+  pending request left on a removed venue can't be approved (trigger
+  `venue_bookings_refuse_deleted_venue`, extended).
+- **`released_at`.** The coordinator's alert used a released booking's
+  `updated_at` as its release time, but the SET NULL rewrites every booking
+  of the venue, which would have moved it and could bring back an alert the
+  coordinator had already dealt with. Released bookings now carry
+  `released_at`, set by `delete_venue()` (existing ones backfilled from
+  their release log entry), and the alert uses that.
+
+### AC4: what "lose their booking" does
+
+Deleting runs one database function, `delete_venue()`, so the soft delete and
+the releases land together or not at all. Every **pending or confirmed**
+booking of the venue whose event is **ongoing** (not completed, cancelled or
+rejected -- the IS-60 reading) becomes `cancelled`, with
+`released_by_venue_deletion = true` and a `venue_booking_status_log` row
+(changed_by = the Venue Staff member, reason naming the venue). Bookings of
+finished events are left as they were.
+
+- **Pending bookings are released too.** A pending request for a venue that
+  no longer exists can't be approved, and the coordinator needs to know.
+- **Only that venue's bookings.** A session's bookings at other venues stay
+  (IS-9: one arrangement's change doesn't remove the others).
+- **A deleted venue can't be booked or approved against.** The backend says
+  so first; trigger `trg_venue_bookings_refuse_deleted_venue` enforces it, so
+  a request racing the delete is either released by it or refused.
+
+### Confirmed sessions go back to planning
+
+A session can't stay confirmed without the venue it was confirmed with, and a
+coordinator can only book a venue in planning (`rule_venue_booking_create`).
+So a released session that was **confirmed** moves `confirmed -> planning`,
+the edge IS-9 already uses when a confirmed event's details change. It goes
+through `transitions.transition()` (status is only written there), with the
+reason in `event_status_log`, attributed to the Venue Staff member.
+
+A session **under a safety check** (`safety_review`) goes back to planning
+the same way (`safety_review -> planning`). Its pending safety review is
+closed as `changes_requested`, with the reason as the comment
+(`safety_service.withdraw_pending_review`). Left pending, the Safety Officer
+couldn't decide it (the session is no longer in safety_review) and the
+coordinator couldn't resubmit (one pending review per session).
+
+Like every other status change that follows another write here, this step is
+not in the same transaction as `delete_venue()`. A session that moved on in
+between (e.g. was cancelled) is left alone.
+
+### The coordinator's alert
+
+`VenueRemovedAlert.vue`, at the top of the coordinator's event details page,
+shows while the session has a booking released by a venue deletion that
+hasn't been replaced (`lib/venueBookings.js::unreplacedVenueReleases`). It
+names the venue and links to request another. "Replaced" means a pending or
+confirmed booking made after the release (the released row's `updated_at`),
+so it stays up if the session only has older bookings left, and goes once
+the coordinator rebooks. The released booking stays listed under Venue
+Booking, marked as released by the deletion. There is no email or push
+notification: none exists anywhere in the app yet (`_notify_venue_deleted`
+is the same no-op hook as the other `_notify_*` functions).
+
+### Facilities and accessibility provisions are closed lists
+
+The Sprint 1 migration left `facilities` / `accessibility_features` as open
+`text[]`. Now that Venue Staff enter them, the backend only accepts the
+values event sessions ask for (`event_service.EQUIPMENT` /
+`ACCESSIBILITY_NEEDS`). Venue search and the suitability checks compare the
+two lists value for value, so "Wheelchair Access" on a venue would never
+match a session needing `wheelchair_access`. Adding a new facility is now a
+code change rather than a data entry.
+
+### Editing
+
+- Only the fields sent change, but the merged record is re-checked, so an
+  edit can never leave the venue invalid.
+- A venue keeps a room layout it lists that has since been soft-deleted, but
+  can't newly add one (same rule as event sessions).
+- Changing setup/turnaround minutes doesn't touch existing bookings: each
+  snapshotted them when made (`20261005100000_venue_bookings.sql`). New
+  check constraint `venues_buffers_non_negative`.
+- Lowering capacity, or removing a layout or provision, doesn't re-check
+  existing bookings.
+- The form has no status field. A new venue is added as `available`; an
+  edit never sends the status, so a venue in maintenance stays that way.
+  The API still accepts `status`.
+
+### Required fields and minimums
+
+A venue needs a name, a location, a capacity of at least 1, **at least one
+supported room layout**, and setup and turnaround times of **at least 5
+minutes** each. Both the form (`lib/venueCatalogue.js::validateVenueForm`)
+and the backend (`venue_service._validated`, `MIN_BUFFER_MINUTES`) check
+them, on add and on edit. An edit re-checks the whole venue, so an older
+venue with no layouts must be given one before any change to it saves.
+
+The 5-minute floor is not in the database: its constraint
+(`venues_buffers_non_negative`) only refuses negatives. Other stories'
+integration tests insert venues straight into the table with 0-minute
+buffers (`test_venue_bookings_integration.py`), and raising the floor there
+would need a new migration. Venues are only ever added or edited through
+the backend, which enforces 5.
+
+The form checks as Venue Staff go:
+
+- **When an error appears:** once Venue Staff leave a field (blur). The
+  room layout checkboxes count as one field, flagged when focus leaves the
+  group rather than when it moves between boxes. After that, the message
+  updates live and disappears as soon as the field is fixed.
+- **Save:** disabled, with a short "Fill in every field marked *" hint,
+  until every check passes.
+- **Editing a venue that already breaks a rule:** its errors show
+  immediately, so Save is never disabled without a visible reason.
+
+### Operating hours are left out of add and edit
+
+`venues.operating_hours_start/end` (added by IS-11) aren't in the venue form
+or accepted by `POST /venues` / `POST /venues/<id>`. Nothing relies on them:
+bookings, conflict checks and suitability checks ignore them, and the venue
+calendar only shows them as a note. So a venue added here has no set hours
+(both NULL), and an edit leaves a venue's existing hours (the seed data's)
+as they are. The venue page still shows them read-only. If a later story
+needs Venue Staff to set them, add the two fields back with their own rules,
+including whether a venue may close after midnight.
+
+### Who can do it
+
+`venue.create` / `venue.edit` / `venue.delete`, Venue Staff only, 403 for
+everyone else (venues are shared inventory every coordinator can list, so
+there's nothing to hide with a 404). Edit is `POST /venues/<id>`, not PATCH,
+matching `POST /room-layouts/<id>`.

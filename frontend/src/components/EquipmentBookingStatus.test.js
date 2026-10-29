@@ -1,7 +1,7 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../lib/api', () => ({ apiGet: vi.fn() }))
+vi.mock('../lib/api', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }))
 
 import { apiGet } from '../lib/api'
 import EquipmentBookingStatus from './EquipmentBookingStatus.vue'
@@ -41,9 +41,9 @@ beforeEach(() => {
   apiGet.mockReset()
 })
 
-async function render(event, requests) {
-  apiGet.mockResolvedValue(requests)
-  const wrapper = mount(EquipmentBookingStatus, { props: { event } })
+async function render(event, requests, changes = []) {
+  apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/change-requests') ? changes : requests))
+  const wrapper = mount(EquipmentBookingStatus, { props: { event }, global: { stubs: { RouterLink: RouterLinkStub } } })
   await flushPromises()
   return wrapper
 }
@@ -71,6 +71,15 @@ describe('EquipmentBookingStatus', () => {
     expect(rows[1].find('.status').text()).toBe('Confirmed')
   })
 
+  it('shows why a request was rejected, and no reason line for other requests', async () => {
+    const rejected = { ...pendingRequest, id: 'req-3', status: 'rejected', rejection_reason: 'Only 1 screen free that day' }
+    const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest, rejected])
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0].find('.rejection').exists()).toBe(false)
+    expect(rows[1].find('.status').text()).toBe('Rejected')
+    expect(rows[1].find('.rejection').text()).toBe('Reason: Only 1 screen free that day')
+  })
+
   it('lists the reserved units by type, with quantity and asset tags, once confirmed', async () => {
     const wrapper = await render({ id: 'session-1', status: 'planning' }, [confirmedRequest])
     const groups = wrapper.findAll('.group')
@@ -94,8 +103,75 @@ describe('EquipmentBookingStatus', () => {
 
   it('shows an error if the requests cannot be loaded', async () => {
     apiGet.mockRejectedValue(new Error('Network down'))
-    const wrapper = mount(EquipmentBookingStatus, { props: { event: { id: 'session-1', status: 'planning' } } })
+    const wrapper = mount(EquipmentBookingStatus, {
+      props: { event: { id: 'session-1', status: 'planning' } },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toContain('Network down')
+  })
+
+  // Record Equipment Request for Event (IS-17)
+  describe('requesting equipment', () => {
+    it('offers Request Equipment while the event is in planning', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [])
+      const link = wrapper.findComponent(RouterLinkStub)
+      expect(link.exists()).toBe(true)
+      expect(link.text()).toBe('Request Equipment')
+      expect(link.props('to')).toEqual({ name: 'request-equipment', params: { eventId: 'session-1' } })
+    })
+
+    it('says Request more equipment once something has already been requested', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
+      expect(wrapper.findComponent(RouterLinkStub).text()).toBe('Request more equipment')
+    })
+
+    it('tells an approved event to start planning first, with no request link', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'approved' }, [])
+      expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
+      expect(wrapper.text()).toContain('Start planning')
+    })
+
+    it.each(['draft', 'under_review', 'safety_review', 'confirmed', 'cancelled'])(
+      'offers no request link when the event is %s',
+      async (status) => {
+        const wrapper = await render({ id: 'session-1', status }, [])
+        expect(wrapper.findComponent(RouterLinkStub).exists()).toBe(false)
+      },
+    )
+  })
+
+  // Update quantity on an existing equipment reservation (IS-43)
+  describe('quantity changes', () => {
+    const withIds = {
+      ...confirmedRequest,
+      items: [
+        { id: 'item-1', type: 'projector', quantity: 1 },
+        { id: 'item-2', type: 'microphone', quantity: 2 },
+      ],
+    }
+
+    it('offers a change form under a confirmed request while the event is live', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [withIds])
+      expect(wrapper.find('.changes').exists()).toBe(true)
+      expect(wrapper.findAll('.change-form')).toHaveLength(2)
+      expect(apiGet).toHaveBeenCalledWith('/equipment/requests/req-1/change-requests')
+    })
+
+    it.each(['safety_review', 'confirmed'])('still offers it once the event is %s', async (status) => {
+      const wrapper = await render({ id: 'session-1', status }, [withIds])
+      expect(wrapper.findAll('.change-form')).toHaveLength(2)
+    })
+
+    it('offers no form (only history) once the event is cancelled', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'cancelled' }, [withIds])
+      expect(wrapper.find('.change-form').exists()).toBe(false)
+    })
+
+    it('offers nothing for a request that is still pending', async () => {
+      const wrapper = await render({ id: 'session-1', status: 'planning' }, [pendingRequest])
+      expect(wrapper.find('.changes').exists()).toBe(false)
+      expect(apiGet).not.toHaveBeenCalledWith('/equipment/requests/req-2/change-requests')
+    })
   })
 })

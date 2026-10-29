@@ -9,13 +9,39 @@ import {
   placesLabel,
   prefillFromProfile,
   registrationPayload,
+  registrationRequirementLabel,
   registrationState,
   registrationStatusLabel,
+  requiresRegistration,
   spotsFilled,
+  venueLines,
+  venueSummary,
 } from './registrations'
 
 const NOW = new Date('2026-10-04T08:00:00Z')
-const OPEN = { registration_start_datetime: '2026-10-03T00:00:00Z', registration_end_datetime: '2026-11-02T15:59:00Z' }
+const OPEN = {
+  registration_needs: true,
+  registration_start_datetime: '2026-10-03T00:00:00Z',
+  registration_end_datetime: '2026-11-02T15:59:00Z',
+}
+
+describe('View Events Without Registration', () => {
+  it('only registration_needs === true counts as requiring registration', () => {
+    expect(requiresRegistration({ registration_needs: true })).toBe(true)
+    expect(requiresRegistration({ registration_needs: false })).toBe(false)
+    expect(requiresRegistration({ registration_needs: null })).toBe(false)
+    expect(requiresRegistration(null)).toBe(false)
+  })
+
+  it('labels every session one way or the other', () => {
+    expect(registrationRequirementLabel({ registration_needs: true })).toBe('Registration required')
+    expect(registrationRequirementLabel({ registration_needs: false })).toBe('No registration required')
+  })
+
+  it('gives no availability tag to a session without registration', () => {
+    expect(availabilityTag({ registration_needs: false, places_left: null }, NOW)).toBeNull()
+  })
+})
 
 describe('registrationState', () => {
   it('is open inside the window', () => {
@@ -32,6 +58,28 @@ describe('registrationState', () => {
   })
 })
 
+describe('View Event Venue', () => {
+  const venues = [
+    { name: 'Auditorium', location: 'Level 1' },
+    { name: 'Seminar Room 2', location: 'Level 3' },
+  ]
+
+  it('shows each confirmed venue with its location', () => {
+    expect(venueLines({ venues })).toEqual(['Auditorium, Level 1', 'Seminar Room 2, Level 3'])
+    expect(venueLines({ venues: [{ name: 'Old Room', location: null }] })).toEqual(['Old Room'])
+  })
+
+  it('summarises one or several venues on a card', () => {
+    expect(venueSummary({ venues: venues.slice(0, 1) })).toBe('Auditorium, Level 1')
+    expect(venueSummary({ venues })).toBe('Auditorium, Level 1 + 1 more')
+  })
+
+  it('says the venue is still to be confirmed when there is none', () => {
+    expect(venueSummary({ venues: [] })).toBe('Venue to be confirmed')
+    expect(venueLines({})).toEqual([])
+  })
+})
+
 describe('availabilityTag (the search-result card tag)', () => {
   it('is Open, Almost Full or Waitlist Only by how full it is', () => {
     expect(availabilityTag({ ...OPEN, capacity: 10, confirmed_count: 2, places_left: 8 }, NOW).label).toBe('Open')
@@ -40,8 +88,10 @@ describe('availabilityTag (the search-result card tag)', () => {
   })
 
   it('says when registration has not opened or has closed', () => {
-    expect(availabilityTag({ registration_start_datetime: '2026-10-04T10:00:00Z' }, NOW).label).toBe('Opens Soon')
-    expect(availabilityTag({ registration_end_datetime: '2026-10-03T00:00:00Z' }, NOW).label).toBe('Registration Closed')
+    expect(availabilityTag({ registration_needs: true, registration_start_datetime: '2026-10-04T10:00:00Z' }, NOW).label)
+      .toBe('Opens Soon')
+    expect(availabilityTag({ registration_needs: true, registration_end_datetime: '2026-10-03T00:00:00Z' }, NOW).label)
+      .toBe('Registration Closed')
   })
 })
 
