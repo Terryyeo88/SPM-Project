@@ -1746,3 +1746,136 @@ including whether a venue may close after midnight.
 everyone else (venues are shared inventory every coordinator can list, so
 there's nothing to hide with a 404). Edit is `POST /venues/<id>`, not PATCH,
 matching `POST /room-layouts/<id>`.
+
+## Notification System (IS-69, Sprint 4, 2026-10-27)
+
+IS-69 builds where notifications land. Until now every story that said
+someone "is notified" called a `print()` placeholder. Built: table
+`public.notifications` (migration `20261027000000_notifications.sql`),
+`app/notifications/notification_service.py`, routes in
+`app/notifications/routes.py`, actions `notification.list` /
+`notification.mark_read` / `notification.mark_all_read`. Backend only; the
+bell and list in the web app are a separate change. The ticket's acceptance
+criteria weren't in the repo, so the working criteria in
+`docs/traceability.md` are our reading. They and the calls below are flagged
+in docs/open-questions.md.
+
+### The five hooks now write notifications, with their signatures unchanged
+
+The five `_notify_*` hooks keep their names and arguments. Each body is now
+one call handing those arguments to `notification_service`. Working out who
+to tell, and every query that needs, lives in `notification_service`, so the
+stories' own modules gain no notification queries:
+
+| Hook (owner) | Calls | Who is told |
+|---|---|---|
+| `coordinator_service._notify_coordinator_assigned` (Justin) | `coordinator_assigned` | the coordinator assigned or reassigned |
+| `booking_service._notify_booking_decision` (Josiah) | `venue_booking_decided` | the session's coordinator, for confirmed / rejected |
+| `equipment_service._notify_request_decision` (Nawaz; also `change_service`) | `equipment_request_decided` | the session's coordinator, for confirmed / rejected / change accepted / change rejected |
+| `safety_service._notify_safety_review` (Justin) | `safety_review_changed` | every Safety Officer for submitted / withdrawn; the session's coordinator for a decision |
+| `venue_service._notify_venue_deleted` (Aaralyn) | `venue_booking_released` | the session's coordinator |
+
+Four existing test files monkeypatch hooks (`test_coordinator_assignment.py`,
+`test_coordinator_assignment_status.py`, `test_equipment_change.py`,
+`test_equipment_reject.py`). They pass untouched, which is the evidence the
+calling code didn't move. One `test_notification_hook_<name>.py` per hook
+checks it passes its arguments through unchanged. Each hook's rewiring and
+its test are their own commit, pending its owner's sign-off, so any of them
+can be dropped and the suite stays green.
+
+### Who is told: the session's current coordinator
+
+A decision on a venue booking or equipment request goes to
+`events.coordinator_id`, not to the booking's or request's `requested_by`.
+Since reassignment (Week 7 #5), they can differ, and the coordinator running
+the session now is the one who has to act on a decision. Nobody is told
+about their own action: a coordinator cancelling their own booking gets
+nothing, so the hook ignores `cancelled`. A session with no coordinator
+notifies nobody.
+
+A safety submission goes to every Safety Officer, since any of them may pick
+it up (there's no assignment step). One row per officer, so each person's
+read state is their own.
+
+### In-app only
+
+The container diagram already gives the API "in-app notifications" and the
+SPA the job of showing them. Email and SMS are deferred. No mail or SMS
+provider is set up, which means credentials, sender verification and a
+delivery and bounce story nobody has scoped. Registrations' `notify_email` /
+`notify_sms` preferences are stored, but nothing reads them yet.
+
+### Writing is best effort: a failure is logged, not raised
+
+Every hook runs after its story's own change is written. If writing the
+notification then failed and raised, the caller would get a 500 for an
+action that already happened (the booking IS confirmed), and might retry
+it. So each writing function catches `Exception`, logs it with the
+traceback (`logger.exception`), and returns. The trade-off: a notification
+can be lost silently, as far as the user can tell. The log is the only
+record, and there is no retry or outbox. That's acceptable while a
+notification only says something the user can also see on the relevant
+page. It would not be once a notification is the only way someone learns
+something.
+
+`BaseException` is not caught. The unit-test guard
+(`UnitTestDatabaseAccessError`) is one on purpose, so a unit test that
+reaches the real database still fails loudly. With the new conftest fixture
+`_notifications_go_to_a_fake` disabled, 26 existing unit tests fail that
+way; with it, they pass.
+
+### The entity link has no foreign key
+
+`entity_type` / `entity_id` say what a notification is about (`event` or
+`safety_review` so far), so the frontend can link to it. One column can't
+reference several tables, so there is no foreign key. Deleting the entity
+leaves the notification pointing at nothing (an orphan). The table only
+checks that a link has both halves or neither. Deletes are rare
+(permanently deleted venues, drafts), and a link that leads nowhere should
+be shown as plain text by the frontend. The alternative (one nullable
+foreign-key column per entity type) needs a migration per new type, for a
+cost that doesn't exist yet. `type` is text for the same reason, not an
+enum: an enum value can never be removed.
+
+### RLS: the recipient reads their own, nobody writes
+
+Flask uses the service-role key and does the real check in `app/authz`. RLS
+is still scoped to the recipient (`recipient_id = auth.uid()`), not the
+"any authenticated user" placeholder on older tables, because a
+notification names events and people. A signed-in caller going around Flask
+must not read anyone else's. There is no insert, update or delete policy,
+so only the backend writes. Proven by
+`test_notifications_integration.py`. Mutation-tested by hand once: loosening
+the live policy to `auth.role() = 'authenticated'` made
+`test_a_signed_in_user_reads_only_their_own_notifications_directly` fail
+(Alice's direct read returned Bob's notification). With it restored, all
+pass.
+
+### Reading and marking read
+
+- `GET /notifications` gives the caller's own, newest first, capped at 50
+  (`?unread=true` for unread only), plus `unread_count`.
+- `GET /notifications/unread-count` is the bell's cheap poll.
+- `POST /notifications/<id>/read` marks one read.
+- `POST /notifications/read-all` marks all of the caller's read.
+
+Every query is scoped to the caller in the service, because
+`notification.list` is role-free and can't scope a query (same warning as
+`EVENT_LIST`). Someone else's notification id is a 404, as is a malformed
+one (instead of Postgres's 500). Marking read is conditioned on
+`read_at IS NULL`, so a second mark keeps the first read time and isn't an
+error. Mutation-tested by hand: removing that condition, and separately the
+recipient scope on the list, each made the unit and integration tests fail.
+
+### Out of scope
+
+- **A reminder scheduler** (e.g. "your event starts tomorrow"). It needs a
+  scheduler process; none exists, and APScheduler isn't a dependency. It
+  currently has no owner or ticket.
+- **New notification triggers.** Only the five existing hooks are wired.
+  Events no hook covered are left to the stories that own them: IS-39's
+  "Organizer is notified of cancellation", change-request notifications,
+  and waitlist promotion. Each is now one `notify(...)` call.
+- **PR #45** (Josiah, open) adds a sixth hook,
+  `block_service._notify_coordinator_venue_blocked`. It needs the same
+  one-line rewiring onto this service once it lands.

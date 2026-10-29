@@ -117,6 +117,22 @@ def _seeded_room_layouts(request, monkeypatch):
     monkeypatch.setattr(event_service, "_room_layouts", lambda: dict.fromkeys(SEEDED_ROOM_LAYOUTS, True))
 
 
+@pytest.fixture(autouse=True)
+def _notifications_go_to_a_fake(request, monkeypatch):
+    """Autouse: since IS-69 the stories' _notify_* hooks write real
+    notifications through app.notifications.notification_service, which has
+    its own `supabase` reference -- one no story's fake covers. Unit tests
+    get an empty in-memory one there, so a test of (say) confirming a
+    booking doesn't need a fake for the notifications table too. A test
+    about notifications swaps in its own. Integration tests write real rows."""
+    if request.node.get_closest_marker("integration"):
+        return
+    import app.notifications.notification_service as notification_service
+    from tests.fake_supabase import FakeSupabase
+
+    monkeypatch.setattr(notification_service, "supabase", FakeSupabase())
+
+
 @pytest.fixture
 def app():
     return create_app(config_override=_TestConfig)

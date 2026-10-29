@@ -225,3 +225,19 @@ SAFETY_REVIEW_VIEW = "safety_review.view"
 SAFETY_REVIEW_APPROVE = "safety_review.approve"
 SAFETY_REVIEW_REJECT = "safety_review.reject"
 SAFETY_REVIEW_REQUEST_CHANGES = "safety_review.request_changes"
+
+# -- notifications (IS-69: Notification System) -------------------------------
+# Source: the stories that say a person "is notified" (IS-14 "An approved
+# booking should notify the Coordinator", IS-41 "an explanation that's sent
+# to the Event Coordinator", Week 7 change #5 "Relevant users should be
+# notified when assignments or reassignments occur", ...) -- IS-69 builds
+# where those notifications land. Every authenticated role can receive one,
+# so none of these is role-gated.
+#
+#   notification.list          -- your own notifications and unread count
+#       (role-free; the query is scoped to the caller -- see the rule).
+#   notification.mark_read     -- one notification, recipient only.
+#   notification.mark_all_read -- every one of your own (no resource).
+NOTIFICATION_LIST = "notification.list"
+NOTIFICATION_MARK_READ = "notification.mark_read"
+NOTIFICATION_MARK_ALL_READ = "notification.mark_all_read"

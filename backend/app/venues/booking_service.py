@@ -26,6 +26,7 @@ from postgrest.exceptions import APIError
 from app.events.event_service import SINGAPORE_TZ
 from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import NotFoundError, ValidationError
 
 BOOKING_STATUSES = {"pending", "confirmed", "rejected", "cancelled"}
@@ -345,11 +346,9 @@ def _record_booking_status_change(
 
 
 def _notify_booking_decision(booking: dict, decision: str) -> None:
-    """Hook for the Notification System story (Justin, later sprint).
-    No-op placeholder, same shape as
-    coordinator_service._notify_coordinator_assigned -- no real
-    notification plumbing exists anywhere in this codebase yet."""
-    print(f"[notify] venue booking {booking['id']} {decision}")
+    """The session's coordinator gets an in-app notification of a decision
+    (IS-69, notification_service.venue_booking_decided)."""
+    notification_service.venue_booking_decided(booking, decision)
 
 
 def _decide_booking(booking_id: str, booking: SimpleNamespace, to_status: str, decided_by: str, reason):

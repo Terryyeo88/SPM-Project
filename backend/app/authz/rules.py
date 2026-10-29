@@ -1023,3 +1023,33 @@ def rule_safety_review_reject(user: Any, review: Any) -> Decision:
 
 def rule_safety_review_request_changes(user: Any, review: Any) -> Decision:
     return rule_safety_review_approve(user, review)
+
+
+# -- notification.* (IS-69: Notification System) ------------------------------
+# A notification has exactly one relationship: its recipient. No role is
+# involved -- an attendee, an organiser and a Safety Officer all get them.
+#
+#   list           ALLOW for any authenticated caller. Same *** WARNING ***
+#                  as EVENT_LIST: this says "you may list notifications", not
+#                  "every notification". list_notifications / unread_count
+#                  filter to recipient_id = the caller themselves.
+#   mark_read      the recipient only; anyone else 404 (they have no
+#                  relationship to it, and a 403 would confirm another
+#                  person's notification id exists). Already read is not a
+#                  denial: marking it again is a no-op.
+#   mark_all_read  ALLOW for any authenticated caller; the update is scoped
+#                  to the caller's own rows, like list.
+
+
+def rule_notification_list(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW
+
+
+def rule_notification_mark_read(user: Any, notification: Any) -> Decision:
+    if notification.recipient_id != user.id:
+        return Decision.DENY_NOT_FOUND
+    return Decision.ALLOW
+
+
+def rule_notification_mark_all_read(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW
