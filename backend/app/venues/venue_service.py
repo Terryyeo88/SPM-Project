@@ -26,6 +26,7 @@ from postgrest.exceptions import APIError
 from app.events.event_service import ACCESSIBILITY_NEEDS, EQUIPMENT
 from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.room_layouts.room_layout_service import list_room_layouts
 from app.safety.safety_service import withdraw_pending_review
 from app.shared.errors import AppError, NotFoundError, ValidationError
@@ -319,11 +320,11 @@ def delete_venue(venue_id: str, deleted_by: str) -> dict:
 
 
 def _notify_venue_deleted(released_booking: dict, venue: dict) -> None:
-    """Hook for the Notification System story, same no-op shape as
-    booking_service._notify_booking_decision. The coordinator's alert itself
-    is on the event details page (VenueRemovedAlert.vue), read from the
-    booking's released_by_venue_deletion flag."""
-    print(f"[notify] venue booking {released_booking['booking_id']} released: venue {venue['id']} deleted")
+    """The session's coordinator gets an in-app notification (IS-69,
+    notification_service.venue_booking_released). The alert on the event
+    details page (VenueRemovedAlert.vue), read from the booking's
+    released_by_venue_deletion flag, is unchanged."""
+    notification_service.venue_booking_released(released_booking, venue)
 
 
 def permanently_delete_venue(venue_id: str) -> None:
