@@ -18,12 +18,14 @@ describe('groupBookingsByTab', () => {
       booking({ name: 'a', status: 'pending' }),
       booking({ name: 'b', status: 'confirmed' }),
       booking({ name: 'c', status: 'rejected' }),
+      booking({ name: 'd', status: 'released' }),
     ]
     const groups = groupBookingsByTab(bookings)
     const names = (key) => groups[key].map((b) => b.name)
     expect(names('pending')).toEqual(['a'])
     expect(names('confirmed')).toEqual(['b'])
     expect(names('rejected')).toEqual(['c'])
+    expect(names('released')).toEqual(['d'])
   })
 
   it('returns every tab key, empty, for no bookings', () => {

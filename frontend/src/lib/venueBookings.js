@@ -6,14 +6,26 @@
  * anything -- same split as lib/coordinatorDashboard.js.
  *
  * Tab -> status mapping mirrors app.venues.booking_service.BOOKING_STATUSES
- * (pending / confirmed / rejected / cancelled) -- there is no "needs more
- * info" or in-between state for a venue booking, unlike an event request.
+ * exactly (pending / confirmed / rejected / released / cancelled) --
+ * there is no "needs more info" or in-between state for a venue booking,
+ * unlike an event request.
+ *
+ * "released" (Sprint 3): a booking that left "confirmed" for a reason
+ * OTHER than Venue Staff rejecting it or the coordinator cancelling it --
+ * its event was cancelled entirely, its tentative hold expired, or its
+ * venue was blocked. See app.venues.booking_release's own module
+ * docstring.
+ *
+ * "cancelled" (IS-9): the coordinator cancels ONE booking directly,
+ * without touching the event or the session's other bookings. Distinct
+ * from "released", which is always system-initiated.
  */
 
 export const BOOKING_TABS = Object.freeze([
   Object.freeze({ key: 'pending', label: 'Pending', statuses: Object.freeze(['pending']) }),
   Object.freeze({ key: 'confirmed', label: 'Confirmed', statuses: Object.freeze(['confirmed']) }),
   Object.freeze({ key: 'rejected', label: 'Rejected', statuses: Object.freeze(['rejected']) }),
+  Object.freeze({ key: 'released', label: 'Released', statuses: Object.freeze(['released']) }),
   Object.freeze({ key: 'cancelled', label: 'Cancelled', statuses: Object.freeze(['cancelled']) }),
 ])
 

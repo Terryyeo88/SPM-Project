@@ -17,6 +17,7 @@ import pytest
 
 import app.auth.context as context_module
 import app.events.transitions as transitions
+import app.venues.booking_release as booking_release
 import app.venues.booking_service as booking_service
 import app.venues.routes as venues_routes
 from app.authz import actions
@@ -59,6 +60,7 @@ def fake(monkeypatch):
         _booking("other-session", event_id="session-2"),
     ]
     monkeypatch.setattr(booking_service, "supabase", db)
+    monkeypatch.setattr(booking_release, "supabase", db)
     monkeypatch.setattr(venues_routes, "supabase", db)
     monkeypatch.setattr(transitions, "supabase", db)
     return db

@@ -188,6 +188,16 @@ onMounted(load)
                 </p>
               </div>
             </div>
+            <div v-if="booking.blocked" class="suitability-row">
+              <span class="suitability-icon warn">!</span>
+              <div>
+                <span class="suitability-label">Venue blocked</span>
+                <p class="muted small">
+                  This venue has been blocked for part of this period -- it cannot be confirmed until the
+                  block no longer overlaps.
+                </p>
+              </div>
+            </div>
           </section>
 
           <section class="decision" aria-labelledby="decision-heading">
@@ -195,6 +205,10 @@ onMounted(load)
 
             <p v-if="!isPending && booking.status === 'rejected'" class="muted small">
               Rejected{{ booking.rejection?.reason ? `: ${booking.rejection.reason}` : '' }}
+            </p>
+            <p v-else-if="!isPending && booking.status === 'released'" class="muted small">
+              Released{{ booking.release?.reason ? `: ${booking.release.reason}` : '' }}
+              <span v-if="!booking.release?.released_by">(done automatically)</span>
             </p>
             <p v-else-if="!isPending" class="muted small">
               This booking is {{ statusLabel(booking.status).toLowerCase() }}.
@@ -234,6 +248,12 @@ onMounted(load)
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
+/* "released" isn't an event status, so event-form.css's own .status-*
+   rules have no entry for it (unlike "confirmed"/"rejected", which
+   happen to also be real event statuses and so already got a colour
+   from there). */
+.status-released { color: #6a6a6a; background: #eeeeee; }
+
 .detail-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #ececec; font-size: 13px; }
 .detail-row:last-child { border-bottom: none; }
 .muted { color: #6b6b6b; }

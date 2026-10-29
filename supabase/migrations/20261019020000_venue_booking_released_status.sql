@@ -1,0 +1,37 @@
+-- ConnectSphere: venue_booking_status gains 'released'
+-- Migration: venue_booking_released_status
+-- Scope: shared release mechanism behind "Venue Becomes Unavailable After
+-- Booking" and "Venue Availability Calendar Tentative Hold" (Josiah,
+-- Sprint 3) -- see app.venues.booking_release's own module docstring.
+--
+-- A confirmed venue_bookings row needs a way to stop holding the venue
+-- for a reason OTHER than Venue Staff rejecting it (an event cancelled,
+-- a tentative hold expiring, a venue being blocked for maintenance).
+-- Reusing 'rejected' for this was explicitly rejected (see
+-- docs/design-decisions.md): 'rejected' must keep meaning only "Venue
+-- Staff declined this request", never a system-initiated release, or
+-- app.venues.booking_service.get_booking's `rejection` field would be
+-- answering two different questions depending on context.
+--
+-- Deliberately its OWN migration file, not folded into
+-- 20261019010000_venue_settings_and_hold.sql: `ALTER TYPE ... ADD VALUE`
+-- cannot run in the same transaction as any statement that READS the new
+-- value (and on Postgres < 12 could not run inside a transaction block at
+-- all). The Supabase CLI runs each migration file as its own transaction,
+-- so isolating this one line here is what keeps `supabase db reset`/
+-- `db push` from ever hitting "unsafe use of new value of enum type"
+-- against a later statement in the same file.
+--
+-- venue_booking_status_log.to_status is already typed
+-- public.venue_booking_status (see 20261005100000_venue_bookings.sql),
+-- so it accepts 'released' automatically -- no change needed there.
+
+alter type public.venue_booking_status add value if not exists 'released';
+
+-- Rollback intent: Postgres has no `ALTER TYPE ... DROP VALUE` at all.
+-- Removing this value, if ever needed, means creating a new enum type
+-- without it, rewriting both venue_bookings.status and
+-- venue_booking_status_log.to_status onto the new type, then dropping
+-- the old one -- recorded here, not scripted, since nothing in this
+-- schema has ever needed that and it is not a mechanical "drop" like
+-- every other rollback-intent block in this project.

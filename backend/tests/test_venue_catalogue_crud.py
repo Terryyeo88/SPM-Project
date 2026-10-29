@@ -72,6 +72,7 @@ def _venue(**overrides):
         "status": "available",
         "setup_minutes": 30,
         "turnaround_minutes": 30,
+        "tentative_hold_minutes": 1440,
         "operating_hours_start": "07:00:00",
         "operating_hours_end": "23:59:00",
         "deleted_at": None,
@@ -162,6 +163,7 @@ def test_ac1_a_missing_required_detail_is_refused(db):
         ({"setup_minutes": 4}, "Setup time must be at least 5 minutes"),
         ({"setup_minutes": -5}, "Setup time must be at least 5 minutes"),
         ({"turnaround_minutes": 0}, "Turnaround time must be at least 5 minutes"),
+        ({"tentative_hold_minutes": 0}, "Tentative hold duration must be at least 1 minutes"),
         ({"rating": 5}, "Unknown venue fields: rating"),
         ({"operating_hours_start": "08:00"}, "Unknown venue fields: operating_hours_start"),
     ],
@@ -176,6 +178,21 @@ def test_ac1_five_minute_buffers_are_accepted(db):
     created = service.create_venue({**_NEW_VENUE, "setup_minutes": 5, "turnaround_minutes": 5})
 
     assert (created["setup_minutes"], created["turnaround_minutes"]) == (5, 5)
+
+
+def test_ac1_a_new_venue_defaults_to_a_24h_tentative_hold(db):
+    """Sprint 3 (Josiah): tentative_hold_minutes, folded into this same
+    create path after merging with main -- see docs/design-decisions.md.
+    Matches venues.tentative_hold_minutes' own DB default."""
+    created = service.create_venue(dict(_NEW_VENUE))
+
+    assert created["tentative_hold_minutes"] == service.DEFAULT_HOLD_MINUTES
+
+
+def test_ac1_tentative_hold_minutes_can_be_set_explicitly(db):
+    created = service.create_venue({**_NEW_VENUE, "tentative_hold_minutes": 90})
+
+    assert created["tentative_hold_minutes"] == 90
 
 
 def test_ac1_a_new_venue_cannot_list_a_soft_deleted_layout(db):
@@ -197,6 +214,17 @@ def test_ac2_venue_staff_edit_a_venues_details(db):
 
     assert (edited["capacity"], edited["location"]) == (250, "Main Building, Level 4")
     assert _stored(db)["capacity"] == 250
+
+
+def test_ac2_venue_staff_edit_the_tentative_hold_duration(db):
+    """Sprint 3 (Josiah): editing a venue never retroactively changes an
+    existing booking's own snapshot -- see
+    test_venue_settings_blocking_hold_integration.py for the proof
+    against a real booking row; this only checks the write itself."""
+    edited = service.update_venue("venue-1", {"tentative_hold_minutes": 90})
+
+    assert edited["tentative_hold_minutes"] == 90
+    assert _stored(db)["tentative_hold_minutes"] == 90
 
 
 def test_ac2_only_the_fields_sent_are_written(db):

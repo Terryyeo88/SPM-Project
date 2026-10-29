@@ -43,6 +43,7 @@ from app.equipment.equipment_service import list_requests_for_event
 from app.events.transitions import TransitionConflictError, label, transition
 from app.extensions import supabase
 from app.shared.errors import NotFoundError, ValidationError
+from app.venues.booking_release import release_expired_hold, touch_expired_holds
 from app.venues.booking_service import with_venue_names
 
 TABLE = "safety_reviews"
@@ -92,8 +93,20 @@ def arrangement_problems(event_id: str) -> list[str]:
         haven't decided). Equipment itself is optional -- a session may
         need none, and requests can't be created in the app yet.
     Rejected bookings and requests don't block: they're history, replaced
-    by a newer request if the coordinator still needs one."""
-    bookings = supabase.table("venue_bookings").select("id, status").eq("event_id", event_id).execute().data or []
+    by a newer request if the coordinator still needs one.
+
+    Sprint 3: touched through touch_expired_holds before being read as
+    "confirmed" -- a hold that silently expired while this session sat
+    in planning must not count as a live arrangement here."""
+    bookings = (
+        supabase.table("venue_bookings")
+        .select("id, event_id, status, confirmed_at, hold_minutes")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+    bookings = touch_expired_holds(bookings)
     requests = supabase.table("equipment_requests").select("id, status").eq("event_id", event_id).execute().data or []
 
     problems = []
@@ -194,6 +207,14 @@ def review_detail(review: SimpleNamespace) -> dict:
         .data
         or []
     )
+    # Sprint 3: touched before being shown to the Safety Officer as a
+    # live arrangement -- a hold that expired while the review sat in
+    # the queue must not be reviewed as if it were still held. event is
+    # already loaded above, so this passes its status directly (no
+    # second round trip) rather than using the batch touch_expired_holds.
+    event_status = (event or {}).get("status")
+    touched = [release_expired_hold(booking, event_status=event_status) for booking in bookings]
+    bookings = [booking for booking in touched if booking.get("status") == "confirmed"]
     history = [row for row in list_reviews_for_event(review.event_id) if row["id"] != review.id]
     names = _first(
         supabase.table(TABLE).select(f"id, {_REVIEWER}, {_SUBMITTER}").eq("id", review.id).execute().data or []

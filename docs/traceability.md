@@ -468,6 +468,70 @@ Not built, so not tested: notifications for submissions and decisions, and
 resetting a check when a session is edited during it (see
 `docs/open-questions.md`, "Safety Officer").
 
+## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, Sprint 3, 2026-10-19)
+
+Source: Week 7 Customer Changes #1, #2, #4; Aaralyn's agreed tentative-hold
+flow (unchanged, already implemented by IS-11/IS-16 -- see
+`docs/design-decisions.md`). Unit tests: `test_booking_release.py`,
+`test_venue_service.py`, `test_block_service.py`, plus the edited sections of
+`test_booking_service.py`, `test_calendar_service.py`, `test_event_update.py`,
+`test_safety_service.py`, `test_event_lifecycle.py`, `test_authz_venues.py`,
+`test_venues_routes.py`. Integration:
+`test_venue_settings_blocking_hold_integration.py` (local Supabase).
+Frontend: `lib/venues.test.js`, `lib/venueBookings.test.js`,
+`router/index.test.js`, `lib/roles.test.js`. Guards marked (guard) were
+mutation-tested by hand (broken, caught, restored).
+
+### IS-58: Request Venue Booking with Setup and Turnaround Time
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can set/update a venue's setup and turnaround time (the auto-apply-at-booking-time half already shipped in IS-14) | `test_venue_service.py::test_update_venue_settings_updates_only_the_fields_given`, `::test_update_venue_settings_can_update_all_three_fields_at_once`, `test_venues_routes.py::test_update_settings_route_succeeds_for_venue_staff`, `test_authz_venues.py::test_venue_staff_allowed_manage_and_block[*]` | `POST /venues/<id>/settings`, `venue_service.update_venue_settings` / `_settings_from`, `VenueDetailView.vue` (inline edit form, venue_staff-gated) |
+| Only Venue Staff may edit; everyone else is refused | `test_authz_venues.py::test_every_other_role_denied_manage_and_block[*]`, `::test_multi_role_union_grants_venue_manage`, `test_venues_routes.py::test_update_settings_route_denies_event_coordinator`, `::test_update_settings_route_rejects_unauthenticated` | `rules.py::rule_venue_manage` (role-only, `DENY_FORBIDDEN`) |
+| Unknown field or non-positive value is refused (400), not silently ignored | `test_venue_service.py::test_update_venue_settings_rejects_a_non_object_body`, `::test_update_venue_settings_rejects_an_unknown_field`, `::test_update_venue_settings_rejects_an_empty_body`, `::test_update_venue_settings_rejects_a_non_positive_int[*]` (includes a `True` case, since `isinstance(True, int)` is true in Python), `::test_update_venue_settings_raises_not_found_for_an_unknown_venue`, `::test_update_venue_settings_translates_a_check_violation`, `::test_update_venue_settings_reraises_an_unrelated_database_error` | `venue_service._settings_from` / `update_venue_settings` |
+| Existing bookings never change when a venue's settings are edited later ("existing bookings that become problematic ... identified, not silently removed" -- satisfied by construction, see design-decisions.md) | `test_venue_settings_blocking_hold_integration.py::test_editing_venue_settings_does_not_change_existing_booking`, `::test_update_venue_settings_rejects_a_non_positive_value_for_real` | `booking_service.create_booking_request` / `confirm_booking` read venue settings once, at creation/confirm time only; `venue_bookings.setup_minutes`/`turnaround_minutes`/`hold_minutes` are snapshots |
+
+### Venue Becomes Unavailable After Booking
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can mark a venue blocked, with a mandatory reason, even with future bookings in place | `test_block_service.py::test_create_venue_block_inserts_the_block`, `::test_create_venue_block_rejects_an_invalid_reason`, `::test_create_venue_block_rejects_a_missing_or_non_string_timestamp[*]`, `test_venues_routes.py::test_create_block_route_succeeds_for_venue_staff`, `test_authz_venues.py::test_venue_staff_allowed_manage_and_block[*]` | `POST /venues/<id>/blocks`, `block_service.create_venue_block` / `_block_fields_from`, `BlockVenueView.vue` |
+| The existing event does NOT auto-cancel | `test_block_service.py::test_create_venue_block_does_not_cancel_the_event` | `release_bookings_overlapping_block` only writes `venue_bookings`/`venue_booking_status_log`, never `events.status` |
+| Affected bookings are identified and the coordinator is informed | `test_block_service.py::test_create_venue_block_releases_overlapping_confirmed_bookings_and_reports_them` | `create_venue_block` returns `released_bookings`; `_notify_coordinator_venue_blocked` print-stub (not itself asserted -- same stub convention as every other `_notify_*`); `BlockVenueView.vue` shows released events with links |
+| The coordinator can search for a replacement venue while the original event info stays intact | `venueBookings.test.js` ("puts each status in the tab of the same name" -- `released` tab), `VenueBookingStatus.vue`'s `canRequestAgain` computed now includes `'released'` (manual check -- no component tests for this file, per the frontend convention) | `canRequestAgain` computed; nothing in the release path touches `events` rows |
+| Only already-confirmed bookings are released at block-creation time; a pending request is Venue Staff's own call at review time | `test_block_service.py::test_create_venue_block_does_not_touch_an_overlapping_pending_booking`, `::test_create_venue_block_does_not_touch_a_non_overlapping_confirmed_booking` | `release_bookings_overlapping_block` queries `status='confirmed'` only |
+| A pending request can never be confirmed into an already-blocked period | `test_booking_service.py::test_confirm_booking_blocked_by_an_overlapping_venue_block` (guard), `::test_confirm_booking_not_blocked_by_a_non_overlapping_venue_block`, `test_venue_settings_blocking_hold_integration.py::test_confirm_booking_refused_against_a_real_venue_block` | `booking_service._blocked_period_exists`, checked in `confirm_booking` |
+| The blocked period is surfaced to Venue Staff reviewing a booking | `VenueBookingReviewView.vue` ("Venue blocked" suitability row, manual check -- no component tests for this file) | `get_booking` sets `booking["blocked"]` |
+
+### Venue Availability Calendar Tentative Hold
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can set/update the hold duration | `test_venue_service.py::test_update_venue_settings_can_update_all_three_fields_at_once` | `tentative_hold_minutes` added to `EDITABLE_VENUE_FIELDS`; same settings form as setup/turnaround |
+| A tentatively-held venue has an expiry date/time | `test_booking_service.py::test_confirm_booking_snapshots_hold_minutes_and_confirmed_at` | `confirm_booking` snapshots `hold_minutes` + `confirmed_at` onto the booking |
+| If the coordinator doesn't act before expiry, the hold expires and the venue becomes available | `test_booking_release.py::test_release_expired_hold_releases_an_expired_booking_whose_event_is_not_yet_confirmed`, `::test_release_expired_hold_leaves_a_not_yet_expired_booking_alone`, `test_venue_settings_blocking_hold_integration.py::test_has_live_confirmed_booking_is_false_once_the_hold_expires`, `::test_releasing_an_expired_hold_frees_the_exclusion_constraint_for_another_booking` | `booking_release.release_expired_hold` / `touch_expired_holds`, wired into every call site in the table below |
+| An expired hold is never treated as a confirmed booking | `test_booking_service.py::test_has_live_confirmed_booking_false_once_the_hold_has_expired`, `test_event_lifecycle.py::test_confirm_refused_once_the_tentative_hold_has_expired` (guard) | `has_live_confirmed_booking`, the gate on `confirm_event` |
+| A long-confirmed event's venue booking is never incorrectly re-expired | `test_booking_release.py::test_release_expired_hold_never_revisits_a_graduated_event[*]` (guard), `test_booking_service.py::test_has_live_confirmed_booking_true_for_a_graduated_event_however_old`, `test_calendar_service.py::test_a_long_confirmed_event_s_booking_is_never_re_expired` (guard), `test_event_update.py::test_a_long_confirmed_event_s_booking_is_never_re_expired_in_impacts` (guard), `test_venue_settings_blocking_hold_integration.py::test_has_live_confirmed_booking_is_true_for_an_already_confirmed_event_however_old` | `release_expired_hold`'s `_HOLD_GRADUATED_EVENT_STATUSES` guard |
+| Existing bookings that become problematic under the new setup/turnaround rule are identified, not silently removed | same as IS-58's snapshot-immutability row above | same |
+
+### Expiry wired into every call site that trusts `confirmed == genuinely holding the venue`
+
+| Location | Test |
+|---|---|
+| `booking_service._confirmed_overlap_exists` | `test_booking_service.py` (`confirm_booking` tests exercise this path; `test_venue_settings_blocking_hold_integration.py::test_releasing_an_expired_hold_frees_the_exclusion_constraint_for_another_booking` proves it end-to-end) |
+| `booking_service.get_booking` / `list_bookings` / `list_bookings_for_event` / `has_live_confirmed_booking` | `test_booking_service.py::test_has_live_confirmed_booking_false_with_no_booking_at_all`, `::test_has_live_confirmed_booking_true_within_the_hold_window` |
+| `calendar_service.get_venue_calendar` | `test_calendar_service.py::test_expired_hold_on_an_unconfirmed_event_emits_no_entry`, `::test_a_long_confirmed_event_s_booking_is_never_re_expired` |
+| `change_impact._venue_impacts` (Aaralyn's file -- additive only, flagged for her sign-off) | `test_event_update.py::test_an_expired_booking_produces_no_impact_and_is_released`, `::test_a_long_confirmed_event_s_booking_is_never_re_expired_in_impacts` |
+| `safety_service.arrangement_problems` / `review_detail` (Justin's file -- additive only, flagged for his sign-off) | `test_safety_service.py::test_an_expired_tentative_hold_is_not_a_confirmed_arrangement`, `::test_review_detail_excludes_an_expired_tentative_hold` |
+| `events/routes.py::confirm_event` (new gate, the critical fix found during planning) | `test_event_lifecycle.py::test_confirm_refused_once_the_tentative_hold_has_expired`, `::test_confirm_succeeds_when_the_venue_booking_is_still_held` |
+| `events/routes.py::cancel_event` (releases every confirmed booking for the event) | `test_event_lifecycle.py::test_cancelling_releases_the_events_venue_bookings` |
+
+Not built, so not tested: a real notification system (print-stub only, same
+converged pattern as every other `_notify_*`); editing or removing a venue
+block once created; resolving the soft edge where a pending request is
+eventually confirmed against a venue's now-stale settings (see
+`docs/open-questions.md`).
+
 ## Sprint 3 — Record Equipment Request for Event (IS-17, Nawaz)
 
 Source: IS-17's AC, plus Aaralyn's IS-9 note that equipment requests need

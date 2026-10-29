@@ -19,6 +19,13 @@
  *
  * IS-61: a booking released because Venue Staff deleted its venue is marked
  * as such; VenueRemovedAlert, at the top of the page, asks for a new venue.
+ *
+ * Sprint 3: a booking can also reach "released" for a reason other than
+ * Venue Staff rejecting it or the coordinator cancelling it -- its event
+ * was cancelled entirely, its tentative hold expired, or its venue was
+ * blocked (app.venues.booking_release). Distinct from "cancelled" (IS-9,
+ * coordinator-initiated) and from released_by_venue_deletion (IS-61,
+ * which already has its own alert further up the page).
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet, apiPost } from '../lib/api'
@@ -43,7 +50,12 @@ const hasActive = computed(() => bookings.value.some((booking) => ['pending', 'c
 // may only request a venue once the event is in planning -- an approved
 // event is moved there first with Start Planning. The request link is
 // shown only while no booking is pending or confirmed (hasActive): a
-// session with a venue booked doesn't request another.
+// session with a venue booked doesn't request another. This already
+// covers "restart after a rejection, cancellation, or a release (Sprint
+// 3: the event was cancelled, the hold expired, or the venue was
+// blocked)" -- none of those statuses count as active, so hasActive
+// goes false and the link reappears, checked across EVERY booking (not
+// just the newest), which matters once a session can hold more than one.
 const canRequest = computed(() => props.event.status === 'planning')
 
 // The booking whose cancel form is open, and its reason / outcome.
@@ -142,6 +154,10 @@ watch(() => props.event.id, () => {
           <p v-if="booking.status === 'rejected'" class="rejection-reason">
             Reason: {{ booking.rejection?.reason || 'No reason was recorded.' }}
           </p>
+          <p v-else-if="booking.status === 'released'" class="rejection-reason">
+            Reason: {{ booking.release?.reason || 'No reason was recorded.' }}
+            <span v-if="!booking.release?.released_by" class="muted">(done automatically)</span>
+          </p>
           <p v-if="booking.released_by_venue_deletion" class="released small" data-test="released-by-deletion">
             Released: this venue was deleted from the venue catalogue by Venue Staff.
           </p>
@@ -202,6 +218,7 @@ h2 { margin: 0; font-size: 15px; color: #222; }
 .status-pending { background: #f7efe1; color: #8a5a12; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }
+.status-released { background: #eeeeee; color: #6a6a6a; }
 .status-cancelled { background: #fcebdd; color: #a3521b; }
 
 .panel {

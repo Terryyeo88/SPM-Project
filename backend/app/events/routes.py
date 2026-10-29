@@ -72,7 +72,8 @@ from app.events.transitions import status_history, transition
 from app.extensions import supabase
 from app.safety.safety_service import is_approved, list_reviews_for_event, submit_for_safety_check
 from app.shared.errors import NotFoundError, ValidationError
-from app.venues.booking_service import create_booking_request, list_bookings_for_event
+from app.venues.booking_release import release_bookings_for_event
+from app.venues.booking_service import create_booking_request, has_live_confirmed_booking, list_bookings_for_event
 
 events_bp = Blueprint("events", __name__, url_prefix="/events")
 
@@ -274,10 +275,24 @@ def confirm_event(event, event_id):
     will decide on the subsequent action"). rule_event_confirm checks the
     status; whether the latest review is approved is a database fact, so
     it's checked here. The Confirmed Status story's "fields should not be
-    changed once confirmed" half is NOT implemented (docs/open-questions.md)."""
+    changed once confirmed" half is NOT implemented (docs/open-questions.md).
+
+    Tentative Hold (Josiah, Sprint 3): also requires the event to still
+    have a LIVE confirmed venue booking -- without this gate, an event
+    could reach "confirmed" status with a booking whose tentative hold
+    silently expired while it sat in safety_review, directly violating
+    that story's AC ("an expired hold should not be treated as a
+    confirmed booking"). has_live_confirmed_booking touches away any
+    expired holds before answering. See docs/design-decisions.md for how
+    this gap was found during planning, not assumed safe."""
     if not is_approved(event_id):
         raise ValidationError(
             "The Safety Officer hasn't approved this session yet -- it can be confirmed once they do."
+        )
+    if not has_live_confirmed_booking(event_id):
+        raise ValidationError(
+            "This session's venue booking is no longer held (its tentative hold expired) -- "
+            "request a venue again before confirming."
         )
     return jsonify(_move(event, event_id, "confirmed")), 200
 
@@ -324,14 +339,23 @@ def cancel_event(event, event_id):
     events can book it (app.equipment.reservation_release). Only after
     transition() succeeds -- a refused or conflicting cancel releases
     nothing. Not atomic with the status change, same as transition()'s own
-    history insert; see docs/open-questions.md."""
+    history insert; see docs/open-questions.md.
+
+    Release venue bookings on cancel (Josiah, Sprint 3): same pattern,
+    same place -- every CONFIRMED venue booking for this event is
+    released (app.venues.booking_release.release_bookings_for_event,
+    PLURAL-SAFE: every booking, not "the" one) so the venue is freed for
+    other events. The requesting coordinator sees this on their own event
+    page the same way a rejected booking already shows (VenueBookingStatus.vue)."""
     updated = _move(event, event_id, "cancelled")
     released = release_event_equipment(event_id)
+    released_bookings = release_bookings_for_event(event_id, "Event cancelled", changed_by=current_user().id)
     return jsonify(
         {
             **updated,
             "cancellation_reason": request.get_json(silent=True)["reason"].strip(),
             "released_equipment_units": released,
+            "released_venue_bookings": len(released_bookings),
         }
     ), 200
 

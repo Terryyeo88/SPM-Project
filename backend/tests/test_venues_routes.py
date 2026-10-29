@@ -151,3 +151,75 @@ def test_get_route_returns_404_for_missing_venue(client, signing_key, monkeypatc
 def test_get_route_rejects_unauthenticated(client):
     response = client.get("/venues/venue-1")
     assert response.status_code == 401
+
+
+# tentative_hold_minutes editing is folded into POST /venues/<venue_id>
+# (IS-61's update_venue, VENUE_EDIT) after the merge with main -- see
+# docs/design-decisions.md -- so its route coverage lives in
+# test_venue_catalogue_crud.py, not here.
+
+
+# -- GET/POST /venues/<venue_id>/blocks (Josiah, Sprint 3) -------------------
+
+
+def test_list_blocks_route_succeeds_for_venue_staff(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["venue_staff"])
+    blocks = [{"id": "block-1", "venue_id": "venue-1", "reason": "maintenance"}]
+    monkeypatch.setattr(routes_module, "list_venue_blocks", lambda venue_id: blocks)
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.get("/venues/venue-1/blocks", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.get_json() == blocks
+
+
+def test_list_blocks_route_denies_event_coordinator(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    monkeypatch.setattr(
+        routes_module, "list_venue_blocks", lambda *a: (_ for _ in ()).throw(AssertionError("should not be called"))
+    )
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.get("/venues/venue-1/blocks", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403
+
+
+def test_create_block_route_succeeds_for_venue_staff(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["venue_staff"])
+    calls = []
+
+    def fake_create(venue_id, body, created_by):
+        calls.append((venue_id, body, created_by))
+        return {"block": {"id": "block-1"}, "released_bookings": []}
+
+    monkeypatch.setattr(routes_module, "create_venue_block", fake_create)
+
+    token = signing_key.make_token(sub="staff-1")
+    body = {
+        "reason": "maintenance",
+        "block_start": "2026-11-01T00:00:00+08:00",
+        "block_end": "2026-11-02T00:00:00+08:00",
+    }
+    response = client.post("/venues/venue-1/blocks", headers={"Authorization": f"Bearer {token}"}, json=body)
+
+    assert response.status_code == 201
+    assert calls == [("venue-1", body, "staff-1")]
+
+
+def test_create_block_route_denies_event_coordinator(client, signing_key, monkeypatch):
+    _mock_profile(monkeypatch, ["event_coordinator"])
+    monkeypatch.setattr(
+        routes_module, "create_venue_block", lambda *a: (_ for _ in ()).throw(AssertionError("should not be called"))
+    )
+
+    token = signing_key.make_token(sub="user-1")
+    response = client.post("/venues/venue-1/blocks", headers={"Authorization": f"Bearer {token}"}, json={})
+
+    assert response.status_code == 403
+
+
+def test_create_block_route_rejects_unauthenticated(client):
+    response = client.post("/venues/venue-1/blocks", json={})
+    assert response.status_code == 401

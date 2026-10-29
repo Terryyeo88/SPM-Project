@@ -119,6 +119,21 @@ VENUE_DELETE = "venue.delete"
 
 VENUE_CALENDAR_VIEW = "venue.calendar_view"
 
+# -- venue.block (Josiah, Sprint 3) ---------------------------------------
+# Source: "Venue Becomes Unavailable After Booking" (Week 7 #2) -- Venue
+# Staff create/list blocks on a venue. Not folded into VENUE_EDIT (IS-61):
+# venues and venue_blocks are different resource types, same reasoning
+# ROOM_LAYOUT_LIST/ROOM_LAYOUT_MANAGE's own split from VENUE_VIEW/
+# VENUE_LIST already established for a similar audience.
+#
+# tentative_hold_minutes (Week 7 #1, "Request Venue Booking with Setup
+# and Turnaround Time") is edited through VENUE_EDIT above, alongside
+# setup_minutes/turnaround_minutes -- IS-61 landed on main as the venue
+# catalogue's one write path while this was in progress, so there is no
+# separate VENUE_MANAGE action here; see docs/design-decisions.md.
+
+VENUE_BLOCK = "venue.block"
+
 # -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
 # Source: "As an Event Coordinator, I want to submit a request to book a
 # venue for an event" (create) and "As a Venue Staff member, I want to

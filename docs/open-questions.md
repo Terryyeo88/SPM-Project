@@ -947,6 +947,59 @@ Known gaps, not built:
   history insert. Each handles a failure between the two -- see
   `app/safety/safety_service.py`.
 
+## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, 19 Oct)
+
+Decisions made where the customer-changes doc and Aaralyn's agreed
+tentative-hold flow were silent (reasoning in `docs/design-decisions.md`,
+"Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry").
+Please confirm:
+
+- **`tentative_hold_minutes` defaults to 1440 (24 hours), guessed.** Same
+  posture as `setup_minutes`/`turnaround_minutes`'s own guessed default of
+  30 when those were added (IS-14) -- no story or doc gives a number.
+- **A pending request reviewed against a venue's now-stale settings is a
+  soft edge, not a fixed one.** If Venue Staff edit a venue's
+  `setup_minutes`/`turnaround_minutes`/`tentative_hold_minutes` while a
+  request for that venue is still pending, the pending request's eventual
+  confirmation will snapshot the NEW settings (confirm-time is when the
+  snapshot happens), even though the coordinator requested it under the old
+  ones. This is a genuine gap, not covered by the snapshot-immutability
+  proof (which only covers ALREADY-confirmed bookings). We judged it
+  acceptable: settings changes should be rare, and the alternative
+  (snapshotting at request time instead of confirm time) would mean a
+  rejected-then-resubmitted request could carry stale settings forward
+  indefinitely. Please confirm this is the right trade-off.
+- **Editing or removing a venue block is out of scope.** The new
+  `venue_blocks` RLS policy is INSERT-only; once created, a block cannot be
+  shortened, extended or withdrawn through the app. No story asked for
+  this, and it wasn't invented.
+- **Hold expiry is eventually-consistent, not point-in-time** (see
+  design-decisions.md's "lazy, read-triggered" write-up) -- a venue does
+  not free itself up the instant its hold's clock runs out; it frees up
+  the next time any call site reads it. No story asked for second-
+  granularity expiry, so this was judged acceptable rather than building
+  scheduler infrastructure the rest of the codebase has no other use for.
+- **The Venue-Becomes-Unavailable story's "Multiple Venues for One Event"
+  sibling (Week 7 #3) has no corresponding Jira card** -- confirmed a real
+  gap, out of scope this sprint. The release mechanism was written
+  plural-safe so it costs nothing extra to pick up later.
+- **Venue blocking vs. a confirm racing at the exact same instant is an
+  app-level check only**, not a database-level guard the way IS-16's
+  exclusion constraint is (see design-decisions.md). Judged acceptable: two
+  different staff actions landing in the same instant is far rarer than
+  IS-16's two-routine-confirms race.
+
+Known gaps, not built:
+
+- **Notifications** (coordinator told a booking was released, whatever the
+  trigger): a `print()` placeholder only
+  (`block_service._notify_coordinator_venue_blocked`), the same converged
+  pattern as every other `_notify_*` stub in this codebase. No real
+  notification infrastructure exists anywhere to build on.
+- **No seeded demo data for a tentatively-held, about-to-expire booking.**
+  To demo expiry, confirm a booking, then either wait out its hold or
+  adjust `confirmed_at`/`hold_minutes` directly in the database.
+
 ## Record Equipment Request for Event (IS-17, Nawaz, 19 Oct)
 
 Source: IS-17's AC (specify an event and one or more items; quantity per
