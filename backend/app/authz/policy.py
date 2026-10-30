@@ -82,6 +82,7 @@ from app.authz.rules import (
     rule_notification_list,
     rule_notification_mark_all_read,
     rule_notification_mark_read,
+    rule_profile_edit_own,
     rule_registration_list,
     rule_registration_withdraw,
     rule_room_layout_list,
@@ -169,6 +170,7 @@ _RULES: dict[str, RuleFunc] = {
     actions.NOTIFICATION_LIST: rule_notification_list,
     actions.NOTIFICATION_MARK_READ: rule_notification_mark_read,
     actions.NOTIFICATION_MARK_ALL_READ: rule_notification_mark_all_read,
+    actions.PROFILE_EDIT_OWN: rule_profile_edit_own,
 }
 
 

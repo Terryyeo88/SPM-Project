@@ -1879,3 +1879,155 @@ recipient scope on the list, each made the unit and integration tests fail.
 - **PR #45** (Josiah, open) adds a sixth hook,
   `block_service._notify_coordinator_venue_blocked`. It needs the same
   one-line rewiring onto this service once it lands.
+
+## User contact and preferences (IS-68, Sprint 4, 2026-10-30)
+
+IS-68 stores the Edit Profile wireframe's Phone Number, Organisation
+(optional) and Communication Preferences (Email notifications / SMS
+notifications) on each user's profile. Built: four columns on
+`public.profiles` (migration `20261030000000_profile_contact_preferences.sql`),
+`app/me/profile_service.py`, the fields added to `GET /me`, a new
+`PATCH /me/profile`, and the action `profile.edit_own`. Frontend helpers are
+in `frontend/src/lib/profile.js`. The wireframe image isn't in the repo, so
+the field list comes from the ticket and from the comment in
+`RegistrationForm.vue`, which was laid out after the same screen.
+
+### The new columns are nullable with no backfill, so existing profiles are unaffected
+
+`phone`, `organisation`, `notify_email` and `notify_sms` are all nullable,
+with no default and no backfill. Adding a column without a default only
+changes the catalogue, so no existing profile is rewritten. NULL is a valid
+value for each, so every existing profile stays valid and still loads and
+saves. `test_profile_contact_integration.py` proves this against the local
+database: every seeded profile (written id, name and email only, the
+pre-IS-68 shape) is NULL in all four columns and still loads and saves.
+
+NULL means "not given yet". For the two preferences that is distinct from
+false ("chose not to"), which is why they have no default either. Blank text
+is stored as NULL, never `''`; two check constraints refuse `''` (and an
+over-long value) in the database too. Both pass on NULL, so they hold for
+every existing row.
+
+### Adding them activates two pieces of Justin's existing code, deliberately
+
+Justin's Attendee Registration was written to pick these fields up as soon
+as a profile story added them. IS-68 adds them, so both now take effect.
+That is intended, not a side effect:
+
+1. **`prefillFromProfile` in `frontend/src/lib/registrations.js`.** The
+   register form now starts from the profile's phone, organisation and
+   notification choices, because `GET /me` returns them.
+2. **`registration_service._db_profile_organisation` in
+   `backend/app/registrations/registration_service.py`.** It reads the
+   profile row with `select("*")` and copies its `organisation` into a
+   registration when the attendee ticks "include organisation". Before
+   IS-68 there was no such column, so it always found none.
+
+**With no data saved, both behave exactly as before.** This is the case
+every existing user is in, and the regression that would hurt users without
+anyone noticing. A profile whose four fields are all NULL gives the same
+register form it did before `GET /me` returned them at all: the same fields,
+the same defaults (phone blank, no organisation, email on, SMS off) and the
+same request body. `RegistrationForm.profileDefaults.test.js` asserts that
+directly, and
+`test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing`
+asserts the backend half. Neither of Justin's files is changed. Justin is
+asked to confirm this is what he meant (docs/open-questions.md, IS-68).
+
+### PATCH /me/profile: your own profile, with no id anywhere
+
+`PATCH /me/profile` updates the caller's own profile. The profile is the
+token's user (`current_user().id`), never an id from the request:
+
+- **There is no id in the URL,** so another user's profile isn't reachable
+  through this route at all. That is why this route has no 404-vs-403
+  question: there is no other user's profile to hide (404) or refuse (403).
+- **The body refuses `id` and `email` outright.** A request containing
+  either is a 400 with code `profile_field_not_editable`, not silently
+  ignored. Email is the login identity (Supabase Auth's, mirrored on
+  profiles) and isn't part of this ticket.
+- **Any other field outside the four is a 400 too** (`Unknown profile
+  fields`). That includes `name`, which isn't editable here either.
+- **It is a partial update:** only the keys present are changed.
+- **The update query is scoped with `.eq("id", caller)`.** That scope is
+  what keeps "own" true, since the rule can't check it.
+
+Authz follows the 5-step checklist in docs/authz-usage.md:
+
+1. **Protocol: none added.** There is no resource to load: the route names
+   no profile, so there's nothing for a rule to compare against.
+2. **Action:** `PROFILE_EDIT_OWN = "profile.edit_own"` in `actions.py`.
+3. **Rule:** `rule_profile_edit_own` returns ALLOW for any authenticated
+   caller, whatever their role, since every user has a profile. It has the
+   same warning as `EVENT_LIST`: ALLOW means "you may edit *a* profile,
+   yours", and the service is what keeps it to yours.
+4. **Registered** in `_RULES` in `policy.py`.
+5. **`@require(PROFILE_EDIT_OWN)`** on the route, with no loader.
+
+### Validation
+
+- **Phone is optional on the profile.** The wireframe marks only
+  Organisation as optional. But every existing profile has no phone, and a
+  user must be able to save an organisation or a preference without one.
+  When a phone is given, it must match the same pattern registrations use
+  (`registration_service.PHONE_PATTERN`, imported, not copied). A
+  registration still requires a phone of its own.
+- **Organisation:** optional, at most 200 characters.
+- **The preferences** take true, false or null. Both false is allowed:
+  nothing sends email or SMS yet, and a registration still asks for at least
+  one of its own.
+
+### The preferences are stored, and only the register form's prefill reads them
+
+IS-69's notifications are in-app only, and each registration keeps its own
+`notify_email` / `notify_sms` (`20261005000000_registrations.sql`). So a
+profile-level preference sends nothing. The only thing that reads it is
+`prefillFromProfile`, which takes it as the new registration's starting
+choice. Logged in docs/open-questions.md.
+
+On the profile page, an unset preference shows the same starting values the
+register form uses (email on, SMS off), so the page shows what a new
+registration will start with. It stays NULL until the user changes one:
+saving only a phone number doesn't turn "never chosen" into a choice
+(`profilePayload` in `lib/profile.js`).
+
+### RLS reviewed, not changed
+
+RLS was already on for `profiles`, with the placeholder policy
+"authenticated read profiles": any signed-in user may select every profile
+through the publishable key. That now includes phone. Narrowing it changes
+what every other feature may read about people, so it needs its own story.
+It is logged in docs/open-questions.md and pinned by
+`test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`,
+so it can't change unnoticed. There is still no write policy, so only the
+backend writes. A signed-in user can't update any profile directly, not
+even their own; that is tested.
+
+### Mutation-tested by hand
+
+The guard is "a user can only read and write their own profile". Each part
+was broken once on its own, the profile tests were run (unit, route and
+integration, against a freshly reset local database), and then it was
+restored:
+
+| Mutant | Result |
+|---|---|
+| `.eq("id", caller)` deleted from the update query | 19 failed (13 unit/route, 6 integration) |
+| `id` removed from the refused fields | 5 failed |
+| `email` removed from the refused fields | 4 failed |
+| `id` let past both checks (refused fields and unknown fields), so silently ignored | 5 failed |
+| the same, and `id` also written into the update | 5 failed |
+
+**One caveat on the `id` and `email` rows.** With only the refusal removed,
+the field is still caught by the unknown-field check, so the request is
+still a 400 and nothing is written. The tests fail there only because they
+assert the specific code `profile_field_not_editable` and its message. The
+two stronger `id` mutants remove both checks; the 400-and-nothing-written
+assertions catch those. Restored: 69 passed.
+
+### Out of scope
+
+- **`GET /me` has no `@require` decorator.** It was already like that, and
+  it wasn't changed. Logged in docs/open-questions.md.
+- **Editing name or email.**
+- **Anything that sends email or SMS.**

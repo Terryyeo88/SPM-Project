@@ -1053,3 +1053,23 @@ def rule_notification_mark_read(user: Any, notification: Any) -> Decision:
 
 def rule_notification_mark_all_read(user: Any, resource: Any = None) -> Decision:
     return Decision.ALLOW
+
+
+# -- profile.* (IS-68: User contact and preferences) --------------------------
+#   edit_own  ALLOW for any authenticated caller, whatever their role: every
+#             user has a profile and may keep their own contact details.
+#
+# NO 404-vs-403 QUESTION HERE, and that is the design, not an omission.
+# PATCH /me/profile has no id in its URL and refuses an "id" in its body
+# (400), so the only profile it can name is the caller's own, taken from
+# their token. Another user's profile is not hidden behind a 404 or refused
+# with a 403 -- it is not reachable through this route at all. So there is
+# no resource to load and nothing for this rule to compare; the guard that
+# makes "own" true is app/me/profile_service.update_own_profile's
+# .eq("id", caller) and its refusal of "id" / "email". Same *** WARNING ***
+# as EVENT_LIST: ALLOW means "you may edit A profile -- yours", and the
+# service is what keeps it to yours. Mutation-tested (docs/traceability.md).
+
+
+def rule_profile_edit_own(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW

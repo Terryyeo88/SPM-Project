@@ -609,3 +609,41 @@ restored):
 Not covered, because not built: the bell and list in the web app (a
 separate frontend change), email/SMS, reminders, and the notifications no
 hook existed for (see `docs/open-questions.md`).
+
+## Sprint 4 — User contact and preferences (IS-68)
+
+Criteria from the ticket: phone number, organisation (optional) and
+communication preferences (email, SMS), per the Edit Profile wireframe; a
+user may read and write only their own profile. Unit:
+`test_profile_service.py`, `test_profile_routes.py`, `test_authz_profile.py`,
+`test_me_route.py`. Integration: `test_profile_contact_integration.py`.
+Frontend: `lib/profile.test.js`, `components/RegistrationForm.profileDefaults.test.js`.
+Design: `docs/design-decisions.md` (IS-68). The new columns are nullable with
+no backfill, so existing profiles are unaffected.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A user can save their phone, organisation and email/SMS preferences | `test_profile_service.py::test_saving_all_three`, `test_profile_routes.py::test_every_role_saves_all_three_to_their_own_profile[*]`, `test_profile_contact_integration.py::test_saving_all_three_and_reading_them_back`, `lib/profile.test.js` "sends all three once given" | `PATCH /me/profile`, `profile_service.py::update_own_profile`, migration `20261030000000_profile_contact_preferences.sql` |
+| Optional means optional: saving with them blank works and stores NULL | `test_profile_service.py::test_saving_with_the_optional_ones_blank_stores_null_not_empty_text`, `::test_saving_with_organisation_left_out_entirely`, `test_profile_routes.py::test_saving_with_the_optional_ones_blank`, `test_profile_contact_integration.py::test_saving_with_the_optional_ones_blank_stores_null`, `::test_the_database_refuses_blank_or_oversized_text[*]`, `lib/profile.test.js` "sends blank optional fields as null" | `profile_service.py::validate_profile_update` / `_optional_text`, constraints `profiles_phone_present` / `profiles_organisation_present` |
+| The saved values are read back through GET /me | `test_profile_service.py::test_reads_back_the_callers_own_saved_values`, `test_profile_routes.py::test_get_me_reads_back_what_was_saved`, `::test_get_me_returns_the_four_fields_as_null_when_never_given`, `test_me_route.py::test_me_returns_id_email_name_roles_for_authenticated_user` | `GET /me`, `profile_service.py::get_contact` |
+| A user cannot read another user's profile | `test_profile_service.py::test_the_read_is_scoped_to_the_callers_id`, `::test_reading_returns_only_the_four_fields_and_never_another_users`, `test_profile_routes.py::test_get_me_never_shows_another_users_contact_details` | `.eq("id", caller)` in `get_contact`; the id comes from the token |
+| A user cannot write another user's profile: no id in the URL; `id` / `email` in the body are a 400, not ignored | `test_profile_service.py::test_the_update_is_scoped_to_the_callers_id`, `::test_one_user_saving_never_writes_another_users_profile`, `::test_a_payload_naming_id_or_email_is_refused_and_nothing_is_written[*]`, `test_profile_routes.py::test_a_body_naming_id_or_email_is_a_400_and_writes_nothing[*]`, `::test_there_is_no_route_that_takes_another_users_id[*]`, `::test_two_users_each_write_only_their_own`, `test_profile_contact_integration.py::test_the_update_touches_only_the_callers_row`, `::test_a_signed_in_user_cannot_write_any_profile_directly` | `.eq("id", caller)` in `update_own_profile`, `FORBIDDEN_FIELDS`, `rules.py::rule_profile_edit_own`, no write RLS policy |
+| Every authenticated role may edit their own profile | `test_authz_profile.py::test_every_authenticated_user_may_edit_their_own_profile[*]`, `::test_profile_edit_own_is_wired_into_the_policy`, `test_profile_routes.py::test_patch_without_a_token_is_a_401` | `actions.PROFILE_EDIT_OWN`, `_RULES` |
+| Existing profiles, with NULL in the new columns, still load and still save | `test_profile_contact_integration.py::test_the_new_columns_exist_nullable_on_every_seeded_profile`, `::test_an_existing_profile_with_nulls_still_loads`, `::test_an_existing_profile_with_nulls_still_saves` | nullable columns, no default, no backfill |
+| (design) With nothing saved, Justin's register form is exactly as before; once saved, it prefills | `components/RegistrationForm.profileDefaults.test.js` (all), `test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing` | `lib/registrations.js::prefillFromProfile`, `registration_service.py::_db_profile_organisation` (both unchanged) |
+| (design) Unset preferences stay NULL until the user changes one | `lib/profile.test.js` "leaves never-chosen preferences out", "sends both preferences as soon as one is changed" | `lib/profile.js::profilePayload` |
+| (design) Field validation: phone pattern when given, organisation length, preferences true/false/null, unknown fields refused | `test_profile_service.py::test_invalid_updates_are_400s[*]`, `::test_a_body_that_is_not_an_object_is_a_400[*]`, `test_profile_routes.py::test_an_invalid_phone_is_a_400`, `lib/profile.test.js` "field errors" | `profile_service.py::validate_profile_update`, `lib/profile.js::profilePhoneError` / `organisationError` |
+
+Each part of the own-profile guard was mutation-tested by hand once (broken,
+confirmed caught, restored), against a freshly reset local database:
+
+- **`.eq("id", caller)` on the update, deleted:** 19 failed.
+- **The refusal of `id`, removed:** 5 failed. The refusal of `email`,
+  removed: 4 failed. Either field was still a 400 through the unknown-field
+  check; the tests caught it by its code and message.
+- **`id` let past both checks:** 5 failed whether it was ignored or
+  written.
+
+Pinned as an open question, not a guarantee: any signed-in user can read
+every profile directly through the existing RLS policy
+(`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
