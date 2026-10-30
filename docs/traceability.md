@@ -617,7 +617,7 @@ communication preferences (email, SMS), per the Edit Profile wireframe; a
 user may read and write only their own profile. Unit:
 `test_profile_service.py`, `test_profile_routes.py`, `test_authz_profile.py`,
 `test_me_route.py`. Integration: `test_profile_contact_integration.py`.
-Frontend: `lib/profile.test.js`, `components/RegistrationForm.profileDefaults.test.js`.
+Frontend: `lib/profile.test.js`, `components/RegistrationForm.profileDefaults.test.js`, `views/ProfileView.test.js`.
 Design: `docs/design-decisions.md` (IS-68). The new columns are nullable with
 no backfill, so existing profiles are unaffected.
 
@@ -631,6 +631,7 @@ no backfill, so existing profiles are unaffected.
 | Every authenticated role may edit their own profile | `test_authz_profile.py::test_every_authenticated_user_may_edit_their_own_profile[*]`, `::test_profile_edit_own_is_wired_into_the_policy`, `test_profile_routes.py::test_patch_without_a_token_is_a_401` | `actions.PROFILE_EDIT_OWN`, `_RULES` |
 | Existing profiles, with NULL in the new columns, still load and still save | `test_profile_contact_integration.py::test_the_new_columns_exist_nullable_on_every_seeded_profile`, `::test_an_existing_profile_with_nulls_still_loads`, `::test_an_existing_profile_with_nulls_still_saves` | nullable columns, no default, no backfill |
 | (design) With nothing saved, Justin's register form is exactly as before; once saved, it prefills | `components/RegistrationForm.profileDefaults.test.js` (all), `test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing` | `lib/registrations.js::prefillFromProfile`, `registration_service.py::_db_profile_organisation` (both unchanged) |
+| The three fields on the profile page, per the wireframe; blank optional fields save | `views/ProfileView.test.js` (all, incl. "saves with the optional ones blank", "clearing saved values sends them as null") | `views/ProfileView.vue` (Justin's; `[PENDING JUSTIN'S SIGN-OFF]` commit) |
 | (design) Unset preferences stay NULL until the user changes one | `lib/profile.test.js` "leaves never-chosen preferences out", "sends both preferences as soon as one is changed" | `lib/profile.js::profilePayload` |
 | (design) Field validation: phone pattern when given, organisation length, preferences true/false/null, unknown fields refused | `test_profile_service.py::test_invalid_updates_are_400s[*]`, `::test_a_body_that_is_not_an_object_is_a_400[*]`, `test_profile_routes.py::test_an_invalid_phone_is_a_400`, `lib/profile.test.js` "field errors" | `profile_service.py::validate_profile_update`, `lib/profile.js::profilePhoneError` / `organisationError` |
 
