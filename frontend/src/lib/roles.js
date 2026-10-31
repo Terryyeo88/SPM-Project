@@ -348,6 +348,16 @@ export const ROUTE_ACCESS = Object.freeze(
       roles: Object.values(ROLES),
       inNav: false,
     },
+    // Notifications (IS-69): every signed-in user has their own (the
+    // backend's notification.* rules allow every authenticated role).
+    // Not a nav link: NAV_LINKS can't carry an unread count, and
+    // navRoles() would hide it from the dashboard-only roles.
+    {
+      routeName: 'notifications',
+      label: 'Notifications',
+      roles: Object.values(ROLES),
+      inNav: false,
+    },
     // Object.freeze() on the outer array is shallow -- it stops entries
     // being added/removed/reordered, but without also freezing (and
     // freezing each entry's own `roles` array) each element, a caller

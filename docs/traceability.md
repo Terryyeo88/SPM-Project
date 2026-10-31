@@ -578,11 +578,12 @@ Each guard above was mutation-tested by hand once (broken, confirmed caught, res
 ## Sprint 4 — Notification System (IS-69)
 
 The ticket's acceptance criteria aren't in the repo; the criteria below are
-our working reading, flagged in `docs/open-questions.md`. Backend only.
+our working reading, flagged in `docs/open-questions.md`.
 Unit: `test_notification_service.py`, `test_notifications_routes.py`,
 `test_authz_notifications.py`, `test_notification_hook_*.py` (one per hook). Integration:
-`test_notifications_integration.py`. Design: `docs/design-decisions.md`
-(IS-69).
+`test_notifications_integration.py`. Frontend: `lib/notifications.test.js`,
+`views/NotificationsView.test.js`, `lib/roles.test.js` and `router/index.test.js`
+(the notifications route). Design: `docs/design-decisions.md` (IS-69).
 
 | Criterion | Test | Implementation |
 |---|---|---|
@@ -595,6 +596,11 @@ Unit: `test_notification_service.py`, `test_notifications_routes.py`,
 | A user can never see or change anyone else's notifications: through Flask (404) or directly against the database (RLS) | `test_authz_notifications.py::test_anyone_elses_notification_is_a_404_whatever_their_role`, `test_notifications_routes.py::test_mark_read_someone_elses_is_404_and_writes_nothing`, `::test_mark_read_missing_is_404`, `::test_every_route_needs_a_login`, `test_notification_service.py::test_mark_read_is_scoped_to_the_caller`, `::test_get_notification_missing_or_malformed_is_not_found`, `test_notifications_integration.py::test_a_signed_in_user_reads_only_their_own_notifications_directly`, `::test_a_signed_in_user_cannot_write_notifications_directly` | `rules.py::rule_notification_mark_read`, recipient scope in every `notification_service.py` query, policy `recipient reads own notifications` (no write policy) |
 | (design) A failure to notify never fails or undoes the action; the unit-test DB guard still fails loudly | `test_notification_service.py::test_a_failed_write_is_logged_and_swallowed`, `::test_a_base_exception_is_not_swallowed` | `notification_service.py::_best_effort` |
 | (design) A link is both halves or neither | `test_notifications_integration.py::test_a_link_is_both_halves_or_neither` | constraint `notifications_entity_complete` |
+| A user sees their notifications in the web app: newest first, unread marked out, an empty state | `NotificationsView.test.js` ("lists the notifications ...", "shows an empty state ...") | `views/NotificationsView.vue`, `/notifications` route |
+| Clicking one marks it read; "Mark all as read" marks the rest; the count comes from the response, not a refetch | `NotificationsView.test.js` ("clicking an unread one ...", "\"Mark all as read\" ...", "following a link ...", "keeps the item unread ... when marking it read fails") | `NotificationsView.vue`, `stores/notifications.js`, `lib/notifications.js` |
+| (design) A notification links to what it's about only where that page already exists and the caller can reach it; otherwise plain text | `lib/notifications.test.js` (`notificationLink`), `NotificationsView.test.js` ("... no page is plain text, not a dead link", "no link when the caller cannot reach the page") | `lib/notifications.js::ENTITY_ROUTES` / `notificationLink` |
+| Every authenticated role reaches the notifications page | `lib/roles.test.js` ("notifications route (IS-69)"), `router/index.test.js` ("/notifications ...", drift guard) | `lib/roles.js` `ROUTE_ACCESS` entry `notifications` |
+| A bell in the nav shows the unread count to every signed-in role and opens the page | `components/AppNavBar.test.js` ("AppNavBar notifications bell (IS-69)") | `AppNavBar.vue` bell (GET `/notifications/unread-count`), `stores/notifications.js` |
 
 Each guard above was mutation-tested by hand once (broken, confirmed caught,
 restored):
@@ -606,9 +612,9 @@ restored):
 - **`list_notifications`' recipient scope.** Removed: three unit tests and
   two integration tests failed.
 
-Not covered, because not built: the bell and list in the web app (a
-separate frontend change), email/SMS, reminders, and the notifications no
-hook existed for (see `docs/open-questions.md`).
+Not covered, because not built: email/SMS, reminders, and the
+notifications no hook existed for (see `docs/open-questions.md`).
+
 
 ## Sprint 4 — User contact and preferences (IS-68)
 

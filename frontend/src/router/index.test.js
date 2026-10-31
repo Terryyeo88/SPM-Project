@@ -425,6 +425,36 @@ describe('router: authentication and role-based route guarding', () => {
     })
   })
 
+  describe('/notifications (IS-69, every authenticated role)', () => {
+    it.each([
+      'event_organizer',
+      'event_coordinator',
+      'event_coordinator_lead',
+      'venue_staff',
+      'technical_support_staff',
+      'attendee',
+      'safety_officer',
+    ])('%s reaches it', async (role) => {
+      mockSession(true)
+      mockMe(role)
+      await router.push('/notifications')
+      expect(router.currentRoute.value.name).toBe('notifications')
+    })
+
+    it('an unauthenticated visitor is sent to /login', async () => {
+      mockSession(false)
+      await router.push('/notifications')
+      expect(router.currentRoute.value.name).toBe('login')
+    })
+
+    it('a user with only an unrecognised role is redirected to /dashboard', async () => {
+      mockSession(true)
+      mockMe('some_future_role')
+      await router.push('/notifications')
+      expect(router.currentRoute.value.name).toBe('dashboard')
+    })
+  })
+
   // Deny-by-default drift guard. ROUTE_ACCESS is a hand-maintained table
   // that has to be kept in step with the route list; these fail loudly
   // (naming the route and the fix) the moment either side changes alone,
