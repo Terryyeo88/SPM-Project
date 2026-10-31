@@ -1754,8 +1754,8 @@ someone "is notified" called a `print()` placeholder. Built: table
 `public.notifications` (migration `20261027000000_notifications.sql`),
 `app/notifications/notification_service.py`, routes in
 `app/notifications/routes.py`, actions `notification.list` /
-`notification.mark_read` / `notification.mark_all_read`. Backend only; the
-bell and list in the web app are a separate change. The ticket's acceptance
+`notification.mark_read` / `notification.mark_all_read`, and the web app's
+notifications page (see "The notifications page" below). The ticket's acceptance
 criteria weren't in the repo, so the working criteria in
 `docs/traceability.md` are our reading. They and the calls below are flagged
 in docs/open-questions.md.
@@ -1866,6 +1866,33 @@ one (instead of Postgres's 500). Marking read is conditioned on
 `read_at IS NULL`, so a second mark keeps the first read time and isn't an
 error. Mutation-tested by hand: removing that condition, and separately the
 recipient scope on the list, each made the unit and integration tests fail.
+
+### The notifications page
+
+`/notifications` (`views/NotificationsView.vue`) lists the caller's own,
+newest first as the backend sends them, unread ones shaded and in bold, with
+"Mark all as read" and an empty state. Clicking an unread one marks it read.
+Every route returns the new unread count, so the page takes the count from
+the response and doesn't refetch. It hands the count to a small Pinia store
+(`stores/notifications.js`) so anything else showing it agrees.
+
+- **Open to every role.** Its `ROUTE_ACCESS` entry lists every role, like
+  `profile`, matching the backend's role-free `notification.*` rules. It is
+  not a nav link: `NAV_LINKS` can't show a count, and `navRoles()` hides
+  links from the dashboard-only roles.
+- **Links only to pages that exist.** `lib/notifications.js::ENTITY_ROUTES`
+  maps `event` to the event page and `safety_review` to the safety review.
+  A notification links there only if the caller's roles can reach that page,
+  since the router would only bounce them to the dashboard. Any other entity
+  type is plain text, and no route was added for anyone else's story.
+  Following a link also marks the notification read.
+- **A link can still lead to a deleted entity.** There's no foreign key (see
+  above), so the page it opens shows its own "not found".
+- **The bell** sits in `AppNavBar.vue` (Aaralyn's), beside the profile icon,
+  for every signed-in role. It fetches `GET /notifications/unread-count`
+  each time a page mounts the nav bar, and doesn't poll in between. It's its
+  own commit, pending Aaralyn's sign-off; without it the page still works,
+  reached by its URL.
 
 ### Out of scope
 

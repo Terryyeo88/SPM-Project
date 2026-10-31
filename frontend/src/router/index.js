@@ -7,6 +7,7 @@ import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListView from '../views/events/EventsListView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import NotificationsView from '../views/NotificationsView.vue'
 import EquipmentCalendarView from '../views/equipment/EquipmentCalendarView.vue'
 import EquipmentDetailView from '../views/equipment/EquipmentDetailView.vue'
 import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vue'
@@ -46,6 +47,13 @@ const routes = [
     name: 'profile',
     component: ProfileView,
     meta: { roles: _rolesByRouteName.get('profile') },
+  },
+  // Notifications (IS-69): every signed-in user's own.
+  {
+    path: '/notifications',
+    name: 'notifications',
+    component: NotificationsView,
+    meta: { roles: _rolesByRouteName.get('notifications') },
   },
   {
     path: '/events',
