@@ -1215,3 +1215,56 @@ Catalogue (IS-61)".
   one `notify(...)` call each): the organiser on cancellation (IS-39, see
   above), the coordinator on a new change request, and attendees promoted
   off a waiting list. Please confirm which are needed.
+
+## User contact and preferences (IS-68, 30 Oct)
+
+- **Justin: is this what you meant?** Your Attendee Registration code
+  already answers how the profile relates to registrations, so this asks
+  you to confirm, not to decide. IS-68 adds `phone`, `organisation`,
+  `notify_email` and `notify_sms` to profiles and to `GET /me`, which turns
+  on two pieces of your code as written:
+  1. `prefillFromProfile` (`frontend/src/lib/registrations.js`): a new
+     registration's phone, organisation and notification choices now
+     *start from* the profile. The attendee can still change them per
+     registration, and each registration stores its own.
+  2. `_db_profile_organisation` (`registration_service.py`): ticking
+     "include organisation" now copies the profile's organisation in.
+
+  So the profile preference is the default for new registrations: it
+  doesn't override them, and it isn't kept separate. With nothing saved
+  (every existing user), the form is exactly as before; that is tested.
+  Please confirm that's what you meant, or say if the preference should
+  instead stay separate or override.
+- **Nothing reads the communication preferences except that prefill.**
+  Notifications are in-app only (IS-69), so a profile's email/SMS
+  preference sends nothing until email or SMS delivery has an owner and a
+  ticket. Please confirm that's acceptable for now.
+- **`GET /me` has no `@require` decorator** (`backend/app/me/routes.py`).
+  It relies on authentication alone, and that hasn't changed. It now also
+  returns the caller's phone, organisation and preferences, still only
+  their own. Noticed during IS-68, and deliberately not fixed here, since
+  it predates this ticket. Please decide whether it should get a
+  `profile.view_own` action like every other route.
+- **Any signed-in user can read every profile's phone directly.** The
+  existing "authenticated read profiles" RLS policy lets any authenticated
+  user select every profile row through the publishable key, so it now
+  covers the new columns too. Flask itself only ever returns your own.
+  Narrowing the policy (to `id = auth.uid()`, or column privileges) changes
+  what other features may read about people, so it wasn't done here.
+  Pinned by a test so it can't change unnoticed. Please decide whether to
+  narrow it, and who owns that.
+- **Phone is optional on the profile.** The wireframe marks only
+  Organisation as optional. Making phone required would stop existing users
+  saving an organisation or a preference without also giving a phone. A
+  registration still requires one. Please confirm.
+- **Both preferences may be false on the profile.** A registration still
+  needs at least one; the register form then asks. Please confirm.
+- **Unmatched URLs answer 500, not 404, app-wide.** The catch-all
+  `@app.errorhandler(Exception)` in `app/__init__.py` also catches
+  werkzeug's NotFound and MethodNotAllowed. Found while testing that
+  `/me/profile/<id>` doesn't exist. This predates IS-68 and wasn't
+  changed. It refuses the request either way, but the status is wrong.
+- **The wireframe isn't in the repo.** The fields come from the ticket and
+  from `RegistrationForm.vue`'s comment on the same Edit Profile screen.
+  This also answers the Attendee Registration entry above ("Profiles don't
+  have phone or a contact preference yet").

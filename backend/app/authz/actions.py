@@ -17,7 +17,8 @@ Deliberately NOT here: anything about equipment REQUEST CREATION or
 RESERVATION (the "Record Equipment Request" and "Accept an equipment
 request" stories are not built -- whoever builds them should add their
 own actions the same way, sourced the same way), and no profile.view_*
-(GET /me needs no policy check at all; see app/me/routes.py).
+(GET /me needs no policy check at all; see app/me/routes.py). Editing
+your own profile does have one: PROFILE_EDIT_OWN (IS-68), below.
 """
 
 from __future__ import annotations
@@ -241,3 +242,12 @@ SAFETY_REVIEW_REQUEST_CHANGES = "safety_review.request_changes"
 NOTIFICATION_LIST = "notification.list"
 NOTIFICATION_MARK_READ = "notification.mark_read"
 NOTIFICATION_MARK_ALL_READ = "notification.mark_all_read"
+
+# -- profile (IS-68: User contact and preferences) -----------------------------
+# Source: IS-68, the Edit Profile wireframe's Phone Number, Organisation and
+# Communication Preferences -- a user keeps their own contact details.
+#
+#   profile.edit_own -- PATCH /me/profile, the caller's own profile. Role-free
+#       and resource-free: the route takes no id, so there is no other
+#       profile it could be pointed at (see rule_profile_edit_own).
+PROFILE_EDIT_OWN = "profile.edit_own"

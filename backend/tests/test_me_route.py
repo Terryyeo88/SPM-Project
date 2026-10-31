@@ -9,12 +9,18 @@ covered through a throwaway `/_test/whoami` route elsewhere.
 from __future__ import annotations
 
 import app.auth.context as context_module
+import app.me.routes as me_routes
+
+# IS-68: GET /me also returns these, read by app.me.profile_service --
+# stubbed here; test_profile_routes.py covers them against the fake.
+UNSET_CONTACT = {"phone": None, "organisation": None, "notify_email": None, "notify_sms": None}
 
 
 def _mock_profile(monkeypatch, name, email, roles):
     monkeypatch.setattr(
         context_module, "_load_profile_with_roles", lambda user_id: (name, email, frozenset(roles))
     )
+    monkeypatch.setattr(me_routes, "get_contact", lambda user_id: dict(UNSET_CONTACT))
     monkeypatch.setattr(context_module, "_get_last_active", lambda session_id: None)
     monkeypatch.setattr(context_module, "_touch_session_activity", lambda *a, **k: None)
 
@@ -32,6 +38,7 @@ def test_me_returns_id_email_name_roles_for_authenticated_user(client, signing_k
         "email": "alice@example.com",
         "name": "Alice Tan",
         "roles": ["event_coordinator"],
+        **UNSET_CONTACT,
     }
 
 
