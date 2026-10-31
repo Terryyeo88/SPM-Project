@@ -11,10 +11,11 @@ every other route (see app/auth/context.py) -- nothing here opts out of
 that with @public. (That GET /me has no @require at all is logged in
 docs/open-questions.md, IS-68; deliberately not changed by IS-68.)
 
-PATCH /me/profile -- the caller updates their OWN contact details and
-preferences (IS-68). The profile is the token's user, never an id from
-the URL or body: there is no id to give, and a body naming "id" or
-"email" is a 400. See app/me/profile_service.py and rule_profile_edit_own.
+PATCH /me/profile -- the caller updates their OWN phone and communication
+preferences (IS-68); organisation is read-only. The profile is the token's
+user, never an id from the URL or body: there is no id to give, and a body
+naming "id", "email" or "organisation" is a 400. See
+app/me/profile_service.py and rule_profile_edit_own.
 """
 
 from flask import Blueprint, jsonify, request

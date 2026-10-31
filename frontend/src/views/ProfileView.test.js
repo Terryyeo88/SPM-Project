@@ -10,13 +10,15 @@ vi.mock('../components/AppNavBar.vue', () => ({ default: { template: '<nav />' }
 
 import ProfileView from './ProfileView.vue'
 import { useAuthStore } from '../stores/auth'
+import { AT_LEAST_ONE_MESSAGE, PHONE_FORMAT_MESSAGE, SMS_NEEDS_PHONE_MESSAGE } from '../lib/profile'
 
-const UNSET = {
+// GET /me for a never-edited profile: the column defaults.
+const DEFAULTS = {
   id: 'u1', name: 'Ethan Koh', email: 'ethan@example.com', roles: ['attendee'],
-  phone: null, organisation: null, notify_email: null, notify_sms: null,
+  phone: null, organisation: null, notify_email: true, notify_sms: false,
 }
 
-async function mountView(profile = UNSET) {
+async function mountView(profile = DEFAULTS) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const auth = useAuthStore()
@@ -39,9 +41,9 @@ async function mountView(profile = UNSET) {
 }
 
 const phone = (wrapper) => wrapper.find('#profile-phone')
-const organisation = (wrapper) => wrapper.find('#profile-organisation')
 const email = (wrapper) => wrapper.find('#profile-notify-email')
 const sms = (wrapper) => wrapper.find('#profile-notify-sms')
+const fieldErrors = (wrapper) => wrapper.findAll('.field-error').map((error) => error.text())
 
 async function save(wrapper) {
   await wrapper.find('form.contact').trigger('submit')
@@ -52,111 +54,135 @@ describe('ProfileView contact details and preferences (IS-68)', () => {
   beforeEach(() => {
     // Like PATCH /me/profile: the four fields as saved, nothing else.
     apiPatch.mockReset().mockImplementation((path, body) => Promise.resolve({
-      phone: null, organisation: null, notify_email: null, notify_sms: null, ...body,
+      phone: null, organisation: null, notify_email: true, notify_sms: false, ...body,
     }))
   })
 
-  it('shows the three fields from the wireframe, with name, email and roles still read-only', async () => {
-    const { wrapper } = await mountView()
+  it('shows phone and preferences as editable; name, email, organisation and roles read-only', async () => {
+    const { wrapper } = await mountView({ ...DEFAULTS, organisation: 'SMU' })
 
-    expect(wrapper.find('label[for="profile-phone"]').text()).toBe('Phone Number')
-    expect(wrapper.find('label[for="profile-organisation"]').text()).toBe('Organisation (optional)')
+    expect(wrapper.find('label[for="profile-phone"]').text()).toBe('Phone Number (optional)')
+    expect(wrapper.find('.prefix').text()).toBe('+65')
     expect(wrapper.find('legend').text()).toBe('Communication Preferences')
     expect(wrapper.text()).toContain('Email notifications')
     expect(wrapper.text()).toContain('SMS notifications')
-    expect(wrapper.find('dl').text()).toContain('Ethan Koh')
-    expect(wrapper.find('dl').text()).toContain('ethan@example.com')
-    expect(wrapper.find('input#profile-name').exists()).toBe(false)
+    const readOnly = wrapper.find('dl').text()
+    expect(readOnly).toContain('Ethan Koh')
+    expect(readOnly).toContain('ethan@example.com')
+    expect(readOnly).toContain('SMU')
+    expect(wrapper.find('form.contact').findAll('input').map((input) => input.attributes('id')))
+      .toEqual(['profile-phone', 'profile-notify-email', 'profile-notify-sms'])
   })
 
-  it('starts blank, with the register form defaults, when nothing is saved', async () => {
+  it('shows "None" when there is no organisation', async () => {
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('dl').text()).toContain('OrganisationNone')
+  })
+
+  it('starts blank with email on, SMS off and locked, for a never-edited profile', async () => {
     const { wrapper } = await mountView()
 
     expect(phone(wrapper).element.value).toBe('')
-    expect(organisation(wrapper).element.value).toBe('')
     expect([email(wrapper).element.checked, sms(wrapper).element.checked]).toEqual([true, false])
+    expect(sms(wrapper).element.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Add a phone number to choose SMS.')
   })
 
-  it('starts from what the profile has saved', async () => {
-    const { wrapper } = await mountView({
-      ...UNSET, phone: '9123 4567', organisation: 'SMU', notify_email: false, notify_sms: true,
-    })
+  it('starts from what the profile has saved, showing the 8 digits after +65', async () => {
+    const { wrapper } = await mountView({ ...DEFAULTS, phone: '+6591234567', notify_email: false, notify_sms: true })
 
     expect(phone(wrapper).element.value).toBe('9123 4567')
-    expect(organisation(wrapper).element.value).toBe('SMU')
     expect([email(wrapper).element.checked, sms(wrapper).element.checked]).toEqual([false, true])
+    expect(sms(wrapper).element.disabled).toBe(false)
   })
 
-  it('saves all three to PATCH /me/profile and keeps the store in step', async () => {
+  it('unlocks SMS once a phone is typed', async () => {
+    const { wrapper } = await mountView()
+
+    await phone(wrapper).setValue('9123 4567')
+
+    expect(sms(wrapper).element.disabled).toBe(false)
+    expect(wrapper.text()).not.toContain('Add a phone number to choose SMS.')
+  })
+
+  it('saves phone and preferences to PATCH /me/profile and keeps the store in step', async () => {
     const { wrapper, auth } = await mountView()
 
-    await phone(wrapper).setValue('+65 9123 4567')
-    await organisation(wrapper).setValue('Singapore Management University')
+    await phone(wrapper).setValue('9123 4567')
     await email(wrapper).setValue(false)
     await sms(wrapper).setValue(true)
     await save(wrapper)
 
-    expect(apiPatch).toHaveBeenCalledWith('/me/profile', {
-      phone: '+65 9123 4567', organisation: 'Singapore Management University', notify_email: false, notify_sms: true,
-    })
+    expect(apiPatch).toHaveBeenCalledWith('/me/profile', { phone: '+6591234567', notify_email: false, notify_sms: true })
     expect(wrapper.find('[role="status"]').text()).toBe('Saved.')
-    expect(auth.profile).toMatchObject({
-      id: 'u1', name: 'Ethan Koh', phone: '+65 9123 4567', organisation: 'Singapore Management University',
-      notify_email: false, notify_sms: true,
-    })
+    expect(auth.profile).toMatchObject({ id: 'u1', name: 'Ethan Koh', phone: '+6591234567', notify_sms: true })
   })
 
-  it('saves with the optional ones blank', async () => {
+  it('saves with the phone left blank', async () => {
     const { wrapper } = await mountView()
 
     await save(wrapper)
 
-    // Nothing typed and no preference touched: phone and organisation go
-    // as null, and never-chosen preferences stay unsent (still null).
-    expect(apiPatch).toHaveBeenCalledWith('/me/profile', { phone: null, organisation: null })
-    expect(wrapper.find('[role="status"]').text()).toBe('Saved.')
+    expect(apiPatch).toHaveBeenCalledWith('/me/profile', { phone: null, notify_email: true, notify_sms: false })
   })
 
-  it('clearing saved values sends them as null', async () => {
-    const { wrapper, auth } = await mountView({
-      ...UNSET, phone: '9123 4567', organisation: 'SMU', notify_email: true, notify_sms: false,
-    })
+  it('clearing a saved phone sends null', async () => {
+    const { wrapper, auth } = await mountView({ ...DEFAULTS, phone: '+6591234567' })
 
     await phone(wrapper).setValue('   ')
-    await organisation(wrapper).setValue('')
     await save(wrapper)
 
-    expect(apiPatch).toHaveBeenCalledWith('/me/profile', {
-      phone: null, organisation: null, notify_email: true, notify_sms: false,
-    })
+    expect(apiPatch).toHaveBeenCalledWith('/me/profile', { phone: null, notify_email: true, notify_sms: false })
     expect(auth.profile.phone).toBeNull()
-    expect(auth.profile.organisation).toBeNull()
   })
 
-  it('a phone that is not a phone number is shown as an error and not saved', async () => {
+  it.each(['9123 456', 'call me'])('a phone of "%s" is shown as an error and not saved', async (typed) => {
     const { wrapper } = await mountView()
 
-    await phone(wrapper).setValue('call me')
+    await phone(wrapper).setValue(typed)
     await save(wrapper)
 
     expect(apiPatch).not.toHaveBeenCalled()
-    expect(wrapper.find('.field-error').text()).toMatch('valid phone number')
+    expect(fieldErrors(wrapper)).toContain(PHONE_FORMAT_MESSAGE)
   })
 
-  it('never sends id or email', async () => {
+  it('unticking both preferences is shown as an error and not saved', async () => {
     const { wrapper } = await mountView()
+
+    await email(wrapper).setValue(false)
+    await save(wrapper)
+
+    expect(apiPatch).not.toHaveBeenCalled()
+    expect(fieldErrors(wrapper)).toContain(AT_LEAST_ONE_MESSAGE)
+  })
+
+  it('clearing the phone while SMS is on is an error until SMS is unticked', async () => {
+    const { wrapper } = await mountView({ ...DEFAULTS, phone: '+6591234567', notify_sms: true })
+
+    await phone(wrapper).setValue('')
+    expect(sms(wrapper).element.disabled).toBe(false)
+    await save(wrapper)
+    expect(apiPatch).not.toHaveBeenCalled()
+    expect(fieldErrors(wrapper)).toContain(SMS_NEEDS_PHONE_MESSAGE)
+
+    await sms(wrapper).setValue(false)
+    await save(wrapper)
+    expect(apiPatch).toHaveBeenCalledWith('/me/profile', { phone: null, notify_email: true, notify_sms: false })
+  })
+
+  it('never sends id, email or organisation', async () => {
+    const { wrapper } = await mountView({ ...DEFAULTS, organisation: 'SMU' })
 
     await phone(wrapper).setValue('9123 4567')
     await sms(wrapper).setValue(true)
     await save(wrapper)
 
-    const body = apiPatch.mock.calls[0][1]
-    expect(body).not.toHaveProperty('id')
-    expect(body).not.toHaveProperty('email')
+    expect(Object.keys(apiPatch.mock.calls[0][1]).sort()).toEqual(['notify_email', 'notify_sms', 'phone'])
   })
 
   it('shows the error when saving fails, and keeps what was typed', async () => {
-    apiPatch.mockRejectedValue(new Error('Enter a valid phone number, e.g. 9123 4567 or +65 9123 4567.'))
+    apiPatch.mockRejectedValue(new Error('Add a phone number to turn on SMS notifications.'))
     const { wrapper, auth } = await mountView()
 
     await phone(wrapper).setValue('9123 4567')
@@ -172,7 +198,7 @@ describe('ProfileView contact details and preferences (IS-68)', () => {
     const { wrapper, auth } = await mountView(null)
     expect(wrapper.find('form.contact').exists()).toBe(false)
 
-    auth.profile = { ...UNSET, phone: '8000 0000' }
+    auth.profile = { ...DEFAULTS, phone: '+6580000000' }
     await flushPromises()
 
     expect(phone(wrapper).element.value).toBe('8000 0000')
