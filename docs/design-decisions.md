@@ -2058,3 +2058,29 @@ assertions catch those. Restored: 69 passed.
   it wasn't changed. Logged in docs/open-questions.md.
 - **Editing name or email.**
 - **Anything that sends email or SMS.**
+
+### IS-75 follow-up: the agreed acceptance criteria (2026-10-31)
+
+Justin answered the IS-68 open questions; IS-75 (`fix/IS-75-profile-contact-rules`)
+brings the code in line. This supersedes "nullable with no backfill" and
+"both preferences may be false" above.
+
+- **Migration `20261031000000_profile_contact_rules.sql`.** Existing phones
+  are normalised to `+65` + 8 digits (spaces/hyphens removed, `+65` added
+  to a bare 8 digits); anything unfixable is cleared. NULL preferences
+  become email on / SMS off, SMS is turned off where there is no phone,
+  and email is turned on where both are off. The preferences then become
+  `NOT NULL` with defaults, and three checks are added:
+  `profiles_phone_sg`, `profiles_notify_at_least_one`,
+  `profiles_sms_needs_phone`. Re-runnable.
+- **`profile_service` checks the profile after the change, not the
+  request.** It reads the caller's row, merges the partial update and
+  checks the rules on the result, so `{"phone": null}` is refused while
+  SMS is on. Shape errors are refused before any read; nothing is written
+  if any check fails.
+- **Organisation is read-only.** Added to the refused fields (400,
+  `profile_field_not_editable`), still returned by `GET /me`.
+- **Frontend.** `lib/profile.js` sends phone and both preferences every
+  time (`hasSavedPreferences` is gone: there is no "never chosen" state
+  any more). The SMS box is disabled only while unticked with no phone,
+  so a user who clears their phone can still untick SMS.

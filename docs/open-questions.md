@@ -1268,3 +1268,24 @@ Catalogue (IS-61)".
   from `RegistrationForm.vue`'s comment on the same Edit Profile screen.
   This also answers the Attendee Registration entry above ("Profiles don't
   have phone or a contact preference yet").
+
+### Answered by Justin (31 Oct) -- built as IS-75 (fix/IS-75-profile-contact-rules)
+
+- **Prefill and organisation copy: confirmed as intended.** The profile is
+  the starting value for a new registration; the attendee can still change
+  it, and each registration keeps its own copy. Changing the profile later
+  doesn't change registrations already made.
+- **Phone is optional, and +65 followed by 8 digits when given.** Stored as
+  `+6591234567`; the profile page shows `+65` as a fixed prefix.
+- **Both preferences off is NOT allowed.** Email is on by default and at
+  least one must stay on (supersedes "Both preferences may be false").
+- **SMS needs a phone number.** The SMS box is disabled until a phone is
+  typed; saving SMS with no phone (or clearing the phone while SMS is on)
+  is refused with a message.
+- **Organisation is read-only.** Week 4 clarifications: organisers and
+  organisations are set up outside the system, so users don't type their
+  own. Shown on the profile, refused by `PATCH /me/profile`, still copied
+  into registrations.
+- **Communication preferences sending nothing yet: accepted for now.**
+- Still open: `GET /me` without `@require`, the profiles read policy, and
+  unmatched URLs answering 500.

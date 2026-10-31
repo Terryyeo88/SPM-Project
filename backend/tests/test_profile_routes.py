@@ -18,8 +18,8 @@ from tests.fake_supabase import FakeSupabase
 ME = "11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
 
-UNSET = {"phone": None, "organisation": None, "notify_email": None, "notify_sms": None}
-OTHERS_CONTACT = {"phone": "+65 8000 0000", "organisation": "Other Org", "notify_email": False, "notify_sms": True}
+DEFAULTS = {"phone": None, "organisation": None, "notify_email": True, "notify_sms": False}
+OTHERS_CONTACT = {"phone": "+6580000000", "organisation": "Other Org", "notify_email": False, "notify_sms": True}
 
 
 def _mock_profile(monkeypatch, roles=("attendee",)):
@@ -40,7 +40,7 @@ def _auth(signing_key, user_id=ME):
 def fake(monkeypatch):
     db = FakeSupabase()
     db.tables["profiles"] = [
-        {"id": ME, "name": "Ethan Koh", "email": "ethan@example.com", **UNSET},
+        {"id": ME, "name": "Ethan Koh", "email": "ethan@example.com", **DEFAULTS},
         {"id": OTHER, "name": "Other Person", "email": "other@example.com", **OTHERS_CONTACT},
     ]
     monkeypatch.setattr(service, "supabase", db)
@@ -55,25 +55,28 @@ def _contact(fake, user_id):
 # -- GET /me -----------------------------------------------------------------
 
 
-def test_get_me_returns_the_four_fields_as_null_when_never_given(client, signing_key, monkeypatch, fake):
+def test_get_me_returns_the_defaults_for_a_never_edited_profile(client, signing_key, monkeypatch, fake):
     _mock_profile(monkeypatch)
 
     response = client.get("/me", headers=_auth(signing_key))
 
     assert response.status_code == 200
     assert response.get_json() == {
-        "id": ME, "email": "ethan@example.com", "name": "Ethan Koh", "roles": ["attendee"], **UNSET,
+        "id": ME, "email": "ethan@example.com", "name": "Ethan Koh", "roles": ["attendee"], **DEFAULTS,
     }
 
 
 def test_get_me_reads_back_what_was_saved(client, signing_key, monkeypatch, fake):
     _mock_profile(monkeypatch)
-    saved = {"phone": "9123 4567", "organisation": "SMU", "notify_email": True, "notify_sms": False}
-    client.patch("/me/profile", json=saved, headers=_auth(signing_key))
+    client.patch(
+        "/me/profile", json={"phone": "+65 9123 4567", "notify_sms": True}, headers=_auth(signing_key)
+    )
 
     body = client.get("/me", headers=_auth(signing_key)).get_json()
 
-    assert {field: body[field] for field in service.CONTACT_FIELDS} == saved
+    assert {field: body[field] for field in service.CONTACT_FIELDS} == {
+        **DEFAULTS, "phone": "+6591234567", "notify_sms": True,
+    }
 
 
 def test_get_me_never_shows_another_users_contact_details(client, signing_key, monkeypatch, fake):
@@ -81,7 +84,7 @@ def test_get_me_never_shows_another_users_contact_details(client, signing_key, m
 
     body = client.get("/me", headers=_auth(signing_key)).get_json()
 
-    assert {field: body[field] for field in service.CONTACT_FIELDS} == UNSET
+    assert {field: body[field] for field in service.CONTACT_FIELDS} == DEFAULTS
     other = client.get("/me", headers=_auth(signing_key, OTHER)).get_json()
     assert {field: other[field] for field in service.CONTACT_FIELDS} == OTHERS_CONTACT
 
@@ -94,39 +97,37 @@ def test_get_me_never_shows_another_users_contact_details(client, signing_key, m
     [["attendee"], ["event_organizer"], ["event_coordinator"], ["event_coordinator_lead"], ["venue_staff"],
      ["technical_support_staff"], ["safety_officer"], []],
 )
-def test_every_role_saves_all_three_to_their_own_profile(client, signing_key, monkeypatch, fake, roles):
+def test_every_role_saves_phone_and_preferences_to_their_own_profile(client, signing_key, monkeypatch, fake, roles):
     _mock_profile(monkeypatch, roles)
-    payload = {"phone": "+65 9123 4567", "organisation": "SMU", "notify_email": False, "notify_sms": True}
+    payload = {"phone": "+65 9123 4567", "notify_email": False, "notify_sms": True}
 
     response = client.patch("/me/profile", json=payload, headers=_auth(signing_key))
 
-    assert (response.status_code, response.get_json()) == (200, payload)
-    assert _contact(fake, ME) == payload
+    expected = {"phone": "+6591234567", "organisation": None, "notify_email": False, "notify_sms": True}
+    assert (response.status_code, response.get_json()) == (200, expected)
+    assert _contact(fake, ME) == expected
     assert _contact(fake, OTHER) == OTHERS_CONTACT
 
 
-def test_saving_with_the_optional_ones_blank(client, signing_key, monkeypatch, fake):
+def test_saving_with_the_phone_blank(client, signing_key, monkeypatch, fake):
     _mock_profile(monkeypatch)
 
-    response = client.patch(
-        "/me/profile",
-        json={"phone": "", "organisation": "", "notify_email": None, "notify_sms": None},
-        headers=_auth(signing_key),
-    )
+    response = client.patch("/me/profile", json={"phone": "", "notify_email": True}, headers=_auth(signing_key))
 
-    assert (response.status_code, response.get_json()) == (200, UNSET)
+    assert (response.status_code, response.get_json()) == (200, DEFAULTS)
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"id": OTHER, "phone": "9123 4567"},
-        {"id": ME, "phone": "9123 4567"},
+        {"id": OTHER, "phone": "+65 9123 4567"},
+        {"id": ME, "phone": "+65 9123 4567"},
         {"email": "other@example.com"},
+        {"organisation": "Hijacked"},
         {"id": OTHER, "email": "other@example.com", "organisation": "Hijacked"},
     ],
 )
-def test_a_body_naming_id_or_email_is_a_400_and_writes_nothing(client, signing_key, monkeypatch, fake, payload):
+def test_a_body_naming_a_read_only_field_is_a_400_and_writes_nothing(client, signing_key, monkeypatch, fake, payload):
     _mock_profile(monkeypatch)
 
     response = client.patch("/me/profile", json=payload, headers=_auth(signing_key))
@@ -134,7 +135,26 @@ def test_a_body_naming_id_or_email_is_a_400_and_writes_nothing(client, signing_k
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "profile_field_not_editable"
     assert _contact(fake, OTHER) == OTHERS_CONTACT
-    assert _contact(fake, ME) == UNSET
+    assert _contact(fake, ME) == DEFAULTS
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"notify_email": False, "notify_sms": False}, service.AT_LEAST_ONE_MESSAGE),
+        ({"notify_sms": True}, service.SMS_NEEDS_PHONE_MESSAGE),
+        ({"phone": "91234567"}, service.PHONE_FORMAT_MESSAGE),
+    ],
+)
+def test_rule_breaking_updates_are_400s_with_a_clear_message(client, signing_key, monkeypatch, fake, payload, message):
+    _mock_profile(monkeypatch)
+
+    response = client.patch("/me/profile", json=payload, headers=_auth(signing_key))
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert response.get_json()["error"]["message"] == message
+    assert _contact(fake, ME) == DEFAULTS
 
 
 @pytest.mark.parametrize("method", ["get", "patch", "put", "post", "delete"])
@@ -147,7 +167,7 @@ def test_there_is_no_route_that_takes_another_users_id(client, signing_key, monk
     _mock_profile(monkeypatch)
 
     response = getattr(client, method)(
-        f"/me/profile/{OTHER}", json={"phone": "9123 4567"}, headers=_auth(signing_key)
+        f"/me/profile/{OTHER}", json={"phone": "+65 9123 4567"}, headers=_auth(signing_key)
     )
 
     assert response.status_code >= 400
@@ -158,20 +178,11 @@ def test_there_is_no_route_that_takes_another_users_id(client, signing_key, monk
 def test_two_users_each_write_only_their_own(client, signing_key, monkeypatch, fake):
     _mock_profile(monkeypatch)
 
-    client.patch("/me/profile", json={"phone": "9123 4567"}, headers=_auth(signing_key, ME))
-    client.patch("/me/profile", json={"organisation": "Changed"}, headers=_auth(signing_key, OTHER))
+    client.patch("/me/profile", json={"phone": "+65 9123 4567"}, headers=_auth(signing_key, ME))
+    client.patch("/me/profile", json={"notify_email": True}, headers=_auth(signing_key, OTHER))
 
-    assert _contact(fake, ME) == {**UNSET, "phone": "9123 4567"}
-    assert _contact(fake, OTHER) == {**OTHERS_CONTACT, "organisation": "Changed"}
-
-
-def test_an_invalid_phone_is_a_400(client, signing_key, monkeypatch, fake):
-    _mock_profile(monkeypatch)
-
-    response = client.patch("/me/profile", json={"phone": "abc"}, headers=_auth(signing_key))
-
-    assert response.status_code == 400
-    assert response.get_json()["error"]["code"] == "validation_error"
+    assert _contact(fake, ME) == {**DEFAULTS, "phone": "+6591234567"}
+    assert _contact(fake, OTHER) == {**OTHERS_CONTACT, "notify_email": True}
 
 
 def test_a_body_that_is_not_json_is_a_400(client, signing_key, monkeypatch, fake):
@@ -180,11 +191,11 @@ def test_a_body_that_is_not_json_is_a_400(client, signing_key, monkeypatch, fake
     response = client.patch("/me/profile", data="phone=9123", headers=_auth(signing_key))
 
     assert response.status_code == 400
-    assert _contact(fake, ME) == UNSET
+    assert _contact(fake, ME) == DEFAULTS
 
 
 def test_patch_without_a_token_is_a_401(client, fake):
-    response = client.patch("/me/profile", json={"phone": "9123 4567"})
+    response = client.patch("/me/profile", json={"phone": "+65 9123 4567"})
 
     assert response.status_code == 401
-    assert _contact(fake, ME) == UNSET
+    assert _contact(fake, ME) == DEFAULTS

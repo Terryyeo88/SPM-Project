@@ -1,71 +1,89 @@
 /**
  * Pure helpers behind the profile page's contact details and
- * communication preferences (IS-68), after the Edit Profile wireframe:
- * Phone Number, Organisation (optional), Communication Preferences
- * (Email notifications / SMS notifications).
+ * communication preferences (IS-68).
+ *
+ * Agreed acceptance criteria (31 Oct):
+ *   - only phone and the two preferences are editable; name, email and
+ *     organisation are shown read-only
+ *   - phone is optional; when given it is +65 followed by 8 digits
+ *   - email is selected by default and at least one preference stays on
+ *   - SMS can only be selected when there is a phone number
  *
  * The values come from GET /me (auth.profile) and are saved with
  * PATCH /me/profile -- the caller's own profile, never one named by id.
- * Each is null until given; blank text is sent as null.
- *
- * The two preferences start from the same values the register form
- * starts from (lib/registrations.js prefillFromProfile), so the profile
- * page shows what a new registration will default to. While the profile
- * has never saved a preference they stay null: they are only sent once
- * the user changes one (see profilePayload).
+ * The page shows "+65" as a fixed prefix and the user types the 8 digits;
+ * the backend stores "+6591234567". The backend checks every rule here
+ * again (app/me/profile_service.py), so these only give earlier feedback.
  */
 import { apiPatch } from './api'
-import { phoneError, prefillFromProfile } from './registrations'
 
-/** Same limit as backend profile_service.ORGANISATION_MAX_LENGTH. */
-export const ORGANISATION_MAX_LENGTH = 200
+export const SG_PREFIX = '+65'
 
-/** The form's starting values from the signed-in user's profile. */
+// The two preference messages match the backend's word for word. The phone
+// message is worded for the input beside the fixed "+65".
+export const PHONE_FORMAT_MESSAGE = 'Enter the 8 digits after +65, e.g. 9123 4567.'
+export const AT_LEAST_ONE_MESSAGE = 'Choose at least one way to be contacted: email or SMS.'
+export const SMS_NEEDS_PHONE_MESSAGE = 'Add a phone number to turn on SMS notifications.'
+
+const LOCAL_DIGITS = /^[0-9]{8}$/
+
+/** "9123 4567" / "9123-4567" -> "91234567". */
+function digitsOnly(value) {
+  return (value ?? '').replace(/[\s-]/g, '')
+}
+
+/** "+6591234567" (as stored) -> "9123 4567" for the input beside "+65". */
+export function localPart(phone) {
+  const digits = digitsOnly(phone)
+  const local = digits.startsWith(SG_PREFIX) ? digits.slice(SG_PREFIX.length) : digits
+  return LOCAL_DIGITS.test(local) ? `${local.slice(0, 4)} ${local.slice(4)}` : local
+}
+
+/** Is a phone number filled in on the form (valid or not)? */
+export function hasPhone(form) {
+  return digitsOnly(form.phone) !== ''
+}
+
+/** The form's starting values from the signed-in user's profile. A
+ * profile that has never been edited has the column defaults (email on,
+ * SMS off); a missing value falls back to the same. */
 export function profileForm(profile) {
-  const prefill = prefillFromProfile(profile)
   return {
-    phone: profile?.phone ?? '',
-    organisation: profile?.organisation ?? '',
-    notify_email: prefill.notify_email,
-    notify_sms: prefill.notify_sms,
+    phone: localPart(profile?.phone),
+    notify_email: typeof profile?.notify_email === 'boolean' ? profile.notify_email : true,
+    notify_sms: typeof profile?.notify_sms === 'boolean' ? profile.notify_sms : false,
   }
 }
 
-/** Has this profile ever saved a communication preference? */
-export function hasSavedPreferences(profile) {
-  return typeof profile?.notify_email === 'boolean' || typeof profile?.notify_sms === 'boolean'
+/** The PATCH /me/profile body. Always all three; a blank phone is null,
+ * so clearing it works. Never id, email or organisation. */
+export function profilePayload(form) {
+  const digits = digitsOnly(form.phone)
+  return {
+    phone: digits ? `${SG_PREFIX}${digits}` : null,
+    notify_email: Boolean(form.notify_email),
+    notify_sms: Boolean(form.notify_sms),
+  }
 }
 
-/**
- * The PATCH /me/profile body. Phone and organisation are always sent
- * (blank -> null, so clearing one works). The preferences are sent when
- * the profile already has them, or when the user changed one -- so saving
- * just a phone number doesn't turn "never chosen" into a choice.
- */
-export function profilePayload(form, profile) {
-  const payload = {
-    phone: form.phone.trim() || null,
-    organisation: form.organisation.trim() || null,
-  }
-  const start = profileForm(profile)
-  const changed = form.notify_email !== start.notify_email || form.notify_sms !== start.notify_sms
-  if (hasSavedPreferences(profile) || changed) {
-    payload.notify_email = Boolean(form.notify_email)
-    payload.notify_sms = Boolean(form.notify_sms)
-  }
-  return payload
-}
-
-/** Error for the phone field, or ''. Blank is fine: it's optional here. */
+/** Error for the phone field, or ''. Blank is fine: it's optional. */
 export function profilePhoneError(phone) {
-  return (phone ?? '').trim() ? phoneError(phone) : ''
+  const digits = digitsOnly(phone)
+  return !digits || LOCAL_DIGITS.test(digits) ? '' : PHONE_FORMAT_MESSAGE
 }
 
-/** Error for the organisation field, or ''. */
-export function organisationError(organisation) {
-  return (organisation ?? '').trim().length > ORGANISATION_MAX_LENGTH
-    ? `Organisation can be at most ${ORGANISATION_MAX_LENGTH} characters.`
-    : ''
+/** Error for the communication preferences, or ''. */
+export function preferencesError(form) {
+  if (!form.notify_email && !form.notify_sms) return AT_LEAST_ONE_MESSAGE
+  if (form.notify_sms && !hasPhone(form)) return SMS_NEEDS_PHONE_MESSAGE
+  return ''
+}
+
+/** Whether the SMS checkbox is disabled: only while it is unticked and
+ * there is no phone. Once ticked it stays usable, so a user who clears
+ * the phone can still untick SMS (the save is refused until they do). */
+export function smsDisabled(form) {
+  return !form.notify_sms && !hasPhone(form)
 }
 
 /** Saves the caller's own profile; resolves to the four fields as saved. */
