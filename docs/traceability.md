@@ -654,3 +654,38 @@ confirmed caught, restored), against a freshly reset local database:
 Pinned as an open question, not a guarantee: any signed-in user can read
 every profile directly through the existing RLS policy
 (`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
+
+
+## Sprint 4 — Notification (Attendees) (IS-76, Justin)
+
+Unit: `test_notification_attendees.py` (who, what, when),
+`test_notification_hook_attendees.py` (which actions trigger which hook).
+Integration: `test_notification_attendees_integration.py`.
+Frontend: `lib/notifications.test.js`. Design: `docs/design-decisions.md`
+(IS-76). "Relevant event details" = event name, session date and time,
+venue.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| AC1 Registered with a place: a confirmation notice | `test_notification_attendees.py::test_ac1_a_confirmed_registration_is_confirmed_to_the_attendee_with_a_link`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[confirmed]`, `::test_a_refused_registration_triggers_nothing[*]` | `notification_service.py::registration_recorded`, `registration_service.py::register` / `_notify_registered` |
+| AC2 Session full: a waiting-list notice with their position | `test_notification_attendees.py::test_ac2_a_waitlisted_registration_says_so_with_the_place_in_the_queue`, `::test_ac2_without_a_known_place_the_waitlist_notice_still_goes`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[waitlisted]` | `notification_service.py::registration_recorded` / `_waitlist_position` |
+| AC3 Moved up from the waiting list: told they're now confirmed | `test_notification_attendees.py::test_ac3_ac4_the_withdrawer_and_the_attendee_moved_up_are_both_told`, `::test_ac3_a_promoted_registration_that_no_longer_exists_tells_only_the_withdrawer`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[r2]` | `notification_service.py::registration_withdrawn`, `registration_service.py::withdraw` (passes `promoted_registration_id` on) |
+| AC4 Own withdrawal confirmed | `test_notification_attendees.py::test_ac3_ac4_*`, `::test_ac4_with_nobody_moved_up_only_the_withdrawer_is_told`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[*]`, `::test_a_refused_withdrawal_triggers_nothing[*]` | `notification_service.py::registration_withdrawn` |
+| AC5 Relevant details changed: one notice, with a link, once confirmed again | `test_notification_attendees.py::test_ac5_a_date_or_time_change_is_told_once_reconfirmed[*]`, `::test_ac5_a_name_change_counts_for_every_session_wherever_it_was_logged`, `::test_ac5_a_new_venue_is_a_relevant_change`, `::test_ac5_dropping_one_of_several_venues_is_a_relevant_change`, `::test_a_deleted_venue_is_still_told_apart_by_its_kept_name`, `test_notification_hook_attendees.py::test_confirming_triggers_the_reconfirmed_hook`, `::test_a_refused_confirmation_triggers_nothing` | `notification_service.py::event_reconfirmed` / `_details_changed_since` / `_venue_changed_since`, `routes.py::confirm_event` / `_notify_attendees_reconfirmed` |
+| AC6 Changed then cancelled: only the cancellation | `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]` | `routes.py::cancel_event` (the details notice only ever comes from `confirm_event`) |
+| AC7 Nothing relevant changed: no notice | `test_notification_attendees.py::test_the_first_confirmation_tells_nobody`, `::test_ac7_no_relevant_change_means_no_notice[*]`, `::test_ac7_a_change_from_before_the_last_confirmation_is_old_news`, `::test_ac7_a_change_the_organiser_only_asked_for_changed_nothing`, `::test_ac7_rebooking_the_same_venue_is_no_change`, `::test_an_organiser_who_is_also_the_coordinator_makes_changes_that_count` | `notification_service.py::_details_changed_since` / `_venue_changed_since` |
+| AC8 Cancelled: registered and waitlisted attendees told | `test_notification_attendees.py::test_ac8_ac9_ac10_cancelling_tells_only_that_sessions_attendees`, `::test_ac8_the_cancellation_has_no_link_and_no_reason`, `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]`, `::test_a_refused_cancellation_triggers_nothing` | `notification_service.py::event_cancelled`, `routes.py::cancel_event` / `_notify_attendees_cancelled` |
+| AC9 Only that session's attendees | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_ac9_another_sessions_date_change_is_not_this_sessions_change` | `_attendee_ids` scoped to one `event_id`; per-session date check |
+| AC10 Not registered or waitlisted: nothing | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_cancelling_a_session_nobody_registered_for_writes_nothing` | `_attendee_ids` (status `confirmed` / `waitlisted` only) |
+| AC11 Names the event and session; in-app; links to the attendee's page | `test_notification_attendees.py::test_the_session_is_named_by_the_event_and_its_start[*]`, `::test_a_session_without_a_name_still_reads`, `lib/notifications.test.js` ("links an attendee's session notification ...", "is null when the caller cannot reach that page ...", "only ever points at routes ...") | `notification_service.py::session_label`, `ENTITY_ATTENDEE_EVENT`, `lib/notifications.js::ENTITY_ROUTES.attendee_event` |
+| (design) A failed notification never fails the action | `test_notification_attendees.py::test_a_failed_attendee_notification_is_logged_and_swallowed[*]` | `_best_effort` |
+| (design) Completing an event tells attendees nothing | `test_notification_hook_attendees.py::test_completing_tells_attendees_nothing` | `routes.py::complete_event` (no hook) |
+
+Integration (`test_notification_attendees_integration.py`, local stack):
+the real register/withdraw functions notify confirmed, waitlisted (with
+place) and moved-up attendees; cancellation reaches only that session's
+current attendees, with no link; a time change is told on reconfirmation
+through real `transition()` history; an irrelevant change or an organiser's
+request tells nobody; a venue swap is told and rebooking the same venue is
+not, against real `venue_bookings` / `venue_booking_status_log`.
+

@@ -242,11 +242,12 @@ decisions worth double-checking.
 - **A freed place goes straight to the next person on the waiting list.**
   Week 2 says "eligible attendees are notified when a slot opens up to
   apply", which could mean they're offered the place rather than given it.
-  With no notifications yet, we move them up automatically. Confirm.
+  We move them up automatically, and since IS-76 they're notified that
+  their registration is now confirmed. Confirm.
 
-- **Not built yet:** notifications (Notification story), editing a
-  registration after submitting it, and organiser/coordinator views of who
-  registered.
+- **Not built yet:** editing a registration after submitting it, and
+  organiser/coordinator views of who registered. (Attendee notifications:
+  IS-76.)
 
 - **Organiser "discretion" and manual closing.** Week 4 says organisers have
   discretion over registration and close it manually. Here the window the
@@ -1289,3 +1290,24 @@ Catalogue (IS-61)".
 - **Communication preferences sending nothing yet: accepted for now.**
 - Still open: `GET /me` without `@require`, the profiles read policy, and
   unmatched URLs answering 500.
+
+
+## Notification (Attendees) (IS-76, Justin, 1 Nov)
+
+Decided and built; worth confirming with the customer:
+
+- **Details changes are told when the session is confirmed again, not at
+  each edit.** The story says "when relevant event details are changed".
+  A change to a confirmed session sends it back to planning, and the
+  change isn't final until venue, equipment and the Safety Officer have
+  signed off again, so attendees hear once, at reconfirmation. If it's
+  cancelled instead, they hear only about the cancellation. Confirm that
+  no early "this event is being updated" notice is wanted.
+- **"Relevant" is the name, the session's date and time, and its venue.**
+  Equipment, description, attendance and the rest don't notify attendees.
+- **The cancellation notice gives no reason and no link.** The reason is
+  internal planning information, and a cancelled session's attendee page
+  can't be opened any more.
+- **In-app only.** The email/SMS preferences collected at registration and
+  on the profile (IS-68) are stored but not used to send anything yet.
+
