@@ -27,12 +27,14 @@ export const markAllNotificationsRead = () => apiPost('/notifications/read-all',
  * already have a page. Anything else (or a type added to the backend later)
  * is shown as plain text rather than a dead link.
  *
- *   event          -- the event details page (organiser, coordinator, Lead)
- *   safety_review  -- one safety review (Safety Officer)
+ *   event           -- the event details page (organiser, coordinator, Lead)
+ *   safety_review   -- one safety review (Safety Officer)
+ *   attendee_event  -- the attendee's own page for a session (IS-76)
  */
 export const ENTITY_ROUTES = Object.freeze({
   event: Object.freeze({ name: 'event-details', param: 'eventId', label: 'View event' }),
   safety_review: Object.freeze({ name: 'safety-review', param: 'reviewId', label: 'View safety review' }),
+  attendee_event: Object.freeze({ name: 'attendee-event', param: 'eventId', label: 'View event' }),
 })
 
 const _rolesByRouteName = new Map(ROUTE_ACCESS.map((entry) => [entry.routeName, entry.roles]))

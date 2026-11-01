@@ -2084,3 +2084,81 @@ brings the code in line. This supersedes "nullable with no backfill" and
   time (`hasSavedPreferences` is gone: there is no "never chosen" state
   any more). The SMS box is disabled only while unticked with no phone,
   so a user who clears their phone can still untick SMS.
+
+
+## Notification (Attendees) (IS-76, Justin, 2026-11-01)
+
+Built on IS-69's notification table and `notify()`, the same way: one
+`_notify_*` hook per trigger in the story's own module, passing its
+arguments to one function in `app.notifications.notification_service`,
+which works out who to tell and writes the rows. No migration
+(`notifications.type` is text), no new page.
+
+### Who is told
+
+A session's attendees are its registrations with status `confirmed` or
+`waitlisted`. Withdrawing deletes the row, so nobody else has one. Each
+session is its own `events` row, so a change or cancellation of one
+session of a request never reaches another session's attendees.
+
+### Details changes are told at reconfirmation
+
+`confirm_event` calls `event_reconfirmed`. It does nothing on a session's
+first confirmation: registration only opens once a session is confirmed,
+so there's nobody to tell. On a later confirmation it looks at what
+changed since the previous `confirmed` entry in `event_status_log`:
+
+- `event_logs` entries since then: a change to `name` anywhere in the
+  request (it's shared and logged once), or to this session's
+  `preferred_start/end_date/time`. Entries the organiser only asked for
+  (`event_log.entry_kind` "requested") are skipped: they changed nothing.
+- The venue: the session's set of confirmed venues now, compared with the
+  set at the previous confirmation, replayed from
+  `venue_booking_status_log`. Rebooking the same venue is no change, and
+  a permanently deleted venue is told apart by the name kept on the
+  booking.
+
+If anything relevant changed, one notification goes to each attendee:
+details updated, see the event page. It doesn't say what changed
+(agreed with Justin: simpler, and the page shows the current details).
+
+Why not notify at each edit: an edit to a confirmed session sends it back
+to planning, and arrangements are reviewed again. Telling attendees at
+each step would send several notices, some about details that never go
+ahead. Every path back to planning (coordinator edit, approved change
+request, cancelled venue booking, deleted venue, and later Jo's venue
+blocking) ends at the same confirm route, so this one hook covers them
+all.
+
+### Messages and links
+
+Every message names the event and the session's start
+(`"Tech Talk" on 12 Nov 2026, 2:00 PM`), since a request's sessions share
+a name. Links use a new entity type, `attendee_event`, for the attendee's
+own page (`/attend/<id>`): attendees can't open the `event` page, so an
+`event` link would show as plain text. The cancellation has neither a
+link (the page can't be opened once cancelled) nor the reason (internal).
+
+### Best effort
+
+As IS-69: every hook runs after its own change succeeded, and a failed
+notification is logged and never fails the request.
+
+### Mutation-tested by hand
+
+Each guard broken once, confirmed caught, restored:
+
+- First-confirmation guard removed: 1 failed (it raised and was swallowed,
+  so the test also checks nothing was logged as a failure).
+- Organiser-requested entries counted: 1 failed.
+- The "since the last confirmation" filter removed: 1 failed.
+- Waitlisted attendees left out: 11 failed.
+- Venue comparison always "no change": 3 failed.
+- Date changes counted from any session: 1 failed.
+
+### Out of scope
+
+- Email/SMS (preferences are stored, not used).
+- Bookmarks (a separate story).
+- Reminders before an event.
+

@@ -19,8 +19,9 @@ HTTP routes for Attendee Registration (Justin). Attendee only.
   DELETE /registrations/<event_id>           withdraw / leave the waiting list
                                              -> {"withdrawn": true, "promoted": bool}
 
-NOT built (see docs/open-questions.md): notifying the attendee
-(Notification story) and organiser/coordinator views of who registered.
+Registering and withdrawing notify the attendee (IS-76; see
+registration_service). NOT built (see docs/open-questions.md):
+organiser/coordinator views of who registered.
 """
 
 from __future__ import annotations

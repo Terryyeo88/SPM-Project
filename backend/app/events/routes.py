@@ -70,6 +70,7 @@ from app.events.event_service import (
 from app.events.event_update import preview_event_update, update_event
 from app.events.transitions import status_history, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.safety.safety_service import is_approved, list_reviews_for_event, submit_for_safety_check
 from app.shared.errors import NotFoundError, ValidationError
 from app.venues.booking_service import create_booking_request, list_bookings_for_event
@@ -274,12 +275,18 @@ def confirm_event(event, event_id):
     will decide on the subsequent action"). rule_event_confirm checks the
     status; whether the latest review is approved is a database fact, so
     it's checked here. The Confirmed Status story's "fields should not be
-    changed once confirmed" half is NOT implemented (docs/open-questions.md)."""
+    changed once confirmed" half is NOT implemented (docs/open-questions.md).
+
+    IS-76: a RE-confirmation tells the session's attendees if a relevant
+    detail changed since it was last confirmed (see
+    notification_service.event_reconfirmed)."""
     if not is_approved(event_id):
         raise ValidationError(
             "The Safety Officer hasn't approved this session yet -- it can be confirmed once they do."
         )
-    return jsonify(_move(event, event_id, "confirmed")), 200
+    updated = _move(event, event_id, "confirmed")
+    _notify_attendees_reconfirmed(event_id)
+    return jsonify(updated), 200
 
 
 # -- Operational Feasibility Check (Week 7 change #6), coordinator side ------
@@ -324,9 +331,13 @@ def cancel_event(event, event_id):
     events can book it (app.equipment.reservation_release). Only after
     transition() succeeds -- a refused or conflicting cancel releases
     nothing. Not atomic with the status change, same as transition()'s own
-    history insert; see docs/open-questions.md."""
+    history insert; see docs/open-questions.md.
+
+    IS-76 AC8: the session's registered and waitlisted attendees are told
+    it was cancelled (without the reason)."""
     updated = _move(event, event_id, "cancelled")
     released = release_event_equipment(event_id)
+    _notify_attendees_cancelled(event_id)
     return jsonify(
         {
             **updated,
@@ -334,6 +345,16 @@ def cancel_event(event, event_id):
             "released_equipment_units": released,
         }
     ), 200
+
+
+def _notify_attendees_reconfirmed(event_id: str) -> None:
+    """IS-76 AC5/AC7 (notification_service.event_reconfirmed)."""
+    notification_service.event_reconfirmed(event_id)
+
+
+def _notify_attendees_cancelled(event_id: str) -> None:
+    """IS-76 AC8 (notification_service.event_cancelled)."""
+    notification_service.event_cancelled(event_id)
 
 
 @events_bp.route("/<event_id>/status-history", methods=["GET"])
