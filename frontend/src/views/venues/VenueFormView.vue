@@ -23,6 +23,7 @@ import {
   ACCESSIBILITY_FEATURE_OPTIONS,
   FACILITY_OPTIONS,
   MIN_BUFFER_MINUTES,
+  MIN_HOLD_MINUTES,
   changedFields,
   createVenue,
   emptyVenueForm,
@@ -233,6 +234,21 @@ onMounted(load)
             <p class="hint">
               Added before and after every booking; at least {{ MIN_BUFFER_MINUTES }} minutes each. Existing bookings
               keep the times they were made with.
+            </p>
+
+            <div class="field">
+              <label for="venue-hold">
+                Tentative hold duration (minutes) <span class="required" aria-hidden="true">*</span>
+              </label>
+              <input id="venue-hold" v-model="form.tentative_hold_minutes" type="number" :min="MIN_HOLD_MINUTES" step="1"
+                :aria-invalid="Boolean(shownError('tentative_hold_minutes'))" @blur="touch('tentative_hold_minutes')" />
+              <p v-if="shownError('tentative_hold_minutes')" class="field-error" data-error="tentative_hold_minutes">
+                {{ shownError('tentative_hold_minutes') }}
+              </p>
+            </div>
+            <p class="hint">
+              How long a confirmed venue booking is tentatively held before it expires if the coordinator hasn't
+              confirmed the event. Existing bookings keep the hold they were confirmed with.
             </p>
           </section>
 
