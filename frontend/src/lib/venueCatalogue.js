@@ -12,6 +12,11 @@
  *
  * Operating hours (IS-11) aren't part of the form: only the venue calendar's
  * note reads them. A new venue has no set hours; an edit leaves them alone.
+ *
+ * tentative_hold_minutes (Sprint 3, Josiah, "Venue Availability Calendar
+ * Tentative Hold") is edited here too, alongside setup/turnaround -- folded
+ * into this same CRUD form rather than a separate settings screen once
+ * both landed on main at the same time; see docs/design-decisions.md.
  */
 import { apiDelete, apiPost } from './api'
 import { ACCESSIBILITY_OPTIONS, EQUIPMENT_OPTIONS, timeValue } from './eventSessions'
@@ -23,6 +28,12 @@ export const NEW_VENUE_STATUS = 'available'
 // Setup and turnaround buffers are at least this long (same as
 // venue_service.MIN_BUFFER_MINUTES).
 export const MIN_BUFFER_MINUTES = 5
+
+// The tentative hold duration (Sprint 3, "Venue Availability Calendar
+// Tentative Hold") is at least this long, and defaults to 24h for a new
+// venue -- same as venue_service.MIN_HOLD_MINUTES / DEFAULT_HOLD_MINUTES.
+export const MIN_HOLD_MINUTES = 1
+export const DEFAULT_HOLD_MINUTES = 1440
 
 export const FACILITY_OPTIONS = Object.freeze(EQUIPMENT_OPTIONS.map(({ value, label }) => ({ value, label })))
 export const ACCESSIBILITY_FEATURE_OPTIONS = Object.freeze(
@@ -40,6 +51,7 @@ export function emptyVenueForm() {
     supported_layouts: [],
     setup_minutes: 30,
     turnaround_minutes: 30,
+    tentative_hold_minutes: DEFAULT_HOLD_MINUTES,
   }
 }
 
@@ -54,6 +66,7 @@ export function venueToForm(venue) {
     supported_layouts: [...(venue.supported_layouts ?? [])],
     setup_minutes: venue.setup_minutes ?? 30,
     turnaround_minutes: venue.turnaround_minutes ?? 30,
+    tentative_hold_minutes: venue.tentative_hold_minutes ?? DEFAULT_HOLD_MINUTES,
   }
 }
 
@@ -76,6 +89,7 @@ export function venuePayload(form) {
     supported_layouts: [...form.supported_layouts],
     setup_minutes: wholeNumber(form.setup_minutes),
     turnaround_minutes: wholeNumber(form.turnaround_minutes),
+    tentative_hold_minutes: wholeNumber(form.tentative_hold_minutes),
   }
 }
 
@@ -101,6 +115,9 @@ export function validateVenueForm(form) {
   }
   if (!(payload.turnaround_minutes >= MIN_BUFFER_MINUTES)) {
     errors.turnaround_minutes = `Turnaround time must be a whole number of at least ${MIN_BUFFER_MINUTES} minutes.`
+  }
+  if (!(payload.tentative_hold_minutes >= MIN_HOLD_MINUTES)) {
+    errors.tentative_hold_minutes = `Tentative hold duration must be a whole number of at least ${MIN_HOLD_MINUTES} minute.`
   }
   return errors
 }

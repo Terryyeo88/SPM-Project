@@ -1,11 +1,10 @@
 """HTTP routes for the venue catalogue (View Venue Catalogue, Nawaz,
-Sprint 1) and venue bookings (Venue Booking Request / Approval, Josiah,
-Sprint 2). Catalogue: GET /venues (list, optionally filtered by
-?status=) and GET /venues/<venue_id> (single record). IS-61 (Venue Staff
-only):
+Sprint 1), venue bookings (Venue Booking Request / Approval, Josiah,
+Sprint 2), venue blocking (Sprint 3, Josiah), and IS-61's venue CRUD:
 
   POST   /venues              -- add a venue
-  POST   /venues/<venue_id>   -- edit a venue (only the fields sent change)
+  POST   /venues/<venue_id>   -- edit a venue (only the fields sent change,
+                                  tentative_hold_minutes included -- Sprint 3)
   DELETE /venues/<venue_id>   -- delete it; releases ongoing events' bookings
   GET    /venues/deleted      -- deleted venues, waiting to be permanently deleted
   DELETE /venues/<venue_id>/permanent -- permanently delete a deleted venue
@@ -14,7 +13,12 @@ Booking routes use a static "/bookings" prefix, declared BEFORE the
 catalogue's own dynamic "/<venue_id>" route below -- otherwise Flask
 would match "/venues/bookings" as "/venues/<venue_id>" with
 venue_id="bookings", same static-before-dynamic care already taken for
-/events/coordinators vs /events/<event_id>."""
+/events/coordinators vs /events/<event_id>. The blocks routes below
+DON'T have this problem -- they're nested UNDER the dynamic segment
+(/<venue_id>/blocks), a strictly more specific pattern than the bare
+/<venue_id>, so Flask/Werkzeug matches them correctly regardless of
+declaration order; still declared after /<venue_id>/calendar for
+readability, not because order matters here."""
 
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ from flask import Blueprint, jsonify, request
 
 from app.auth.context import current_user
 from app.authz.actions import (
+    VENUE_BLOCK,
     VENUE_BOOKING_APPROVE,
     VENUE_BOOKING_CANCEL,
     VENUE_BOOKING_LIST,
@@ -39,6 +44,7 @@ from app.authz.actions import (
 from app.authz.decorators import require
 from app.extensions import supabase
 from app.shared.errors import ValidationError
+from app.venues.block_service import create_venue_block, list_venue_blocks
 from app.venues.booking_service import (
     BOOKING_STATUSES,
     cancel_booking,
@@ -198,6 +204,19 @@ def get_venue_calendar_route(venue, venue_id):
     if not start or not end:
         raise ValidationError("Both 'start' and 'end' query parameters (YYYY-MM-DD) are required.")
     return jsonify(get_venue_calendar(venue_id, start, end)), 200
+
+
+# Venue Becomes Unavailable After Booking (Josiah, Sprint 3, Week 7 #2).
+@venues_bp.route("/<venue_id>/blocks", methods=["GET"])
+@require(VENUE_BLOCK)
+def list_venue_blocks_route(venue_id):
+    return jsonify(list_venue_blocks(venue_id)), 200
+
+
+@venues_bp.route("/<venue_id>/blocks", methods=["POST"])
+@require(VENUE_BLOCK)
+def create_venue_block_route(venue_id):
+    return jsonify(create_venue_block(venue_id, request.get_json(silent=True), current_user().id)), 201
 
 
 def load_venue(venue_id: str) -> dict:

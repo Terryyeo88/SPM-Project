@@ -30,6 +30,7 @@ const venue = {
   status: 'available',
   setup_minutes: 30,
   turnaround_minutes: 30,
+  tentative_hold_minutes: 1440,
   operating_hours_start: '07:00:00',
   operating_hours_end: '23:59:00',
 }
@@ -56,6 +57,7 @@ describe('venuePayload', () => {
       supported_layouts: ['theatre'],
       setup_minutes: 0,
       turnaround_minutes: 30,
+      tentative_hold_minutes: 1440,
     })
   })
 })
@@ -105,6 +107,13 @@ describe('validateVenueForm (IS-61 AC1/AC2)', () => {
     expect(validateVenueForm(validForm({ setup_minutes: '5', turnaround_minutes: '5' }))).toEqual({})
   })
 
+  it('needs a tentative hold duration of at least 1 minute (Sprint 3)', () => {
+    expect(validateVenueForm(validForm({ tentative_hold_minutes: '0' })).tentative_hold_minutes).toBe(
+      'Tentative hold duration must be a whole number of at least 1 minute.',
+    )
+    expect(validateVenueForm(validForm({ tentative_hold_minutes: '' })).tentative_hold_minutes).toBeTruthy()
+    expect(validateVenueForm(validForm({ tentative_hold_minutes: '1' }))).toEqual({})
+  })
 })
 
 describe('formatOperatingHours', () => {
@@ -122,6 +131,11 @@ describe('changedFields (IS-61 AC2)', () => {
   it('lists only what changed', () => {
     const form = { ...venueToForm(venue), capacity: '250', facilities: ['wifi'] }
     expect(changedFields(venue, form)).toEqual({ capacity: 250, facilities: ['wifi'] })
+  })
+
+  it('lists tentative_hold_minutes when only it changed (Sprint 3)', () => {
+    const form = { ...venueToForm(venue), tentative_hold_minutes: '90' }
+    expect(changedFields(venue, form)).toEqual({ tentative_hold_minutes: 90 })
   })
 
   it("never sends status, so a venue in maintenance stays in maintenance", () => {

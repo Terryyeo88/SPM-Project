@@ -14,19 +14,23 @@ mechanics.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+import app.venues.booking_release as release_module
 import app.venues.calendar_service as service_module
 from app.shared.errors import ValidationError
 
 
 class _FakeTable:
-    def __init__(self, rows):
+    def __init__(self, db, rows):
+        self._db = db
         self._rows = rows
         self._filters = []
         self._in_filters = []
+        self._op, self._payload, self._want_maybe_single = None, None, False
 
     def select(self, *_a, **_k):
         return self
@@ -39,17 +43,42 @@ class _FakeTable:
         self._in_filters.append((column, tuple(values)))
         return self
 
-    def execute(self):
-        def matches(row):
-            for column, value in self._filters:
-                if row.get(column) != value:
-                    return False
-            for column, values in self._in_filters:
-                if row.get(column) not in values:
-                    return False
-            return True
+    def update(self, payload):
+        self._op, self._payload = "update", payload
+        return self
 
-        return SimpleNamespace(data=[dict(row) for row in self._rows if matches(row)])
+    def insert(self, payload):
+        self._op, self._payload = "insert", payload
+        return self
+
+    def maybe_single(self):
+        self._want_maybe_single = True
+        return self
+
+    def _matches(self, row):
+        for column, value in self._filters:
+            if row.get(column) != value:
+                return False
+        for column, values in self._in_filters:
+            if row.get(column) not in values:
+                return False
+        return True
+
+    def execute(self):
+        if self._op == "insert":
+            new_rows = self._payload if isinstance(self._payload, list) else [self._payload]
+            created = [{"id": self._db.new_id(), **row} for row in new_rows]
+            self._rows.extend(created)
+            return SimpleNamespace(data=created)
+
+        matched = [row for row in self._rows if self._matches(row)]
+        if self._op == "update":
+            for row in matched:
+                row.update(self._payload)
+        data = [dict(row) for row in matched]
+        if self._want_maybe_single:
+            return SimpleNamespace(data=data[0]) if data else None
+        return SimpleNamespace(data=data)
 
 
 class _FakeSupabase:
@@ -58,9 +87,15 @@ class _FakeSupabase:
             "venue_blocks": venue_blocks or [],
             "venue_bookings": venue_bookings or [],
         }
+        self._next_id = 0
 
     def table(self, name):
-        return _FakeTable(self._tables[name])
+        self._tables.setdefault(name, [])
+        return _FakeTable(self, self._tables[name])
+
+    def new_id(self):
+        self._next_id += 1
+        return f"row-{self._next_id}"
 
 
 _VENUE = {
@@ -74,6 +109,10 @@ _VENUE = {
 def _patch(monkeypatch, fake_supabase, venue=None):
     monkeypatch.setattr(service_module, "supabase", fake_supabase)
     monkeypatch.setattr(service_module, "get_venue", lambda venue_id: venue or _VENUE)
+    # release_expired_hold's own writes (the status update + audit log
+    # insert) go through app.venues.booking_release's own module-level
+    # `supabase` reference, not this module's -- same fake.
+    monkeypatch.setattr(release_module, "supabase", fake_supabase)
 
 
 def test_block_within_range_is_returned_as_blocked(monkeypatch):
@@ -230,3 +269,62 @@ def test_rejects_malformed_date(monkeypatch):
 
     with pytest.raises(ValidationError):
         service_module.get_venue_calendar("venue-1", "not-a-date", "2026-12-31")
+
+
+# -- Sprint 3: an expired tentative hold emits NO entry -------------------
+
+
+def test_expired_hold_on_an_unconfirmed_event_emits_no_entry(monkeypatch):
+    """The AC: an expired hold must never read as a live booking -- it
+    disappears from the calendar entirely, which IS "the venue becomes
+    available again"."""
+    old_confirmed_at = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    bookings = [
+        {
+            "id": "booking-1",
+            "event_id": "event-1",
+            "venue_id": "venue-1",
+            "status": "confirmed",
+            "booking_start": "2026-12-10T09:00:00+00:00",
+            "booking_end": "2026-12-10T13:00:00+00:00",
+            "confirmed_at": old_confirmed_at,
+            "hold_minutes": 60,
+            "events": {"name": "Product Launch Gala", "status": "planning"},
+        }
+    ]
+    fake = _FakeSupabase(venue_bookings=bookings)
+    _patch(monkeypatch, fake)
+
+    result = service_module.get_venue_calendar("venue-1", "2026-12-01", "2026-12-31")
+
+    assert result["entries"] == []
+    assert fake._tables["venue_bookings"][0]["status"] == "released"
+
+
+def test_a_long_confirmed_event_s_booking_is_never_re_expired(monkeypatch):
+    """The guard this whole mechanism depends on: once the EVENT reaches
+    confirmed, elapsed hold time is meaningless, however long ago the
+    booking was confirmed -- it must still show as a live "confirmed"
+    entry, not vanish."""
+    ancient_confirmed_at = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+    bookings = [
+        {
+            "id": "booking-1",
+            "event_id": "event-1",
+            "venue_id": "venue-1",
+            "status": "confirmed",
+            "booking_start": "2026-12-10T09:00:00+00:00",
+            "booking_end": "2026-12-10T13:00:00+00:00",
+            "confirmed_at": ancient_confirmed_at,
+            "hold_minutes": 60,
+            "events": {"name": "Product Launch Gala", "status": "confirmed"},
+        }
+    ]
+    fake = _FakeSupabase(venue_bookings=bookings)
+    _patch(monkeypatch, fake)
+
+    result = service_module.get_venue_calendar("venue-1", "2026-12-01", "2026-12-31")
+
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["state"] == "confirmed"
+    assert fake._tables["venue_bookings"][0]["status"] == "confirmed"

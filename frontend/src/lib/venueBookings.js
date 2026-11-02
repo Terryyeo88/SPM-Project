@@ -6,14 +6,26 @@
  * anything -- same split as lib/coordinatorDashboard.js.
  *
  * Tab -> status mapping mirrors app.venues.booking_service.BOOKING_STATUSES
- * (pending / confirmed / rejected / cancelled) -- there is no "needs more
- * info" or in-between state for a venue booking, unlike an event request.
+ * exactly (pending / confirmed / rejected / released / cancelled) --
+ * there is no "needs more info" or in-between state for a venue booking,
+ * unlike an event request.
+ *
+ * "released" (Sprint 3): a booking that left "confirmed" for a reason
+ * OTHER than Venue Staff rejecting it or the coordinator cancelling it --
+ * its event was cancelled entirely, its tentative hold expired, or its
+ * venue was blocked. See app.venues.booking_release's own module
+ * docstring.
+ *
+ * "cancelled" (IS-9): the coordinator cancels ONE booking directly,
+ * without touching the event or the session's other bookings. Distinct
+ * from "released", which is always system-initiated.
  */
 
 export const BOOKING_TABS = Object.freeze([
   Object.freeze({ key: 'pending', label: 'Pending', statuses: Object.freeze(['pending']) }),
   Object.freeze({ key: 'confirmed', label: 'Confirmed', statuses: Object.freeze(['confirmed']) }),
   Object.freeze({ key: 'rejected', label: 'Rejected', statuses: Object.freeze(['rejected']) }),
+  Object.freeze({ key: 'released', label: 'Released', statuses: Object.freeze(['released']) }),
   Object.freeze({ key: 'cancelled', label: 'Cancelled', statuses: Object.freeze(['cancelled']) }),
 ])
 
@@ -53,6 +65,36 @@ export function validateBookingForm(form) {
 export function canCancelBooking(booking, event) {
   return ['pending', 'confirmed'].includes(booking?.status)
     && !['completed', 'cancelled'].includes(event?.status)
+}
+
+/**
+ * Venue Availability Calendar Tentative Hold (Sprint 3): the date/time a
+ * CONFIRMED booking's tentative hold expires, computed client-side from
+ * confirmed_at + hold_minutes (both snapshotted onto the booking at
+ * confirm time -- see app.venues.booking_service.confirm_booking). null
+ * for a booking that was never confirmed, or is missing either field
+ * (an older row from before this sprint, or a non-confirmed status where
+ * the fields are meaningless). This is purely informational: the actual
+ * expiry decision is the backend's (app.venues.booking_release), which
+ * re-derives the same deadline server-side every time it's touched -- a
+ * clock difference between browser and server only affects how early/
+ * late this display looks, never whether the booking is actually live.
+ */
+export function holdExpiry(booking) {
+  if (booking?.status !== 'confirmed') return null
+  if (!booking.confirmed_at || typeof booking.hold_minutes !== 'number') return null
+  const confirmedAt = new Date(booking.confirmed_at)
+  if (Number.isNaN(confirmedAt.getTime())) return null
+  return new Date(confirmedAt.getTime() + booking.hold_minutes * 60_000)
+}
+
+/** holdExpiry(booking), formatted for display: "3 Nov 2026, 14:30". null stays null. */
+export function formatHoldExpiry(booking) {
+  const expiry = holdExpiry(booking)
+  if (!expiry) return null
+  return expiry.toLocaleString('en-SG', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
 }
 
 /**

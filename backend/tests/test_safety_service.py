@@ -18,6 +18,7 @@ from postgrest.exceptions import APIError
 
 import app.events.transitions as transitions
 import app.safety.safety_service as safety_service
+import app.venues.booking_release as booking_release_module
 from app.events.transitions import TransitionConflictError
 from app.shared.errors import ValidationError
 from tests.factories import make_user
@@ -32,6 +33,10 @@ def db(monkeypatch):
     fake = FakeSupabase([{"id": "event-1", "status": "planning", "coordinator_id": COORD}])
     monkeypatch.setattr(safety_service, "supabase", fake)
     monkeypatch.setattr(transitions, "supabase", fake)
+    # arrangement_problems/review_detail touch expired tentative holds
+    # through app.venues.booking_release, which holds its own
+    # module-level `supabase` reference -- same fake.
+    monkeypatch.setattr(booking_release_module, "supabase", fake)
     monkeypatch.setattr(safety_service, "list_requests_for_event", lambda event_id: [])
     return fake
 
@@ -102,6 +107,25 @@ def test_rejected_bookings_and_requests_are_history_and_do_not_block(db):
 def test_other_sessions_arrangements_do_not_count(db):
     db.tables["venue_bookings"] = [{"id": "b-1", "event_id": "event-2", "status": "confirmed"}]
     assert safety_service.arrangement_problems("event-1") != []
+
+
+def test_an_expired_tentative_hold_is_not_a_confirmed_arrangement(db):
+    """Sprint 3: a confirmed booking whose hold silently expired while
+    this session sat in planning must not count as "ready"."""
+    db.tables["venue_bookings"] = [
+        {
+            "id": "b-1",
+            "event_id": "event-1",
+            "status": "confirmed",
+            "confirmed_at": "2020-01-01T00:00:00+00:00",
+            "hold_minutes": 60,
+        }
+    ]
+
+    assert safety_service.arrangement_problems("event-1") == [
+        "No venue booking has been confirmed for this session yet."
+    ]
+    assert db.tables["venue_bookings"][0]["status"] == "released"
 
 
 # -- submit ----------------------------------------------------------------------
@@ -250,6 +274,45 @@ def test_the_decision_stands_if_the_session_moves_on_between_the_two_writes(db, 
     monkeypatch.setattr(safety_service, "transition", conflict)
     decided = safety_service.decide_review("review-1", review, "rejected", OFFICER, "Too crowded.")
     assert decided["status"] == "rejected"
+
+
+# -- review_detail: expired holds are never shown as live arrangements --------------
+
+
+def test_review_detail_excludes_an_expired_tentative_hold(db):
+    db.tables["safety_reviews"] = [
+        {"id": "review-1", "event_id": "event-1", "status": "pending", "submitted_at": "2026-10-18T01:00:00+00:00"}
+    ]
+    db.tables["venue_bookings"] = [
+        {
+            "id": "b-1",
+            "event_id": "event-1",
+            "venue_id": "venue-1",
+            "status": "confirmed",
+            "confirmed_at": "2020-01-01T00:00:00+00:00",
+            "hold_minutes": 60,
+        }
+    ]
+    review = SimpleNamespace(id="review-1", event_id="event-1", status="pending")
+
+    detail = safety_service.review_detail(review)
+
+    assert detail["venue_bookings"] == []
+    assert db.tables["venue_bookings"][0]["status"] == "released"
+
+
+def test_review_detail_includes_a_still_live_confirmed_booking(db):
+    db.tables["safety_reviews"] = [
+        {"id": "review-1", "event_id": "event-1", "status": "pending", "submitted_at": "2026-10-18T01:00:00+00:00"}
+    ]
+    db.tables["venue_bookings"] = [
+        {"id": "b-1", "event_id": "event-1", "venue_id": "venue-1", "status": "confirmed"}
+    ]
+    review = SimpleNamespace(id="review-1", event_id="event-1", status="pending")
+
+    detail = safety_service.review_detail(review)
+
+    assert [b["id"] for b in detail["venue_bookings"]] == ["b-1"]
 
 
 # -- is_approved (confirm's gate) --------------------------------------------------

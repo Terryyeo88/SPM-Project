@@ -28,6 +28,13 @@ A "pending" venue_bookings row is deliberately NOT an entry: nothing has
 been approved yet, so there is nothing yet to hold the venue -- same
 exclusion app.venues.booking_service._BLOCKING_STATUSES already applies
 for the overlap guard, reused here for the same reason.
+
+Sprint 3: a "confirmed" row whose tentative hold has expired is also NOT
+an entry, lazily -- every fetched confirmed row is touched through
+app.venues.booking_release.release_expired_hold before being decided,
+using the event status this query already embeds (no second round trip).
+A "released" booking never shows up at all, which is exactly "the venue
+becomes available again" (Tentative Hold AC).
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from datetime import datetime
 
 from app.extensions import supabase
 from app.shared.calendar import calendar_envelope, parse_calendar_range
+from app.venues.booking_release import release_expired_hold
 from app.venues.venue_service import get_venue
 
 # Mirrors booking_service._BLOCKING_STATUSES -- not imported, because
@@ -111,17 +119,26 @@ def get_venue_calendar(venue_id: str, start: str, end: str) -> dict:
     # events(name)/venues(name) embed.
     bookings_result = (
         supabase.table("venue_bookings")
-        .select("id, event_id, booking_start, booking_end, status, events(name, status)")
+        .select("id, event_id, booking_start, booking_end, status, confirmed_at, hold_minutes, events(name, status)")
         .eq("venue_id", venue_id)
         .in_("status", _HELD_BOOKING_STATUSES)
         .execute()
     )
     for row in bookings_result.data or []:
+        event = row.get("events") or {}
+        # Touched here, using the event status already embedded in this
+        # same query (no second round trip) -- an expired hold is
+        # released and emits NO entry at all, which is exactly "the venue
+        # becomes available again" (Tentative Hold AC). See
+        # app.venues.booking_release for why this must check elapsed time
+        # AND that the event hasn't already reached confirmed/completed.
+        row = release_expired_hold(row, event_status=event.get("status"))
+        if row.get("status") != "confirmed":
+            continue
         booking_start = _parse_timestamptz(row["booking_start"])
         booking_end = _parse_timestamptz(row["booking_end"])
         if not calendar_range.overlaps(booking_start, booking_end):
             continue
-        event = row.get("events") or {}
         state = "confirmed" if event.get("status") == "confirmed" else "tentatively_held"
         entries.append(
             {
