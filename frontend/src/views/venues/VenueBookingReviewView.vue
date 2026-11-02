@@ -25,6 +25,7 @@ import { useRoute } from 'vue-router'
 import { apiGet, apiPost } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 import { statusLabel } from '../../lib/coordinatorDashboard'
+import { formatHoldExpiry } from '../../lib/venueBookings'
 import { checkSuitability } from '../../lib/venueSuitability'
 import AppNavBar from '../../components/AppNavBar.vue'
 
@@ -209,6 +210,9 @@ onMounted(load)
             <p v-else-if="!isPending && booking.status === 'released'" class="muted small">
               Released{{ booking.release?.reason ? `: ${booking.release.reason}` : '' }}
               <span v-if="!booking.release?.released_by">(done automatically)</span>
+            </p>
+            <p v-else-if="!isPending && booking.status === 'confirmed' && formatHoldExpiry(booking)" class="muted small" data-test="hold-expiry">
+              Confirmed -- tentatively held until {{ formatHoldExpiry(booking) }}.
             </p>
             <p v-else-if="!isPending" class="muted small">
               This booking is {{ statusLabel(booking.status).toLowerCase() }}.

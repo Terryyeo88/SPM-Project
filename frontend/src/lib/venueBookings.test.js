@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   BOOKING_TABS,
   canCancelBooking,
+  formatHoldExpiry,
   groupBookingsByTab,
+  holdExpiry,
   isBookingTab,
   unreplacedVenueReleases,
   validateBookingForm,
@@ -86,6 +88,35 @@ describe('canCancelBooking (IS-9)', () => {
 
   it.each(['completed', 'cancelled'])('does not offer to cancel once the event is %s', (status) => {
     expect(canCancelBooking({ status: 'confirmed' }, { status })).toBe(false)
+  })
+})
+
+describe('holdExpiry / formatHoldExpiry (Venue Availability Calendar Tentative Hold)', () => {
+  it('computes confirmed_at + hold_minutes for a confirmed booking', () => {
+    const confirmed = { status: 'confirmed', confirmed_at: '2026-11-01T08:00:00+00:00', hold_minutes: 90 }
+    expect(holdExpiry(confirmed)).toEqual(new Date('2026-11-01T09:30:00+00:00'))
+  })
+
+  it('formats the expiry for display', () => {
+    const confirmed = { status: 'confirmed', confirmed_at: '2026-11-01T08:00:00+00:00', hold_minutes: 60 }
+    expect(formatHoldExpiry(confirmed)).toMatch(/2026/)
+  })
+
+  it.each(['pending', 'rejected', 'released', 'cancelled'])('is null for a %s booking', (status) => {
+    expect(holdExpiry({ status, confirmed_at: '2026-11-01T08:00:00+00:00', hold_minutes: 60 })).toBeNull()
+  })
+
+  it('is null when confirmed_at or hold_minutes is missing (an older row)', () => {
+    expect(holdExpiry({ status: 'confirmed', hold_minutes: 60 })).toBeNull()
+    expect(holdExpiry({ status: 'confirmed', confirmed_at: '2026-11-01T08:00:00+00:00' })).toBeNull()
+  })
+
+  it('is null for a malformed confirmed_at rather than throwing', () => {
+    expect(holdExpiry({ status: 'confirmed', confirmed_at: 'not-a-date', hold_minutes: 60 })).toBeNull()
+  })
+
+  it('formatHoldExpiry is null wherever holdExpiry is null', () => {
+    expect(formatHoldExpiry({ status: 'pending' })).toBeNull()
   })
 })
 

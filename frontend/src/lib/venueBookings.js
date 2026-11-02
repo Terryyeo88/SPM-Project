@@ -68,6 +68,36 @@ export function canCancelBooking(booking, event) {
 }
 
 /**
+ * Venue Availability Calendar Tentative Hold (Sprint 3): the date/time a
+ * CONFIRMED booking's tentative hold expires, computed client-side from
+ * confirmed_at + hold_minutes (both snapshotted onto the booking at
+ * confirm time -- see app.venues.booking_service.confirm_booking). null
+ * for a booking that was never confirmed, or is missing either field
+ * (an older row from before this sprint, or a non-confirmed status where
+ * the fields are meaningless). This is purely informational: the actual
+ * expiry decision is the backend's (app.venues.booking_release), which
+ * re-derives the same deadline server-side every time it's touched -- a
+ * clock difference between browser and server only affects how early/
+ * late this display looks, never whether the booking is actually live.
+ */
+export function holdExpiry(booking) {
+  if (booking?.status !== 'confirmed') return null
+  if (!booking.confirmed_at || typeof booking.hold_minutes !== 'number') return null
+  const confirmedAt = new Date(booking.confirmed_at)
+  if (Number.isNaN(confirmedAt.getTime())) return null
+  return new Date(confirmedAt.getTime() + booking.hold_minutes * 60_000)
+}
+
+/** holdExpiry(booking), formatted for display: "3 Nov 2026, 14:30". null stays null. */
+export function formatHoldExpiry(booking) {
+  const expiry = holdExpiry(booking)
+  if (!expiry) return null
+  return expiry.toLocaleString('en-SG', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+/**
  * IS-61: the bookings this session lost because Venue Staff deleted their
  * venue (released_by_venue_deletion) and hasn't replaced yet -- what the
  * "book another venue" alert on the event details page lists. A release

@@ -30,7 +30,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet, apiPost } from '../lib/api'
 import { statusLabel } from '../lib/coordinatorDashboard'
-import { canCancelBooking } from '../lib/venueBookings'
+import { canCancelBooking, formatHoldExpiry } from '../lib/venueBookings'
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -151,6 +151,10 @@ watch(() => props.event.id, () => {
               Cancel booking
             </button>
           </div>
+          <p v-if="booking.status === 'confirmed' && formatHoldExpiry(booking)" class="muted small" data-test="hold-expiry">
+            Tentatively held until {{ formatHoldExpiry(booking) }} -- confirm the event before then, or the venue
+            becomes available to other requests.
+          </p>
           <p v-if="booking.status === 'rejected'" class="rejection-reason">
             Reason: {{ booking.rejection?.reason || 'No reason was recorded.' }}
           </p>

@@ -52,6 +52,20 @@ describe('VenueBookingStatus', () => {
     expect(wrapper.text()).toContain('Reason: Closed for repairs.')
   })
 
+  it('shows a confirmed booking\'s tentative hold expiry (Sprint 3)', async () => {
+    const confirmed = { ...hall, confirmed_at: '2026-11-01T08:00:00+00:00', hold_minutes: 1440 }
+    const wrapper = await render([confirmed])
+
+    expect(row(wrapper, 'booking-hall').find('[data-test="hold-expiry"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Tentatively held until')
+  })
+
+  it('shows no expiry line for a confirmed booking missing the snapshot (an older row)', async () => {
+    const wrapper = await render([hall])
+
+    expect(row(wrapper, 'booking-hall').find('[data-test="hold-expiry"]').exists()).toBe(false)
+  })
+
   it('says so when no venue has been requested', async () => {
     const wrapper = await render([])
     expect(wrapper.text()).toContain('No venue has been requested for this session yet.')
