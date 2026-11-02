@@ -342,3 +342,20 @@ describe('profile route', () => {
     expect(NAV_LINKS.some((l) => l.routeName === 'profile')).toBe(false)
   })
 })
+
+describe('notifications route (IS-69)', () => {
+  it('is reachable by every role -- every authenticated user has notifications', () => {
+    for (const role of Object.values(ROLES)) {
+      expect(reachableRoutes([role])).toContain('notifications')
+    }
+  })
+
+  it('is not a nav link, so no role sees it in the links (dashboard-only roles included)', () => {
+    expect(NAV_LINKS.some((l) => l.routeName === 'notifications')).toBe(false)
+    expect(visibleLinks(Object.values(ROLES))).not.toContain('notifications')
+  })
+
+  it('an unrecognised role still cannot reach it (deny by default)', () => {
+    expect(reachableRoutes(['some_future_role'])).not.toContain('notifications')
+  })
+})

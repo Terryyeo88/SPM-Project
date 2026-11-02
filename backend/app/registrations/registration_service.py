@@ -30,6 +30,12 @@ Decisions (docs/design-decisions.md, "Attendee Registration"):
     List) frees the place for the first waitlisted attendee, who is moved up
     in the same database call (public.withdraw_registration).
 
+Notification (Attendees) (IS-76): registering and withdrawing tell the
+attendee (and, on a withdrawal that moves someone up, that person) through
+_notify_registered / _notify_withdrawn -- what they say and who gets them
+is app.notifications.notification_service's. Both run after the database
+call has succeeded, and a failed notification never fails the request.
+
 The confirmed-or-waitlisted decision and the insert happen in ONE database
 call, public.register_attendee, which locks the session row first -- so two
 attendees racing for the last place can't both be confirmed. Everything
@@ -57,6 +63,7 @@ from datetime import date, datetime
 
 from app.events.event_service import SINGAPORE_TZ
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import NotFoundError, ValidationError
 
 _PUBLIC_FIELDS = (
@@ -153,6 +160,7 @@ def register(event, attendee_id: str, payload) -> dict:
     outcome = result.get("outcome")
 
     if outcome == "registered":
+        _notify_registered(result["registration"])
         return result["registration"]
     if outcome == "already_registered":
         raise ValidationError("You're already registered for this session.")
@@ -177,10 +185,22 @@ def withdraw(event_id: str, attendee_id: str) -> dict:
     result = _db_withdraw(event_id, attendee_id) or {}
     outcome = result.get("outcome")
     if outcome == "withdrawn":
-        return {"withdrawn": True, "promoted": result.get("promoted_registration_id") is not None}
+        promoted_id = result.get("promoted_registration_id")
+        _notify_withdrawn(event_id, attendee_id, promoted_id)
+        return {"withdrawn": True, "promoted": promoted_id is not None}
     if outcome == "started":
         raise ValidationError("This session has already started, so the registration can't be withdrawn.")
     raise NotFoundError("You aren't registered for this session.")
+
+
+def _notify_registered(registration: dict) -> None:
+    """IS-76 AC1/AC2 (notification_service.registration_recorded)."""
+    notification_service.registration_recorded(registration)
+
+
+def _notify_withdrawn(event_id: str, attendee_id: str, promoted_registration_id: str | None) -> None:
+    """IS-76 AC3/AC4 (notification_service.registration_withdrawn)."""
+    notification_service.registration_withdrawn(event_id, attendee_id, promoted_registration_id)
 
 
 # -- browsing, one session, and "my registrations" ----------------------------

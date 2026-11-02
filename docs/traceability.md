@@ -638,3 +638,118 @@ Story: "As a Venue staff, I want to add, edit and delete venues so that I can ea
 | Only the backend can delete or change a venue: a signed-in user (even Venue Staff) calling the database directly can't run `delete_venue()` or write `venues` | `test_venue_catalogue_crud_integration.py::test_a_signed_in_user_cannot_call_delete_venue_directly`, `::test_a_signed_in_user_cannot_change_a_venue_directly` | migration's `revoke`/`grant` on `delete_venue()` (service role only), `venues` RLS (read policy only, `20260923000000_venues.sql`) |
 
 Each guard above was mutation-tested by hand once (broken, confirmed caught, restored): the `delete_venue()` grant, the deleted-venue trigger, `delete_venue()`'s event-status and booking-status filters, `venues_buffers_non_negative`, the not-deleted condition on edits, the pending condition on withdrawing a safety review, `expected_from` on the revert to planning, the catalogue's deleted filter, the backend's deleted-venue check on booking requests, and the alert's "newer booking" check.
+
+## Sprint 4 — Notification System (IS-69)
+
+The ticket's acceptance criteria aren't in the repo; the criteria below are
+our working reading, flagged in `docs/open-questions.md`.
+Unit: `test_notification_service.py`, `test_notifications_routes.py`,
+`test_authz_notifications.py`, `test_notification_hook_*.py` (one per hook). Integration:
+`test_notifications_integration.py`. Frontend: `lib/notifications.test.js`,
+`views/NotificationsView.test.js`, `lib/roles.test.js` and `router/index.test.js`
+(the notifications route). Design: `docs/design-decisions.md` (IS-69).
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A notification is stored for the person who needs to act, at each point a story said someone "is notified" | `test_notification_service.py::test_coordinator_assigned_*`, `::test_a_venue_booking_decision_*`, `::test_a_released_booking_*`, `::test_an_equipment_decision_*`, `::test_a_submission_or_withdrawal_*`, `::test_a_safety_decision_*`, `test_notification_hook_*.py` (all), `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_notifies_the_sessions_current_coordinator`, `::test_a_safety_submission_reaches_every_safety_officer` | `notification_service.py` (`coordinator_assigned`, `venue_booking_decided`, `venue_booking_released`, `equipment_request_decided`, `safety_review_changed`, `notify`), the five `_notify_*` hooks, migration `20261027000000_notifications.sql` |
+| (design) The session's current coordinator is told, not the requester; nobody is told about their own action; no coordinator means nobody | `test_notification_service.py::test_a_venue_booking_decision_goes_to_the_sessions_current_coordinator`, `::test_cancelling_a_booking_notifies_nobody`, `::test_a_session_with_no_coordinator_notifies_nobody`, `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_*` | `notification_service.py::_event`, `_notify_coordinator_of` |
+| Every authenticated role has notifications | `test_authz_notifications.py::test_every_authenticated_user_may_list_and_mark_all_their_own`, `test_notifications_routes.py::test_list_returns_the_callers_notifications_and_unread_count[*]` | `rules.py::rule_notification_list` / `rule_notification_mark_all_read` |
+| A user sees their own notifications, newest first, with an unread count | `test_notification_service.py::test_list_is_only_the_callers_own_newest_first`, `::test_list_can_be_unread_only`, `::test_list_is_capped`, `::test_unread_count_counts_only_the_callers_unread`, `test_notifications_routes.py::test_list_*`, `::test_unread_count`, `test_notifications_integration.py::test_list_is_newest_first` | `GET /notifications`, `GET /notifications/unread-count`, `notification_service.py::list_notifications` / `unread_count`, index `idx_notifications_recipient_created` / `idx_notifications_recipient_unread` |
+| A user can mark one notification read (again is a no-op that keeps the first read time) | `test_notification_service.py::test_mark_read_sets_read_at_and_drops_the_count`, `::test_marking_an_already_read_one_keeps_its_first_read_time`, `test_notifications_routes.py::test_mark_read_own`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/<id>/read`, `notification_service.py::mark_read` (conditioned on `read_at IS NULL`) |
+| A user can mark all their notifications read | `test_notification_service.py::test_mark_all_read_marks_only_the_callers_unread`, `test_notifications_routes.py::test_mark_all_read`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/read-all`, `notification_service.py::mark_all_read` |
+| A user can never see or change anyone else's notifications: through Flask (404) or directly against the database (RLS) | `test_authz_notifications.py::test_anyone_elses_notification_is_a_404_whatever_their_role`, `test_notifications_routes.py::test_mark_read_someone_elses_is_404_and_writes_nothing`, `::test_mark_read_missing_is_404`, `::test_every_route_needs_a_login`, `test_notification_service.py::test_mark_read_is_scoped_to_the_caller`, `::test_get_notification_missing_or_malformed_is_not_found`, `test_notifications_integration.py::test_a_signed_in_user_reads_only_their_own_notifications_directly`, `::test_a_signed_in_user_cannot_write_notifications_directly` | `rules.py::rule_notification_mark_read`, recipient scope in every `notification_service.py` query, policy `recipient reads own notifications` (no write policy) |
+| (design) A failure to notify never fails or undoes the action; the unit-test DB guard still fails loudly | `test_notification_service.py::test_a_failed_write_is_logged_and_swallowed`, `::test_a_base_exception_is_not_swallowed` | `notification_service.py::_best_effort` |
+| (design) A link is both halves or neither | `test_notifications_integration.py::test_a_link_is_both_halves_or_neither` | constraint `notifications_entity_complete` |
+| A user sees their notifications in the web app: newest first, unread marked out, an empty state | `NotificationsView.test.js` ("lists the notifications ...", "shows an empty state ...") | `views/NotificationsView.vue`, `/notifications` route |
+| Clicking one marks it read; "Mark all as read" marks the rest; the count comes from the response, not a refetch | `NotificationsView.test.js` ("clicking an unread one ...", "\"Mark all as read\" ...", "following a link ...", "keeps the item unread ... when marking it read fails") | `NotificationsView.vue`, `stores/notifications.js`, `lib/notifications.js` |
+| (design) A notification links to what it's about only where that page already exists and the caller can reach it; otherwise plain text | `lib/notifications.test.js` (`notificationLink`), `NotificationsView.test.js` ("... no page is plain text, not a dead link", "no link when the caller cannot reach the page") | `lib/notifications.js::ENTITY_ROUTES` / `notificationLink` |
+| Every authenticated role reaches the notifications page | `lib/roles.test.js` ("notifications route (IS-69)"), `router/index.test.js` ("/notifications ...", drift guard) | `lib/roles.js` `ROUTE_ACCESS` entry `notifications` |
+| A bell in the nav shows the unread count to every signed-in role and opens the page | `components/AppNavBar.test.js` ("AppNavBar notifications bell (IS-69)") | `AppNavBar.vue` bell (GET `/notifications/unread-count`), `stores/notifications.js` |
+
+Each guard above was mutation-tested by hand once (broken, confirmed caught,
+restored):
+
+- **The RLS read policy.** Loosened to `auth.role() = 'authenticated'`:
+  `test_a_signed_in_user_reads_only_their_own_notifications_directly` failed.
+- **`mark_read`'s `read_at IS NULL` condition.** Removed: one unit test and
+  one integration test failed.
+- **`list_notifications`' recipient scope.** Removed: three unit tests and
+  two integration tests failed.
+
+Not covered, because not built: email/SMS, reminders, and the
+notifications no hook existed for (see `docs/open-questions.md`).
+
+
+## Sprint 4 — User contact and preferences (IS-68)
+
+Criteria from the ticket: phone number, organisation (optional) and
+communication preferences (email, SMS), per the Edit Profile wireframe; a
+user may read and write only their own profile. Unit:
+`test_profile_service.py`, `test_profile_routes.py`, `test_authz_profile.py`,
+`test_me_route.py`. Integration: `test_profile_contact_integration.py`.
+Frontend: `lib/profile.test.js`, `components/RegistrationForm.profileDefaults.test.js`, `views/ProfileView.test.js`.
+Design: `docs/design-decisions.md` (IS-68). The new columns are nullable with
+no backfill, so existing profiles are unaffected.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A user can save their phone, organisation and email/SMS preferences | `test_profile_service.py::test_saving_all_three`, `test_profile_routes.py::test_every_role_saves_all_three_to_their_own_profile[*]`, `test_profile_contact_integration.py::test_saving_all_three_and_reading_them_back`, `lib/profile.test.js` "sends all three once given" | `PATCH /me/profile`, `profile_service.py::update_own_profile`, migration `20261030000000_profile_contact_preferences.sql` |
+| Optional means optional: saving with them blank works and stores NULL | `test_profile_service.py::test_saving_with_the_optional_ones_blank_stores_null_not_empty_text`, `::test_saving_with_organisation_left_out_entirely`, `test_profile_routes.py::test_saving_with_the_optional_ones_blank`, `test_profile_contact_integration.py::test_saving_with_the_optional_ones_blank_stores_null`, `::test_the_database_refuses_blank_or_oversized_text[*]`, `lib/profile.test.js` "sends blank optional fields as null" | `profile_service.py::validate_profile_update` / `_optional_text`, constraints `profiles_phone_present` / `profiles_organisation_present` |
+| The saved values are read back through GET /me | `test_profile_service.py::test_reads_back_the_callers_own_saved_values`, `test_profile_routes.py::test_get_me_reads_back_what_was_saved`, `::test_get_me_returns_the_four_fields_as_null_when_never_given`, `test_me_route.py::test_me_returns_id_email_name_roles_for_authenticated_user` | `GET /me`, `profile_service.py::get_contact` |
+| A user cannot read another user's profile | `test_profile_service.py::test_the_read_is_scoped_to_the_callers_id`, `::test_reading_returns_only_the_four_fields_and_never_another_users`, `test_profile_routes.py::test_get_me_never_shows_another_users_contact_details` | `.eq("id", caller)` in `get_contact`; the id comes from the token |
+| A user cannot write another user's profile: no id in the URL; `id` / `email` in the body are a 400, not ignored | `test_profile_service.py::test_the_update_is_scoped_to_the_callers_id`, `::test_one_user_saving_never_writes_another_users_profile`, `::test_a_payload_naming_id_or_email_is_refused_and_nothing_is_written[*]`, `test_profile_routes.py::test_a_body_naming_id_or_email_is_a_400_and_writes_nothing[*]`, `::test_there_is_no_route_that_takes_another_users_id[*]`, `::test_two_users_each_write_only_their_own`, `test_profile_contact_integration.py::test_the_update_touches_only_the_callers_row`, `::test_a_signed_in_user_cannot_write_any_profile_directly` | `.eq("id", caller)` in `update_own_profile`, `FORBIDDEN_FIELDS`, `rules.py::rule_profile_edit_own`, no write RLS policy |
+| Every authenticated role may edit their own profile | `test_authz_profile.py::test_every_authenticated_user_may_edit_their_own_profile[*]`, `::test_profile_edit_own_is_wired_into_the_policy`, `test_profile_routes.py::test_patch_without_a_token_is_a_401` | `actions.PROFILE_EDIT_OWN`, `_RULES` |
+| Existing profiles, with NULL in the new columns, still load and still save | `test_profile_contact_integration.py::test_the_new_columns_exist_nullable_on_every_seeded_profile`, `::test_an_existing_profile_with_nulls_still_loads`, `::test_an_existing_profile_with_nulls_still_saves` | nullable columns, no default, no backfill |
+| (design) With nothing saved, Justin's register form is exactly as before; once saved, it prefills | `components/RegistrationForm.profileDefaults.test.js` (all), `test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing` | `lib/registrations.js::prefillFromProfile`, `registration_service.py::_db_profile_organisation` (both unchanged) |
+| The three fields on the profile page, per the wireframe; blank optional fields save | `views/ProfileView.test.js` (all, incl. "saves with the optional ones blank", "clearing saved values sends them as null") | `views/ProfileView.vue` (Justin's; `[PENDING JUSTIN'S SIGN-OFF]` commit) |
+| (design) Unset preferences stay NULL until the user changes one | `lib/profile.test.js` "leaves never-chosen preferences out", "sends both preferences as soon as one is changed" | `lib/profile.js::profilePayload` |
+| (design) Field validation: phone pattern when given, organisation length, preferences true/false/null, unknown fields refused | `test_profile_service.py::test_invalid_updates_are_400s[*]`, `::test_a_body_that_is_not_an_object_is_a_400[*]`, `test_profile_routes.py::test_an_invalid_phone_is_a_400`, `lib/profile.test.js` "field errors" | `profile_service.py::validate_profile_update`, `lib/profile.js::profilePhoneError` / `organisationError` |
+
+Each part of the own-profile guard was mutation-tested by hand once (broken,
+confirmed caught, restored), against a freshly reset local database:
+
+- **`.eq("id", caller)` on the update, deleted:** 19 failed.
+- **The refusal of `id`, removed:** 5 failed. The refusal of `email`,
+  removed: 4 failed. Either field was still a 400 through the unknown-field
+  check; the tests caught it by its code and message.
+- **`id` let past both checks:** 5 failed whether it was ignored or
+  written.
+
+Pinned as an open question, not a guarantee: any signed-in user can read
+every profile directly through the existing RLS policy
+(`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
+
+
+## Sprint 4 — Notification (Attendees) (IS-76, Justin)
+
+Unit: `test_notification_attendees.py` (who, what, when),
+`test_notification_hook_attendees.py` (which actions trigger which hook).
+Integration: `test_notification_attendees_integration.py`.
+Frontend: `lib/notifications.test.js`. Design: `docs/design-decisions.md`
+(IS-76). "Relevant event details" = event name, session date and time,
+venue.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| AC1 Registered with a place: a confirmation notice | `test_notification_attendees.py::test_ac1_a_confirmed_registration_is_confirmed_to_the_attendee_with_a_link`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[confirmed]`, `::test_a_refused_registration_triggers_nothing[*]` | `notification_service.py::registration_recorded`, `registration_service.py::register` / `_notify_registered` |
+| AC2 Session full: a waiting-list notice with their position | `test_notification_attendees.py::test_ac2_a_waitlisted_registration_says_so_with_the_place_in_the_queue`, `::test_ac2_without_a_known_place_the_waitlist_notice_still_goes`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[waitlisted]` | `notification_service.py::registration_recorded` / `_waitlist_position` |
+| AC3 Moved up from the waiting list: told they're now confirmed | `test_notification_attendees.py::test_ac3_ac4_the_withdrawer_and_the_attendee_moved_up_are_both_told`, `::test_ac3_a_promoted_registration_that_no_longer_exists_tells_only_the_withdrawer`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[r2]` | `notification_service.py::registration_withdrawn`, `registration_service.py::withdraw` (passes `promoted_registration_id` on) |
+| AC4 Own withdrawal confirmed | `test_notification_attendees.py::test_ac3_ac4_*`, `::test_ac4_with_nobody_moved_up_only_the_withdrawer_is_told`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[*]`, `::test_a_refused_withdrawal_triggers_nothing[*]` | `notification_service.py::registration_withdrawn` |
+| AC5 Relevant details changed: one notice, with a link, once confirmed again | `test_notification_attendees.py::test_ac5_a_date_or_time_change_is_told_once_reconfirmed[*]`, `::test_ac5_a_name_change_counts_for_every_session_wherever_it_was_logged`, `::test_ac5_a_new_venue_is_a_relevant_change`, `::test_ac5_dropping_one_of_several_venues_is_a_relevant_change`, `::test_a_deleted_venue_is_still_told_apart_by_its_kept_name`, `test_notification_hook_attendees.py::test_confirming_triggers_the_reconfirmed_hook`, `::test_a_refused_confirmation_triggers_nothing` | `notification_service.py::event_reconfirmed` / `_details_changed_since` / `_venue_changed_since`, `routes.py::confirm_event` / `_notify_attendees_reconfirmed` |
+| AC6 Changed then cancelled: only the cancellation | `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]` | `routes.py::cancel_event` (the details notice only ever comes from `confirm_event`) |
+| AC7 Nothing relevant changed: no notice | `test_notification_attendees.py::test_the_first_confirmation_tells_nobody`, `::test_ac7_no_relevant_change_means_no_notice[*]`, `::test_ac7_a_change_from_before_the_last_confirmation_is_old_news`, `::test_ac7_a_change_the_organiser_only_asked_for_changed_nothing`, `::test_ac7_rebooking_the_same_venue_is_no_change`, `::test_an_organiser_who_is_also_the_coordinator_makes_changes_that_count` | `notification_service.py::_details_changed_since` / `_venue_changed_since` |
+| AC8 Cancelled: registered and waitlisted attendees told | `test_notification_attendees.py::test_ac8_ac9_ac10_cancelling_tells_only_that_sessions_attendees`, `::test_ac8_the_cancellation_has_no_link_and_no_reason`, `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]`, `::test_a_refused_cancellation_triggers_nothing` | `notification_service.py::event_cancelled`, `routes.py::cancel_event` / `_notify_attendees_cancelled` |
+| AC9 Only that session's attendees | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_ac9_another_sessions_date_change_is_not_this_sessions_change` | `_attendee_ids` scoped to one `event_id`; per-session date check |
+| AC10 Not registered or waitlisted: nothing | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_cancelling_a_session_nobody_registered_for_writes_nothing` | `_attendee_ids` (status `confirmed` / `waitlisted` only) |
+| AC11 Names the event and session; in-app; links to the attendee's page | `test_notification_attendees.py::test_the_session_is_named_by_the_event_and_its_start[*]`, `::test_a_session_without_a_name_still_reads`, `lib/notifications.test.js` ("links an attendee's session notification ...", "is null when the caller cannot reach that page ...", "only ever points at routes ...") | `notification_service.py::session_label`, `ENTITY_ATTENDEE_EVENT`, `lib/notifications.js::ENTITY_ROUTES.attendee_event` |
+| (design) A failed notification never fails the action | `test_notification_attendees.py::test_a_failed_attendee_notification_is_logged_and_swallowed[*]` | `_best_effort` |
+| (design) Completing an event tells attendees nothing | `test_notification_hook_attendees.py::test_completing_tells_attendees_nothing` | `routes.py::complete_event` (no hook) |
+
+Integration (`test_notification_attendees_integration.py`, local stack):
+the real register/withdraw functions notify confirmed, waitlisted (with
+place) and moved-up attendees; cancellation reaches only that session's
+current attendees, with no link; a time change is told on reconfirmation
+through real `transition()` history; an irrelevant change or an organiser's
+request tells nobody; a venue swap is told and rebooking the same venue is
+not, against real `venue_bookings` / `venue_booking_status_log`.
+

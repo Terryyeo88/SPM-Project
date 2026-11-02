@@ -242,11 +242,12 @@ decisions worth double-checking.
 - **A freed place goes straight to the next person on the waiting list.**
   Week 2 says "eligible attendees are notified when a slot opens up to
   apply", which could mean they're offered the place rather than given it.
-  With no notifications yet, we move them up automatically. Confirm.
+  We move them up automatically, and since IS-76 they're notified that
+  their registration is now confirmed. Confirm.
 
-- **Not built yet:** notifications (Notification story), editing a
-  registration after submitting it, and organiser/coordinator views of who
-  registered.
+- **Not built yet:** editing a registration after submitting it, and
+  organiser/coordinator views of who registered. (Attendee notifications:
+  IS-76.)
 
 - **Organiser "discretion" and manual closing.** Week 4 says organisers have
   discretion over registration and close it manually. Here the window the
@@ -1238,3 +1239,128 @@ Catalogue (IS-61)".
   the same reading as IS-60. Only those events' bookings are released when
   a venue is deleted; finished and rejected events keep their record.
   Please confirm rejected events shouldn't lose their booking too.
+
+## Notification System (IS-69, 27 Oct)
+
+- **The acceptance criteria are our reading.** IS-69's ticket text isn't in
+  the repo, so `docs/traceability.md` maps working criteria (stored per
+  user; own list, newest first, with an unread count; mark one or all read;
+  never anyone else's; a failure never undoes the action). Please confirm
+  or replace them with the ticket's own.
+- **In-app only; email and SMS are deferred.** No mail or SMS provider
+  exists, and registrations' `notify_email` / `notify_sms` choices aren't
+  read yet. Please confirm in-app is enough for now, or say which
+  notifications must also go by email or SMS.
+- **Decisions go to the session's current coordinator**, not whoever made
+  the request, since a reassigned session's new coordinator is the one who
+  acts. Please confirm.
+- **Nobody is told about their own action.** A coordinator cancelling their
+  own venue booking gets no notification, and Venue Staff aren't told
+  either. Please confirm, or say whether Venue Staff should be.
+- **A safety submission goes to every Safety Officer.** There's no
+  assignment step, so each gets their own copy. Please confirm.
+- **A failed notification is logged, not retried.** The action it was about
+  still succeeds. Please confirm that's acceptable, or whether some
+  notifications must be guaranteed (which needs a retry or outbox).
+- **No reminder notifications.** Nothing is sent on a schedule (e.g. before
+  an event starts). That needs a scheduler, which has no owner or ticket.
+  Please confirm reminders are out of scope.
+- **Still not notified** (no hook existed; the owning stories can now add
+  one `notify(...)` call each): the organiser on cancellation (IS-39, see
+  above), the coordinator on a new change request, and attendees promoted
+  off a waiting list. Please confirm which are needed.
+
+## User contact and preferences (IS-68, 30 Oct)
+
+- **Justin: is this what you meant?** Your Attendee Registration code
+  already answers how the profile relates to registrations, so this asks
+  you to confirm, not to decide. IS-68 adds `phone`, `organisation`,
+  `notify_email` and `notify_sms` to profiles and to `GET /me`, which turns
+  on two pieces of your code as written:
+  1. `prefillFromProfile` (`frontend/src/lib/registrations.js`): a new
+     registration's phone, organisation and notification choices now
+     *start from* the profile. The attendee can still change them per
+     registration, and each registration stores its own.
+  2. `_db_profile_organisation` (`registration_service.py`): ticking
+     "include organisation" now copies the profile's organisation in.
+
+  So the profile preference is the default for new registrations: it
+  doesn't override them, and it isn't kept separate. With nothing saved
+  (every existing user), the form is exactly as before; that is tested.
+  Please confirm that's what you meant, or say if the preference should
+  instead stay separate or override.
+- **Nothing reads the communication preferences except that prefill.**
+  Notifications are in-app only (IS-69), so a profile's email/SMS
+  preference sends nothing until email or SMS delivery has an owner and a
+  ticket. Please confirm that's acceptable for now.
+- **`GET /me` has no `@require` decorator** (`backend/app/me/routes.py`).
+  It relies on authentication alone, and that hasn't changed. It now also
+  returns the caller's phone, organisation and preferences, still only
+  their own. Noticed during IS-68, and deliberately not fixed here, since
+  it predates this ticket. Please decide whether it should get a
+  `profile.view_own` action like every other route.
+- **Any signed-in user can read every profile's phone directly.** The
+  existing "authenticated read profiles" RLS policy lets any authenticated
+  user select every profile row through the publishable key, so it now
+  covers the new columns too. Flask itself only ever returns your own.
+  Narrowing the policy (to `id = auth.uid()`, or column privileges) changes
+  what other features may read about people, so it wasn't done here.
+  Pinned by a test so it can't change unnoticed. Please decide whether to
+  narrow it, and who owns that.
+- **Phone is optional on the profile.** The wireframe marks only
+  Organisation as optional. Making phone required would stop existing users
+  saving an organisation or a preference without also giving a phone. A
+  registration still requires one. Please confirm.
+- **Both preferences may be false on the profile.** A registration still
+  needs at least one; the register form then asks. Please confirm.
+- **Unmatched URLs answer 500, not 404, app-wide.** The catch-all
+  `@app.errorhandler(Exception)` in `app/__init__.py` also catches
+  werkzeug's NotFound and MethodNotAllowed. Found while testing that
+  `/me/profile/<id>` doesn't exist. This predates IS-68 and wasn't
+  changed. It refuses the request either way, but the status is wrong.
+- **The wireframe isn't in the repo.** The fields come from the ticket and
+  from `RegistrationForm.vue`'s comment on the same Edit Profile screen.
+  This also answers the Attendee Registration entry above ("Profiles don't
+  have phone or a contact preference yet").
+
+### Answered by Justin (31 Oct) -- built as IS-75 (fix/IS-75-profile-contact-rules)
+
+- **Prefill and organisation copy: confirmed as intended.** The profile is
+  the starting value for a new registration; the attendee can still change
+  it, and each registration keeps its own copy. Changing the profile later
+  doesn't change registrations already made.
+- **Phone is optional, and +65 followed by 8 digits when given.** Stored as
+  `+6591234567`; the profile page shows `+65` as a fixed prefix.
+- **Both preferences off is NOT allowed.** Email is on by default and at
+  least one must stay on (supersedes "Both preferences may be false").
+- **SMS needs a phone number.** The SMS box is disabled until a phone is
+  typed; saving SMS with no phone (or clearing the phone while SMS is on)
+  is refused with a message.
+- **Organisation is read-only.** Week 4 clarifications: organisers and
+  organisations are set up outside the system, so users don't type their
+  own. Shown on the profile, refused by `PATCH /me/profile`, still copied
+  into registrations.
+- **Communication preferences sending nothing yet: accepted for now.**
+- Still open: `GET /me` without `@require`, the profiles read policy, and
+  unmatched URLs answering 500.
+
+
+## Notification (Attendees) (IS-76, Justin, 1 Nov)
+
+Decided and built; worth confirming with the customer:
+
+- **Details changes are told when the session is confirmed again, not at
+  each edit.** The story says "when relevant event details are changed".
+  A change to a confirmed session sends it back to planning, and the
+  change isn't final until venue, equipment and the Safety Officer have
+  signed off again, so attendees hear once, at reconfirmation. If it's
+  cancelled instead, they hear only about the cancellation. Confirm that
+  no early "this event is being updated" notice is wanted.
+- **"Relevant" is the name, the session's date and time, and its venue.**
+  Equipment, description, attendance and the rest don't notify attendees.
+- **The cancellation notice gives no reason and no link.** The reason is
+  internal planning information, and a cancelled session's attendee page
+  can't be opened any more.
+- **In-app only.** The email/SMS preferences collected at registration and
+  on the profile (IS-68) are stored but not used to send anything yet.
+

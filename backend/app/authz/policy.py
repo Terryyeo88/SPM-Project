@@ -79,6 +79,10 @@ from app.authz.rules import (
     rule_event_submit,
     rule_event_view,
     rule_event_view_public,
+    rule_notification_list,
+    rule_notification_mark_all_read,
+    rule_notification_mark_read,
+    rule_profile_edit_own,
     rule_registration_list,
     rule_registration_withdraw,
     rule_room_layout_list,
@@ -165,6 +169,10 @@ _RULES: dict[str, RuleFunc] = {
     actions.SAFETY_REVIEW_APPROVE: rule_safety_review_approve,
     actions.SAFETY_REVIEW_REJECT: rule_safety_review_reject,
     actions.SAFETY_REVIEW_REQUEST_CHANGES: rule_safety_review_request_changes,
+    actions.NOTIFICATION_LIST: rule_notification_list,
+    actions.NOTIFICATION_MARK_READ: rule_notification_mark_read,
+    actions.NOTIFICATION_MARK_ALL_READ: rule_notification_mark_all_read,
+    actions.PROFILE_EDIT_OWN: rule_profile_edit_own,
 }
 
 

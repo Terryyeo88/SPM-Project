@@ -1919,3 +1919,419 @@ including whether a venue may close after midnight.
 everyone else (venues are shared inventory every coordinator can list, so
 there's nothing to hide with a 404). Edit is `POST /venues/<id>`, not PATCH,
 matching `POST /room-layouts/<id>`.
+
+## Notification System (IS-69, Sprint 4, 2026-10-27)
+
+IS-69 builds where notifications land. Until now every story that said
+someone "is notified" called a `print()` placeholder. Built: table
+`public.notifications` (migration `20261027000000_notifications.sql`),
+`app/notifications/notification_service.py`, routes in
+`app/notifications/routes.py`, actions `notification.list` /
+`notification.mark_read` / `notification.mark_all_read`, and the web app's
+notifications page (see "The notifications page" below). The ticket's acceptance
+criteria weren't in the repo, so the working criteria in
+`docs/traceability.md` are our reading. They and the calls below are flagged
+in docs/open-questions.md.
+
+### The five hooks now write notifications, with their signatures unchanged
+
+The five `_notify_*` hooks keep their names and arguments. Each body is now
+one call handing those arguments to `notification_service`. Working out who
+to tell, and every query that needs, lives in `notification_service`, so the
+stories' own modules gain no notification queries:
+
+| Hook (owner) | Calls | Who is told |
+|---|---|---|
+| `coordinator_service._notify_coordinator_assigned` (Justin) | `coordinator_assigned` | the coordinator assigned or reassigned |
+| `booking_service._notify_booking_decision` (Josiah) | `venue_booking_decided` | the session's coordinator, for confirmed / rejected |
+| `equipment_service._notify_request_decision` (Nawaz; also `change_service`) | `equipment_request_decided` | the session's coordinator, for confirmed / rejected / change accepted / change rejected |
+| `safety_service._notify_safety_review` (Justin) | `safety_review_changed` | every Safety Officer for submitted / withdrawn; the session's coordinator for a decision |
+| `venue_service._notify_venue_deleted` (Aaralyn) | `venue_booking_released` | the session's coordinator |
+
+Four existing test files monkeypatch hooks (`test_coordinator_assignment.py`,
+`test_coordinator_assignment_status.py`, `test_equipment_change.py`,
+`test_equipment_reject.py`). They pass untouched, which is the evidence the
+calling code didn't move. One `test_notification_hook_<name>.py` per hook
+checks it passes its arguments through unchanged. Each hook's rewiring and
+its test are their own commit, pending its owner's sign-off, so any of them
+can be dropped and the suite stays green.
+
+### Who is told: the session's current coordinator
+
+A decision on a venue booking or equipment request goes to
+`events.coordinator_id`, not to the booking's or request's `requested_by`.
+Since reassignment (Week 7 #5), they can differ, and the coordinator running
+the session now is the one who has to act on a decision. Nobody is told
+about their own action: a coordinator cancelling their own booking gets
+nothing, so the hook ignores `cancelled`. A session with no coordinator
+notifies nobody.
+
+A safety submission goes to every Safety Officer, since any of them may pick
+it up (there's no assignment step). One row per officer, so each person's
+read state is their own.
+
+### In-app only
+
+The container diagram already gives the API "in-app notifications" and the
+SPA the job of showing them. Email and SMS are deferred. No mail or SMS
+provider is set up, which means credentials, sender verification and a
+delivery and bounce story nobody has scoped. Registrations' `notify_email` /
+`notify_sms` preferences are stored, but nothing reads them yet.
+
+### Writing is best effort: a failure is logged, not raised
+
+Every hook runs after its story's own change is written. If writing the
+notification then failed and raised, the caller would get a 500 for an
+action that already happened (the booking IS confirmed), and might retry
+it. So each writing function catches `Exception`, logs it with the
+traceback (`logger.exception`), and returns. The trade-off: a notification
+can be lost silently, as far as the user can tell. The log is the only
+record, and there is no retry or outbox. That's acceptable while a
+notification only says something the user can also see on the relevant
+page. It would not be once a notification is the only way someone learns
+something.
+
+`BaseException` is not caught. The unit-test guard
+(`UnitTestDatabaseAccessError`) is one on purpose, so a unit test that
+reaches the real database still fails loudly. With the new conftest fixture
+`_notifications_go_to_a_fake` disabled, 26 existing unit tests fail that
+way; with it, they pass.
+
+### The entity link has no foreign key
+
+`entity_type` / `entity_id` say what a notification is about (`event` or
+`safety_review` so far), so the frontend can link to it. One column can't
+reference several tables, so there is no foreign key. Deleting the entity
+leaves the notification pointing at nothing (an orphan). The table only
+checks that a link has both halves or neither. Deletes are rare
+(permanently deleted venues, drafts), and a link that leads nowhere should
+be shown as plain text by the frontend. The alternative (one nullable
+foreign-key column per entity type) needs a migration per new type, for a
+cost that doesn't exist yet. `type` is text for the same reason, not an
+enum: an enum value can never be removed.
+
+### RLS: the recipient reads their own, nobody writes
+
+Flask uses the service-role key and does the real check in `app/authz`. RLS
+is still scoped to the recipient (`recipient_id = auth.uid()`), not the
+"any authenticated user" placeholder on older tables, because a
+notification names events and people. A signed-in caller going around Flask
+must not read anyone else's. There is no insert, update or delete policy,
+so only the backend writes. Proven by
+`test_notifications_integration.py`. Mutation-tested by hand once: loosening
+the live policy to `auth.role() = 'authenticated'` made
+`test_a_signed_in_user_reads_only_their_own_notifications_directly` fail
+(Alice's direct read returned Bob's notification). With it restored, all
+pass.
+
+### Reading and marking read
+
+- `GET /notifications` gives the caller's own, newest first, capped at 50
+  (`?unread=true` for unread only), plus `unread_count`.
+- `GET /notifications/unread-count` is the bell's cheap poll.
+- `POST /notifications/<id>/read` marks one read.
+- `POST /notifications/read-all` marks all of the caller's read.
+
+Every query is scoped to the caller in the service, because
+`notification.list` is role-free and can't scope a query (same warning as
+`EVENT_LIST`). Someone else's notification id is a 404, as is a malformed
+one (instead of Postgres's 500). Marking read is conditioned on
+`read_at IS NULL`, so a second mark keeps the first read time and isn't an
+error. Mutation-tested by hand: removing that condition, and separately the
+recipient scope on the list, each made the unit and integration tests fail.
+
+### The notifications page
+
+`/notifications` (`views/NotificationsView.vue`) lists the caller's own,
+newest first as the backend sends them, unread ones shaded and in bold, with
+"Mark all as read" and an empty state. Clicking an unread one marks it read.
+Every route returns the new unread count, so the page takes the count from
+the response and doesn't refetch. It hands the count to a small Pinia store
+(`stores/notifications.js`) so anything else showing it agrees.
+
+- **Open to every role.** Its `ROUTE_ACCESS` entry lists every role, like
+  `profile`, matching the backend's role-free `notification.*` rules. It is
+  not a nav link: `NAV_LINKS` can't show a count, and `navRoles()` hides
+  links from the dashboard-only roles.
+- **Links only to pages that exist.** `lib/notifications.js::ENTITY_ROUTES`
+  maps `event` to the event page and `safety_review` to the safety review.
+  A notification links there only if the caller's roles can reach that page,
+  since the router would only bounce them to the dashboard. Any other entity
+  type is plain text, and no route was added for anyone else's story.
+  Following a link also marks the notification read.
+- **A link can still lead to a deleted entity.** There's no foreign key (see
+  above), so the page it opens shows its own "not found".
+- **The bell** sits in `AppNavBar.vue` (Aaralyn's), beside the profile icon,
+  for every signed-in role. It fetches `GET /notifications/unread-count`
+  each time a page mounts the nav bar, and doesn't poll in between. It's its
+  own commit, pending Aaralyn's sign-off; without it the page still works,
+  reached by its URL.
+
+### Out of scope
+
+- **A reminder scheduler** (e.g. "your event starts tomorrow"). It needs a
+  scheduler process; none exists, and APScheduler isn't a dependency. It
+  currently has no owner or ticket.
+- **New notification triggers.** Only the five existing hooks are wired.
+  Events no hook covered are left to the stories that own them: IS-39's
+  "Organizer is notified of cancellation", change-request notifications,
+  and waitlist promotion. Each is now one `notify(...)` call.
+- **PR #45** (Josiah, open) adds a sixth hook,
+  `block_service._notify_coordinator_venue_blocked`. It needs the same
+  one-line rewiring onto this service once it lands.
+
+## User contact and preferences (IS-68, Sprint 4, 2026-10-30)
+
+IS-68 stores the Edit Profile wireframe's Phone Number, Organisation
+(optional) and Communication Preferences (Email notifications / SMS
+notifications) on each user's profile. Built: four columns on
+`public.profiles` (migration `20261030000000_profile_contact_preferences.sql`),
+`app/me/profile_service.py`, the fields added to `GET /me`, a new
+`PATCH /me/profile`, and the action `profile.edit_own`. Frontend helpers are
+in `frontend/src/lib/profile.js`. The wireframe image isn't in the repo, so
+the field list comes from the ticket and from the comment in
+`RegistrationForm.vue`, which was laid out after the same screen.
+
+### The new columns are nullable with no backfill, so existing profiles are unaffected
+
+`phone`, `organisation`, `notify_email` and `notify_sms` are all nullable,
+with no default and no backfill. Adding a column without a default only
+changes the catalogue, so no existing profile is rewritten. NULL is a valid
+value for each, so every existing profile stays valid and still loads and
+saves. `test_profile_contact_integration.py` proves this against the local
+database: every seeded profile (written id, name and email only, the
+pre-IS-68 shape) is NULL in all four columns and still loads and saves.
+
+NULL means "not given yet". For the two preferences that is distinct from
+false ("chose not to"), which is why they have no default either. Blank text
+is stored as NULL, never `''`; two check constraints refuse `''` (and an
+over-long value) in the database too. Both pass on NULL, so they hold for
+every existing row.
+
+### Adding them activates two pieces of Justin's existing code, deliberately
+
+Justin's Attendee Registration was written to pick these fields up as soon
+as a profile story added them. IS-68 adds them, so both now take effect.
+That is intended, not a side effect:
+
+1. **`prefillFromProfile` in `frontend/src/lib/registrations.js`.** The
+   register form now starts from the profile's phone, organisation and
+   notification choices, because `GET /me` returns them.
+2. **`registration_service._db_profile_organisation` in
+   `backend/app/registrations/registration_service.py`.** It reads the
+   profile row with `select("*")` and copies its `organisation` into a
+   registration when the attendee ticks "include organisation". Before
+   IS-68 there was no such column, so it always found none.
+
+**With no data saved, both behave exactly as before.** This is the case
+every existing user is in, and the regression that would hurt users without
+anyone noticing. A profile whose four fields are all NULL gives the same
+register form it did before `GET /me` returned them at all: the same fields,
+the same defaults (phone blank, no organisation, email on, SMS off) and the
+same request body. `RegistrationForm.profileDefaults.test.js` asserts that
+directly, and
+`test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing`
+asserts the backend half. Neither of Justin's files is changed. Justin is
+asked to confirm this is what he meant (docs/open-questions.md, IS-68).
+
+### PATCH /me/profile: your own profile, with no id anywhere
+
+`PATCH /me/profile` updates the caller's own profile. The profile is the
+token's user (`current_user().id`), never an id from the request:
+
+- **There is no id in the URL,** so another user's profile isn't reachable
+  through this route at all. That is why this route has no 404-vs-403
+  question: there is no other user's profile to hide (404) or refuse (403).
+- **The body refuses `id` and `email` outright.** A request containing
+  either is a 400 with code `profile_field_not_editable`, not silently
+  ignored. Email is the login identity (Supabase Auth's, mirrored on
+  profiles) and isn't part of this ticket.
+- **Any other field outside the four is a 400 too** (`Unknown profile
+  fields`). That includes `name`, which isn't editable here either.
+- **It is a partial update:** only the keys present are changed.
+- **The update query is scoped with `.eq("id", caller)`.** That scope is
+  what keeps "own" true, since the rule can't check it.
+
+Authz follows the 5-step checklist in docs/authz-usage.md:
+
+1. **Protocol: none added.** There is no resource to load: the route names
+   no profile, so there's nothing for a rule to compare against.
+2. **Action:** `PROFILE_EDIT_OWN = "profile.edit_own"` in `actions.py`.
+3. **Rule:** `rule_profile_edit_own` returns ALLOW for any authenticated
+   caller, whatever their role, since every user has a profile. It has the
+   same warning as `EVENT_LIST`: ALLOW means "you may edit *a* profile,
+   yours", and the service is what keeps it to yours.
+4. **Registered** in `_RULES` in `policy.py`.
+5. **`@require(PROFILE_EDIT_OWN)`** on the route, with no loader.
+
+### Validation
+
+- **Phone is optional on the profile.** The wireframe marks only
+  Organisation as optional. But every existing profile has no phone, and a
+  user must be able to save an organisation or a preference without one.
+  When a phone is given, it must match the same pattern registrations use
+  (`registration_service.PHONE_PATTERN`, imported, not copied). A
+  registration still requires a phone of its own.
+- **Organisation:** optional, at most 200 characters.
+- **The preferences** take true, false or null. Both false is allowed:
+  nothing sends email or SMS yet, and a registration still asks for at least
+  one of its own.
+
+### The preferences are stored, and only the register form's prefill reads them
+
+IS-69's notifications are in-app only, and each registration keeps its own
+`notify_email` / `notify_sms` (`20261005000000_registrations.sql`). So a
+profile-level preference sends nothing. The only thing that reads it is
+`prefillFromProfile`, which takes it as the new registration's starting
+choice. Logged in docs/open-questions.md.
+
+On the profile page, an unset preference shows the same starting values the
+register form uses (email on, SMS off), so the page shows what a new
+registration will start with. It stays NULL until the user changes one:
+saving only a phone number doesn't turn "never chosen" into a choice
+(`profilePayload` in `lib/profile.js`).
+
+### RLS reviewed, not changed
+
+RLS was already on for `profiles`, with the placeholder policy
+"authenticated read profiles": any signed-in user may select every profile
+through the publishable key. That now includes phone. Narrowing it changes
+what every other feature may read about people, so it needs its own story.
+It is logged in docs/open-questions.md and pinned by
+`test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`,
+so it can't change unnoticed. There is still no write policy, so only the
+backend writes. A signed-in user can't update any profile directly, not
+even their own; that is tested.
+
+### Mutation-tested by hand
+
+The guard is "a user can only read and write their own profile". Each part
+was broken once on its own, the profile tests were run (unit, route and
+integration, against a freshly reset local database), and then it was
+restored:
+
+| Mutant | Result |
+|---|---|
+| `.eq("id", caller)` deleted from the update query | 19 failed (13 unit/route, 6 integration) |
+| `id` removed from the refused fields | 5 failed |
+| `email` removed from the refused fields | 4 failed |
+| `id` let past both checks (refused fields and unknown fields), so silently ignored | 5 failed |
+| the same, and `id` also written into the update | 5 failed |
+
+**One caveat on the `id` and `email` rows.** With only the refusal removed,
+the field is still caught by the unknown-field check, so the request is
+still a 400 and nothing is written. The tests fail there only because they
+assert the specific code `profile_field_not_editable` and its message. The
+two stronger `id` mutants remove both checks; the 400-and-nothing-written
+assertions catch those. Restored: 69 passed.
+
+### Out of scope
+
+- **`GET /me` has no `@require` decorator.** It was already like that, and
+  it wasn't changed. Logged in docs/open-questions.md.
+- **Editing name or email.**
+- **Anything that sends email or SMS.**
+
+### IS-75 follow-up: the agreed acceptance criteria (2026-10-31)
+
+Justin answered the IS-68 open questions; IS-75 (`fix/IS-75-profile-contact-rules`)
+brings the code in line. This supersedes "nullable with no backfill" and
+"both preferences may be false" above.
+
+- **Migration `20261031000000_profile_contact_rules.sql`.** Existing phones
+  are normalised to `+65` + 8 digits (spaces/hyphens removed, `+65` added
+  to a bare 8 digits); anything unfixable is cleared. NULL preferences
+  become email on / SMS off, SMS is turned off where there is no phone,
+  and email is turned on where both are off. The preferences then become
+  `NOT NULL` with defaults, and three checks are added:
+  `profiles_phone_sg`, `profiles_notify_at_least_one`,
+  `profiles_sms_needs_phone`. Re-runnable.
+- **`profile_service` checks the profile after the change, not the
+  request.** It reads the caller's row, merges the partial update and
+  checks the rules on the result, so `{"phone": null}` is refused while
+  SMS is on. Shape errors are refused before any read; nothing is written
+  if any check fails.
+- **Organisation is read-only.** Added to the refused fields (400,
+  `profile_field_not_editable`), still returned by `GET /me`.
+- **Frontend.** `lib/profile.js` sends phone and both preferences every
+  time (`hasSavedPreferences` is gone: there is no "never chosen" state
+  any more). The SMS box is disabled only while unticked with no phone,
+  so a user who clears their phone can still untick SMS.
+
+
+## Notification (Attendees) (IS-76, Justin, 2026-11-01)
+
+Built on IS-69's notification table and `notify()`, the same way: one
+`_notify_*` hook per trigger in the story's own module, passing its
+arguments to one function in `app.notifications.notification_service`,
+which works out who to tell and writes the rows. No migration
+(`notifications.type` is text), no new page.
+
+### Who is told
+
+A session's attendees are its registrations with status `confirmed` or
+`waitlisted`. Withdrawing deletes the row, so nobody else has one. Each
+session is its own `events` row, so a change or cancellation of one
+session of a request never reaches another session's attendees.
+
+### Details changes are told at reconfirmation
+
+`confirm_event` calls `event_reconfirmed`. It does nothing on a session's
+first confirmation: registration only opens once a session is confirmed,
+so there's nobody to tell. On a later confirmation it looks at what
+changed since the previous `confirmed` entry in `event_status_log`:
+
+- `event_logs` entries since then: a change to `name` anywhere in the
+  request (it's shared and logged once), or to this session's
+  `preferred_start/end_date/time`. Entries the organiser only asked for
+  (`event_log.entry_kind` "requested") are skipped: they changed nothing.
+- The venue: the session's set of confirmed venues now, compared with the
+  set at the previous confirmation, replayed from
+  `venue_booking_status_log`. Rebooking the same venue is no change, and
+  a permanently deleted venue is told apart by the name kept on the
+  booking.
+
+If anything relevant changed, one notification goes to each attendee:
+details updated, see the event page. It doesn't say what changed
+(agreed with Justin: simpler, and the page shows the current details).
+
+Why not notify at each edit: an edit to a confirmed session sends it back
+to planning, and arrangements are reviewed again. Telling attendees at
+each step would send several notices, some about details that never go
+ahead. Every path back to planning (coordinator edit, approved change
+request, cancelled venue booking, deleted venue, and later Jo's venue
+blocking) ends at the same confirm route, so this one hook covers them
+all.
+
+### Messages and links
+
+Every message names the event and the session's start
+(`"Tech Talk" on 12 Nov 2026, 2:00 PM`), since a request's sessions share
+a name. Links use a new entity type, `attendee_event`, for the attendee's
+own page (`/attend/<id>`): attendees can't open the `event` page, so an
+`event` link would show as plain text. The cancellation has neither a
+link (the page can't be opened once cancelled) nor the reason (internal).
+
+### Best effort
+
+As IS-69: every hook runs after its own change succeeded, and a failed
+notification is logged and never fails the request.
+
+### Mutation-tested by hand
+
+Each guard broken once, confirmed caught, restored:
+
+- First-confirmation guard removed: 1 failed (it raised and was swallowed,
+  so the test also checks nothing was logged as a failure).
+- Organiser-requested entries counted: 1 failed.
+- The "since the last confirmation" filter removed: 1 failed.
+- Waitlisted attendees left out: 11 failed.
+- Venue comparison always "no change": 3 failed.
+- Date changes counted from any session: 1 failed.
+
+### Out of scope
+
+- Email/SMS (preferences are stored, not used).
+- Bookmarks (a separate story).
+- Reminders before an event.
+

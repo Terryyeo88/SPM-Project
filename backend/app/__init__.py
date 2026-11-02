@@ -51,6 +51,7 @@ def _register_blueprints(app: Flask) -> None:
     from app.events.routes import events_bp
     from app.health.routes import health_bp
     from app.me.routes import me_bp
+    from app.notifications.routes import notifications_bp
     from app.registrations.routes import registrations_bp
     from app.room_layouts.routes import room_layouts_bp
     from app.safety.routes import safety_bp
@@ -67,3 +68,4 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(booking_conflicts_bp)
     app.register_blueprint(room_layouts_bp)
     app.register_blueprint(safety_bp)
+    app.register_blueprint(notifications_bp)

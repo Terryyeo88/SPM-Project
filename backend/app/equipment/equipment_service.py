@@ -36,6 +36,7 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import NotFoundError, ValidationError
 
 # The event's own [start, end) window, reused rather than re-derived so an
@@ -687,7 +688,6 @@ def reject_request(request_id: str, reason, decided_by: str) -> dict:
 
 
 def _notify_request_decision(request_id: str, decision: str) -> None:
-    """Hook for the Notification System story. No-op placeholder, same
-    shape as booking_service._notify_booking_decision -- no notification
-    plumbing exists anywhere in this codebase yet."""
-    print(f"[notify] equipment request {request_id} {decision}")
+    """The session's coordinator gets an in-app notification of a decision
+    (IS-69, notification_service.equipment_request_decided)."""
+    notification_service.equipment_request_decided(request_id, decision)
