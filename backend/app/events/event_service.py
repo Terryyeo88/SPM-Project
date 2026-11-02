@@ -23,6 +23,7 @@ from app.authz.actions import EVENT_VIEW
 from app.authz.policy import can
 from app.events.transitions import TransitionConflictError, record_creation, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.room_layouts.room_layout_service import list_room_layouts
 from app.shared.errors import ValidationError
 
@@ -578,6 +579,7 @@ def _submit_sessions(
     # what moves it on to under_review.
 
     result = supabase.table("events").select("*").in_("id", submitted_ids).execute()
+    _notify_organizer(submitted_ids[0], "submitted", submitted_by)
     return result.data or []
 
 
@@ -809,7 +811,15 @@ def _decide(
             transition(session["id"], to_status, decided_by, reason=reason, expected_from=from_status)
         except TransitionConflictError:
             continue
+    if to_status in ("approved", "rejected"):
+        _notify_organizer(event_id, to_status, decided_by)
     return decided
+
+
+def _notify_organizer(event_id: str, what: str, actor_id: str | None = None) -> None:
+    """The organizer is told how their request is going (IS-23,
+    notification_service.organizer_event_news)."""
+    notification_service.organizer_event_news(event_id, what, actor_id)
 
 
 def approve_event_request(event_id: str, event: SimpleNamespace, approved_by: str):

@@ -300,6 +300,7 @@ def confirm_event(event, event_id):
             "request a venue again before confirming."
         )
     updated = _move(event, event_id, "confirmed")
+    _notify_organizer(event_id, "confirmed")
     _notify_attendees_reconfirmed(event_id)
     return jsonify(updated), 200
 
@@ -358,11 +359,14 @@ def cancel_event(event, event_id):
     IS-76 AC8: the session's registered and waitlisted attendees are told
     it was cancelled (without the reason).
 
+    IS-23: the organizer is told too (the reason is on the event page).
+
     IS-26 AC4: Technical Support Staff are told too, if the session had an
     equipment request waiting or confirmed."""
     updated = _move(event, event_id, "cancelled")
     released = release_event_equipment(event_id)
     released_bookings = release_bookings_for_event(event_id, "Event cancelled", changed_by=current_user().id)
+    _notify_organizer(event_id, "cancelled")
     _notify_attendees_cancelled(event_id)
     _notify_technical_support_cancelled(event_id)
     return jsonify(
@@ -378,6 +382,11 @@ def cancel_event(event, event_id):
 def _notify_attendees_reconfirmed(event_id: str) -> None:
     """IS-76 AC5/AC7 (notification_service.event_reconfirmed)."""
     notification_service.event_reconfirmed(event_id)
+
+
+def _notify_organizer(event_id: str, what: str) -> None:
+    """IS-23 (notification_service.organizer_event_news)."""
+    notification_service.organizer_event_news(event_id, what, current_user().id)
 
 
 def _notify_technical_support_cancelled(event_id: str) -> None:

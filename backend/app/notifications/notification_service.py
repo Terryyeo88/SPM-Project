@@ -13,6 +13,11 @@ Two halves:
     safety_service._notify_safety_review             -> safety_review_changed
     venue_service._notify_venue_deleted              -> venue_booking_released
 
+  IS-23 (Notification (Event Organizer)) -- the "Event Organizer" section:
+
+    event_service._notify_organizer                  -> organizer_event_news
+    events.routes._notify_organizer                  -> organizer_event_news
+
   IS-26 (Receive Technical Support Notifications) -- the "Technical Support
   Staff" section:
 
@@ -119,6 +124,13 @@ TECHNICAL_SUPPORT_TIMING_FIELDS = frozenset(
 )
 TECHNICAL_SUPPORT_FIELDS = TECHNICAL_SUPPORT_TIMING_FIELDS | {"equipment", "room_layout"}
 _LIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
+
+# IS-23 (Notification (Event Organizer)).
+EVENT_REQUEST_SUBMITTED = "event_request_submitted"
+EVENT_REQUEST_APPROVED = "event_request_approved"
+EVENT_REQUEST_REJECTED = "event_request_rejected"
+EVENT_CONFIRMED = "event_confirmed"
+EVENT_CANCELLED_ORGANIZER = "event_cancelled_organizer"
 
 
 def _best_effort(func):
@@ -346,6 +358,45 @@ def technical_support_event_news(
         type_ = EQUIPMENT_EVENT_CHANGED
         message = f'The equipment or room layout for "{name}" was changed. Check its equipment booking.'
     notify(_technical_support_ids(actor_id), type_, message, ENTITY_EQUIPMENT_REQUEST, requests[0]["id"])
+
+
+# -- Event Organizer (IS-23) --------------------------------------------------
+#
+# The organizer who owns the request is told how it is going: it was
+# submitted, the coordinator approved or rejected it, a session was
+# confirmed, a session was cancelled. Decisions apply to the whole request
+# (events.event_service._decide), so approval and rejection are one
+# notification per request; confirming and cancelling are per session, so
+# those name the session. A rejection or cancellation does not repeat the
+# reason: it stays on the event page (status history), as IS-41 does for
+# equipment. The organizer is told of their own submission (the criterion
+# asks for it) but of nothing else they did themselves.
+
+_ORGANIZER_NEWS = {
+    "submitted": (EVENT_REQUEST_SUBMITTED, 'Your event request "{name}" was submitted.'),
+    "approved": (EVENT_REQUEST_APPROVED, 'Your event request "{name}" was approved.'),
+    "rejected": (
+        EVENT_REQUEST_REJECTED,
+        'Your event request "{name}" was rejected. Open it to see the reason.',
+    ),
+    "confirmed": (EVENT_CONFIRMED, "{label} has been confirmed."),
+    "cancelled": (EVENT_CANCELLED_ORGANIZER, "{label} was cancelled. Open it to see the reason."),
+}
+
+
+@_best_effort
+def organizer_event_news(event_id: str, what: str, actor_id: str | None = None) -> None:
+    """IS-23: tell the session's organizer about `what` (submitted /
+    approved / rejected / confirmed / cancelled)."""
+    if what not in _ORGANIZER_NEWS:
+        return
+    session = _session(event_id)
+    organizer = session.get("organizer_id") if session else None
+    if not organizer or (what != "submitted" and organizer == actor_id):
+        return
+    type_, template = _ORGANIZER_NEWS[what]
+    message = template.format(name=session.get("name") or "Your event", label=session_label(session))
+    notify([organizer], type_, message, ENTITY_EVENT, session["id"])
 
 
 _SAFETY_DECISIONS = {

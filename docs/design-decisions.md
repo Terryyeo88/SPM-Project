@@ -2546,3 +2546,52 @@ whether a request is live; telling for any edit instead of only the arranged
 fields; telling before a refused request or an unacknowledged edit is
 written; and each of the five hooks (create, quantity change, withdraw,
 cancel event, approve change).
+
+## Notification (Event Organizer) (IS-23, Nawaz, Sprint 4)
+
+Source: IS-23's criteria (see `traceability.md`): the organizer is told when
+their request is submitted, when the coordinator approves or rejects it, when
+it is confirmed, and when it is cancelled (and when a coordinator asks for
+clarification or amendment: not built, see open-questions). Built on IS-69's
+notification service. No table, no migration.
+
+### One notification per decision, one per session for confirm and cancel
+
+Approving and rejecting apply to the whole request (`_decide` moves every
+under-review session together), so the organizer gets one notification for the
+request, linking to the session they opened. Confirming and cancelling are per
+session (each session has its own route call), so those notifications name the
+session by its date, the way IS-76 does for attendees. A request of three
+sessions is therefore one "approved" and, later, up to three "confirmed".
+
+### Submission is told even though the organizer did it
+
+The criterion asks for it, and IS-1's "Create an Event Request" says the same.
+Every other milestone is the coordinator's action, so the general rule
+(nobody is told about their own action) still holds and is enforced: if an
+organizer who also holds the coordinator role decides their own request, they
+are not told.
+
+### The reason stays on the event page
+
+A rejection or cancellation says to open the event, and does not repeat the
+reason: it is already shown from the status history, the same split IS-41 uses
+for equipment rejections.
+
+### Where the hooks sit
+
+| Milestone | Hook | After |
+|---|---|---|
+| Submitted (and resubmitted) | `event_service._submit_sessions` | every session has moved and the coordinator step is done |
+| Approved / rejected | `event_service._decide` | the opened session and its siblings have moved |
+| Confirmed | `events.routes.confirm_event` | the status move |
+| Cancelled | `events.routes.cancel_event` | the status move |
+
+Starting planning is not told: the story does not list it.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling the organizer of their own decisions;
+never telling them of their own submission; telling for planning; telling
+before a decision or the confirm move is final; telling once per session on
+decisions; and each of the submit, confirm and cancel hooks.
