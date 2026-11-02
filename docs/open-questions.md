@@ -1395,3 +1395,16 @@ confirm:
   notification story.
 - **Cancelling the whole event** is unchanged: Release Equipment on Cancel
   (Justin) still releases everything.
+
+## Integration tests for the equipment workflow (Nawaz)
+
+- **Written but not run.** `test_equipment_workflow_integration.py` was written
+  without access to a local Supabase (no Docker where it was written), so it has only been
+  collected and skipped, never executed. Its first run may turn up mistakes in the tests
+  themselves rather than in the code. Please run it against a local stack
+  (`npx supabase start && npx supabase db reset`, export the local keys, `pytest -m
+  integration tests/test_equipment_workflow_integration.py`) and report any failure. The
+  Definition of Done item "integration tests ... pass against a local Supabase" stays
+  open until someone has.
+- It needs the three equipment migrations applied (`20261019100000`, `20261019200000`,
+  `20261102000000`); `db reset` applies them with the rest.
