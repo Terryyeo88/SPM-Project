@@ -356,11 +356,15 @@ def cancel_event(event, event_id):
     page the same way a rejected booking already shows (VenueBookingStatus.vue).
 
     IS-76 AC8: the session's registered and waitlisted attendees are told
-    it was cancelled (without the reason)."""
+    it was cancelled (without the reason).
+
+    IS-26 AC4: Technical Support Staff are told too, if the session had an
+    equipment request waiting or confirmed."""
     updated = _move(event, event_id, "cancelled")
     released = release_event_equipment(event_id)
     released_bookings = release_bookings_for_event(event_id, "Event cancelled", changed_by=current_user().id)
     _notify_attendees_cancelled(event_id)
+    _notify_technical_support_cancelled(event_id)
     return jsonify(
         {
             **updated,
@@ -374,6 +378,11 @@ def cancel_event(event, event_id):
 def _notify_attendees_reconfirmed(event_id: str) -> None:
     """IS-76 AC5/AC7 (notification_service.event_reconfirmed)."""
     notification_service.event_reconfirmed(event_id)
+
+
+def _notify_technical_support_cancelled(event_id: str) -> None:
+    """IS-26 AC4 (notification_service.technical_support_event_news)."""
+    notification_service.technical_support_event_news(event_id, "cancelled", actor_id=current_user().id)
 
 
 def _notify_attendees_cancelled(event_id: str) -> None:

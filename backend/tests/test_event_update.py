@@ -792,3 +792,42 @@ def test_a_draft_is_updated_without_being_logged(client, signing_key, monkeypatc
     assert response.status_code == 200
     assert fake.get("session-1")["name"] == "Renamed draft"
     assert _logs(fake) == []
+
+
+# -- IS-26: Technical Support Staff are told about changes they arrange around -------------
+
+
+@pytest.fixture
+def tech_news(monkeypatch):
+    import app.notifications.notification_service as notification_service
+
+    seen = []
+    monkeypatch.setattr(notification_service, "technical_support_event_news", lambda *a, **k: seen.append((a, k)))
+    return seen
+
+
+def test_is26_an_update_tells_technical_support_which_fields_changed_and_who_changed_them(fake, tech_news):
+    update_event(_event(fake), {"preferred_start_date": LATER, "preferred_end_date": LATER}, COORDINATOR)
+
+    assert tech_news == [
+        (("session-1", "changed", {"preferred_start_date", "preferred_end_date"}, COORDINATOR), {})
+    ]
+
+
+def test_is26_an_update_that_changes_nothing_tells_nobody(fake, tech_news):
+    update_event(_event(fake), {"name": _session()["name"]}, COORDINATOR)
+
+    assert tech_news == []
+
+
+def test_is26_an_update_refused_for_unacknowledged_impacts_tells_nobody(fake, tech_news):
+    fake.tables.setdefault("equipment_requests", []).append(
+        {
+            "id": "req-1", "event_id": "session-1", "status": "pending",
+            "needed_start": "2026-01-01T01:00:00+00:00", "needed_end": "2026-01-01T09:00:00+00:00",
+        }
+    )
+    with pytest.raises(ChangeImpactNotAcknowledgedError):
+        update_event(_event(fake), {"preferred_start_date": LATER, "preferred_end_date": LATER}, COORDINATOR)
+
+    assert tech_news == []

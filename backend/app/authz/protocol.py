@@ -44,6 +44,17 @@ class EquipmentRequestLike(Protocol):
     event_status: str | None
 
 
+class EquipmentChangeLike(Protocol):
+    """An IS-43 quantity-change request, as load_change_resource hands it to
+    the rules: its own status, its request's status and its event's."""
+
+    id: str
+    status: str
+    request_status: str
+    event_status: str | None
+    request_owner: str
+
+
 class SafetyReviewLike(Protocol):
     id: str
     event_id: str

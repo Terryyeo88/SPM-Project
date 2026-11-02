@@ -61,6 +61,7 @@ from app.events.event_service import (
 )
 from app.events.transitions import transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import AppError, ValidationError
 
 # Statuses a coordinator's change can no longer reach (rule_event_edit's
@@ -161,6 +162,14 @@ def revert_to_planning(event_id: str, status: str, changed_fields, actor: str | 
     )
 
 
+def notify_technical_support_of_change(event_id: str, changed_fields, actor: str | None) -> None:
+    """IS-26 AC2/AC3: tell Technical Support Staff when a change touched the
+    date, time, equipment or room layout of a session they have equipment
+    arranged for (notification_service.technical_support_event_news
+    decides whether it is relevant)."""
+    notification_service.technical_support_event_news(event_id, "changed", set(changed_fields), actor)
+
+
 def apply_shared_details(event: SimpleNamespace, shared_changes: dict, actor: str | None) -> None:
     """Writes a changed name/description/purpose to the request's other
     sessions -- those still open to changes -- and sends any confirmed one
@@ -257,4 +266,6 @@ def update_event(event: SimpleNamespace, payload, updated_by: str, acknowledge_i
     # fixing a rejected session must not rename sessions already decided.
     if updated_by == getattr(event, "coordinator_id", None):
         apply_shared_details(event, {field: changes[field] for field in SHARED_FIELDS if field in changes}, updated_by)
-    return revert_to_planning(event.id, event.status, changes, updated_by) or updated
+    result = revert_to_planning(event.id, event.status, changes, updated_by) or updated
+    notify_technical_support_of_change(event.id, changes, updated_by)
+    return result
