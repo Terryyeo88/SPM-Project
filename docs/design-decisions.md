@@ -2399,3 +2399,150 @@ accepted even if that update were missed.
 IS-9 requires a reason to cancel a venue booking. Nothing here asks for one:
 the coordinator is withdrawing their own request, and nobody has to act on
 the answer. Easy to add (a column plus a text box) if the team wants it.
+
+## Receive Technical Support Notifications (IS-26, Nawaz, Sprint 4)
+
+Source: IS-26's criteria (see `traceability.md`): Technical Support Staff are
+notified when equipment is requested, when equipment requirements change,
+when an event with equipment is rescheduled or cancelled, when equipment
+becomes unavailable, and only for matters relevant to them. It builds on
+IS-69's notification service (`notify()`, best effort, in-app only) and adds
+no table and no migration: `notifications.type` is free text by design.
+
+### "The relevant Technical Support Staff" is the role
+
+Nothing in the system assigns a Technical Support member to a request or an
+event (the Technical Support queue is shared, and `rule_equipment_request_*`
+check the role only). So every user with the `technical_support_staff` role
+is told, the same choice IS-69 made for Safety Officers (every one, because
+any of them may pick the item up). "Relevant" is then enforced by *what*
+triggers a notification, not by *who* receives it: an event is only news if
+it has an equipment request that is `pending` or `confirmed`, and an edit is
+only news if it touched the date, time, equipment list or room layout.
+
+### The person who did it is not told
+
+Same rule as IS-69 ("Nobody is told about their own action"). It only matters
+for a user who holds both roles, but the hook passes the actor so it holds.
+
+### Five triggers, three of them on the story's own code
+
+| Criterion | Trigger | Where |
+|---|---|---|
+| Requirement submitted | a request is created | `equipment_service.create_request` |
+| Requirements changed | a quantity change is asked for (IS-43); a booking is withdrawn (IS-66) | `change_service.create_change_request`, `equipment_service.cancel_request` |
+| Event rescheduled | a coordinator edit or an approved change request touches the date or time | `event_update.update_event`, `change_request_service.approve_change_request` |
+| Event cancelled | the cancel route, once the status has moved | `events.routes.cancel_event` |
+| Equipment unavailable | **not built**, see open-questions | |
+
+Every hook runs after the change it reports has been written, so a refused or
+conflicting action tells nobody. The edit hooks run after the move back to
+planning too, so a failure there does not leave a notification behind.
+
+### Reschedule is the date or time; equipment and layout edits are told alike
+
+The criterion is "rescheduled ... when the new date or time affects those
+arrangements". An edit to the equipment list or room layout changes what
+Technical Support prepare in the same way, and `change_impact` already warns
+the coordinator about exactly those fields for Technical Support, so they get
+a notification with different wording ("equipment or room layout ... was
+changed") using the same field list. Other edits (name, attendance, notes) are
+not told.
+
+### The notification links to the first live request
+
+A session can have several requests, and Technical Support cannot open the
+event page (their routes are role-gated), so the event-level notifications
+link to the session's first live request (lowest id, so it is stable). The
+frontend maps the new `equipment_request` entity to the request page.
+
+### Out of scope
+
+Email or SMS (IS-69's deferral), reminders, and a retry for a lost
+notification.
+
+## Equipment request workflow, decisions recorded after the fact (IS-17, IS-19, IS-41, IS-43, Nawaz)
+
+These four stories were merged with their reasoning only in
+`open-questions.md`. The team's Definition of Done wants it here too, so this
+is the short version; the questions to confirm stay in open-questions.
+
+### IS-17: Record Equipment Request for Event
+
+- The request is for one session, so its period is the session's own window
+  (Singapore time, missing end time = end of day) copied onto the request.
+  The coordinator does not type dates. Mirrors a venue booking's snapshot.
+- Only while the event is in `planning`, and only for its assigned
+  coordinator (a stranger gets 404): our reading of Aaralyn's IS-9 note.
+- One line per equipment type (the table's unique key), and several requests
+  per session are allowed; "request more" adds another.
+- Two inserts, no transaction (the REST client has none): if the lines fail
+  the request row is deleted again so Technical Support never sees an empty
+  request.
+- Nothing is reserved at this point: reservation is accepting, IS-19.
+
+### IS-19: Accept an Equipment Request and Reserve Stock
+
+- Availability is counted from reservation rows and never stored, so there
+  is no counter to keep in step; one reservation row per unit, each copying
+  the request's period.
+- Accepted whole or not at all: a partial accept would need a quantity
+  decision nobody asked for, and rejecting is the alternative.
+- Lowest asset tag first, so the result is predictable.
+- Only while the event is `planning`: a pending request past planning is a
+  leftover, and accepting it would take stock for nothing.
+- Racing: the status update is conditioned on `pending` (the loser's units
+  are deleted again), and the exclusion constraint refuses two requests for
+  the same unit.
+
+### IS-41: Get Warned and Reject
+
+- The warning is IS-18's existing availability check; IS-41 adds the
+  suggestion to reject and keeps Accept disabled while a line is short.
+- Reject is allowed whether or not stock is short (Technical Support may have
+  other reasons), and without an event-status check, so a leftover pending
+  request can be cleared. Rejecting takes no stock.
+- The reason lives on the request (`rejection_reason`, `decided_by`,
+  `decided_at`) because a request is decided once. A CHECK keeps reason and
+  status in step, added `NOT VALID` so existing rows are untouched.
+
+### IS-43: Update Quantity on an Existing Reservation
+
+- The coordinator's ask is a stored record (`equipment_change_requests`),
+  because Technical Support have to review it; until accepted nothing on the
+  request changes.
+- The recalculation is computed whenever the ask is read, never stored. It
+  counts the units the request already holds.
+- Accepting an increase reserves the lowest free tags; a decrease releases
+  the highest. Whole-line quantity only: a new type is a new request, a new
+  date is the event's own change flow.
+- Allowed while the event is `planning`, `safety_review` or `confirmed`;
+  one waiting ask per line (a partial unique index).
+- Accept writes the extra reservations, claims the ask, then updates the
+  line, and undoes the earlier steps if a later one fails.
+
+### Mutation-tested by hand (done for the DoD, 3 Nov)
+
+Each guard was removed in turn and the story's unit tests run; each removal
+made a test fail, then the code was restored.
+
+| Story | Guard removed | Caught by |
+|---|---|---|
+| IS-19 | the `pending` condition on the accept's status update | `test_equipment_accept.py` |
+| IS-19 | the deletion of the just-written reservations when that update loses | `test_equipment_accept.py` |
+| IS-41 | the `pending` condition on the reject's update | `test_equipment_reject.py` |
+| IS-43 | the `pending` condition on claiming a change | `test_equipment_change.py` |
+| IS-43 | the undo of the extra reservations when the claim is lost | `test_equipment_change.py` |
+| IS-43 | the un-claim when the quantity update fails | `test_equipment_change.py` |
+
+IS-17's one guard (deleting the request when its lines fail) is covered by
+`test_equipment_create_request.py` and its integration test; it has no
+conditional write to remove.
+
+### Mutation-tested by hand (IS-26)
+
+Removed in turn, each caught: telling the actor of their own action; ignoring
+whether a request is live; telling for any edit instead of only the arranged
+fields; telling before a refused request or an unacknowledged edit is
+written; and each of the five hooks (create, quantity change, withdraw,
+cancel event, approve change).

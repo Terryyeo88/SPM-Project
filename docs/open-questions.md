@@ -1043,7 +1043,7 @@ require planning too"). No new migration: `equipment_requests` and
   `equipment.list` is Technical Support only. Types are not sensitive.
 - **Nothing is reserved.** A new request is Pending with no reservation rows
   (IS-19, Accept, writes those). Technical Support already sees it in their
-  queue (IS-18); no notification is sent (no notification system exists yet).
+  queue (IS-18); since IS-26 they are also told when one is submitted.
 - **The create-event form's `equipment_needed` list is unchanged** and does
   not create a request. Still open: whether it should.
 
@@ -1087,8 +1087,8 @@ conventions Justin's View Reserved Equipment section documents
   the exclusion constraint (its own units are already held), so a leftover
   like that needs its reservation rows deleted by hand. Not guarded beyond
   the clean-up above.
-- **No notification.** `_notify_request_decision` is a no-op placeholder
-  like the venue one; the Notification System story is not built.
+- **Notification.** Written after this story, by IS-69: the session's
+  coordinator is told of the decision through `_notify_request_decision`.
 - **Reject, warn on shortfall, and quantity changes** are IS-41 and IS-43,
   not here.
 
@@ -1118,8 +1118,8 @@ conventions Justin's View Reserved Equipment section documents
   protect.
 - **"Sent to the Event Coordinator"** is the stored reason shown in the
   coordinator's Equipment Booking section, plus `_notify_request_decision`,
-  which is still a print placeholder. No notification system exists yet;
-  wiring it up is a one-line change when one does.
+  which since IS-69 writes an in-app notification to the session's
+  coordinator.
 - **Accepting does not write `decided_by`/`decided_at`.** IS-19 predates the
   columns and a confirmed request already shows its reservation rows.
   Say if the team wants those filled for accepts too.
@@ -1165,8 +1165,10 @@ conventions Justin's View Reserved Equipment section documents
   steps if a later one fails. The exclusion constraint is the backstop if
   another request takes a unit meanwhile. The real-database behaviour is
   untested.
-- **Notification** uses the same `_notify_request_decision` placeholder as
-  accept/reject ("change accepted" / "change rejected"). The coordinator sees
+- **Notification** uses the same `_notify_request_decision` hook as
+  accept/reject ("change accepted" / "change rejected"), which since IS-69
+  tells the session's coordinator; since IS-26 Technical Support are told when
+  a change is asked for. The coordinator sees
   the outcome, and a rejection's reason, under the request on the event page.
 - **The coordinator's page does not refresh itself** when Technical Support
   decide; they see the new quantity and allocated units after reloading.
@@ -1389,10 +1391,9 @@ confirm:
 - **Cancelling is final.** The coordinator asks again with "Request more
   equipment" rather than reopening the old request, so the history shows
   both. Technical Support see cancelled requests under a new Cancelled tab.
-- **Technical Support are not told** beyond the existing
-  `_notify_request_decision` print placeholder ("cancelled"). Whether they
-  should be notified when a confirmed request is cancelled belongs with the
-  notification story.
+- **Technical Support are told** (IS-26) when a request is cancelled, whether
+  pending or confirmed, so a queue item does not vanish unexplained. The
+  coordinator is not told of their own action.
 - **Cancelling the whole event** is unchanged: Release Equipment on Cancel
   (Justin) still releases everything.
 
@@ -1408,3 +1409,44 @@ confirm:
   open until someone has.
 - It needs the three equipment migrations applied (`20261019100000`, `20261019200000`,
   `20261102000000`); `db reset` applies them with the rest.
+
+## Receive Technical Support Notifications (IS-26, Nawaz, Sprint 4)
+
+Reasoning is in `design-decisions.md` ("Receive Technical Support
+Notifications"). Please confirm:
+
+- **Every Technical Support Staff member is told.** Nothing assigns staff to
+  a request or event, so "the relevant Technical Support Staff" is the role.
+  If the team wants assignment, that is a new story and these hooks would
+  take a recipient list.
+- **"Equipment becomes unavailable" is NOT built.** The criterion says "when
+  the equipment becomes unavailable". Nothing in the app changes a unit's
+  status: `equipment_units.status` (available / maintenance / retired) is only
+  set in the database or the seed, and the calendar notes there is "no dated
+  unavailability for equipment". With no action to hook, a notification would
+  have nothing to fire from. When a story adds a way to take a unit out of
+  service (or to dated unavailability), the hook is one call to
+  `technical_support_event_news`-style code: find the live requests holding
+  that unit and tell Technical Support. Please confirm that belongs to a
+  later story, or say where unit status is meant to change.
+- **Rescheduling is only news if equipment is arranged.** A change to the
+  date or time of a session with no `pending` or `confirmed` request tells
+  nobody. A change to the equipment list or room layout is told too (with
+  different wording). Please confirm that reading of "affects those
+  arrangements".
+- **A reschedule does not move the request.** The request's `needed_start`
+  and `needed_end` are still the old window (IS-17 snapshots them), so
+  Technical Support are told to check, and the coordinator has to withdraw
+  (IS-66) and ask again. `change_impact` already tells the coordinator the
+  request "will not move automatically". Whether the request should follow
+  the event is a separate story.
+- **Event cancelled is told only if a request was live.** A pending request
+  stays `pending` on a cancelled event (Release Equipment on Cancel frees
+  confirmed units only), so the notification tells Technical Support to clear
+  it.
+- **The notification links to the session's first live request.** There can
+  be several; the event page is not open to Technical Support.
+- **Not notified here:** a request accepted or rejected by Technical Support
+  (the coordinator is told, IS-69; the decider is not), and the other
+  roles' notification stories (IS-23, IS-24, IS-25).
+

@@ -404,6 +404,7 @@ def create_request(event: SimpleNamespace, raw_items, requested_by: str) -> dict
         supabase.table("equipment_requests").delete().eq("id", request_row["id"]).execute()
         raise
 
+    _notify_technical_support(request_row["id"], "submitted", requested_by)
     return get_request(request_row["id"])
 
 
@@ -740,6 +741,7 @@ def cancel_request(request_id: str, cancelled_by: str) -> dict:
         raise
 
     _notify_request_decision(request_id, "cancelled")
+    _notify_technical_support(request_id, "cancelled", cancelled_by)
     return get_request(request_id)
 
 
@@ -747,3 +749,10 @@ def _notify_request_decision(request_id: str, decision: str) -> None:
     """The session's coordinator gets an in-app notification of a decision
     (IS-69, notification_service.equipment_request_decided)."""
     notification_service.equipment_request_decided(request_id, decision)
+
+
+def _notify_technical_support(request_id: str, what: str, actor_id: str | None = None) -> None:
+    """Technical Support Staff are told a request was submitted, a quantity
+    change was asked for, or a request was withdrawn (IS-26,
+    notification_service.technical_support_request_news)."""
+    notification_service.technical_support_request_news(request_id, what, actor_id)

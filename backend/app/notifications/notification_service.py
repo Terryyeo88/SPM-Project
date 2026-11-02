@@ -13,6 +13,14 @@ Two halves:
     safety_service._notify_safety_review             -> safety_review_changed
     venue_service._notify_venue_deleted              -> venue_booking_released
 
+  IS-26 (Receive Technical Support Notifications) -- the "Technical Support
+  Staff" section:
+
+    equipment_service._notify_technical_support      -> technical_support_request_news
+      (also change_service.create_change_request, for a quantity change)
+    events.routes._notify_technical_support_cancelled -> technical_support_event_news
+    event_update.notify_technical_support_of_change   -> technical_support_event_news
+
   IS-76 (Notification (Attendees)) -- see the "attendees" section:
 
     registration_service._notify_registered          -> registration_recorded
@@ -94,6 +102,23 @@ EVENT_DETAILS_UPDATED = "event_details_updated"
 EVENT_CANCELLED = "event_cancelled"
 
 SAFETY_OFFICER_ROLE = "safety_officer"
+
+# IS-26 (Receive Technical Support Notifications).
+TECHNICAL_SUPPORT_ROLE = "technical_support_staff"
+ENTITY_EQUIPMENT_REQUEST = "equipment_request"
+EQUIPMENT_REQUEST_SUBMITTED = "equipment_request_submitted"
+EQUIPMENT_CHANGE_REQUESTED = "equipment_change_requested"
+EQUIPMENT_REQUEST_CANCELLED = "equipment_request_cancelled"
+EQUIPMENT_EVENT_CANCELLED = "equipment_event_cancelled"
+EQUIPMENT_EVENT_CHANGED = "equipment_event_changed"
+# The session details Technical Support arrange around (the same ones
+# change_impact's technical-support check watches): the date and time, the
+# equipment list and the room layout.
+TECHNICAL_SUPPORT_TIMING_FIELDS = frozenset(
+    {"preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time"}
+)
+TECHNICAL_SUPPORT_FIELDS = TECHNICAL_SUPPORT_TIMING_FIELDS | {"equipment", "room_layout"}
+_LIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
 
 
 def _best_effort(func):
@@ -229,6 +254,98 @@ def equipment_request_decided(request_id: str, decision: str) -> None:
     if event:
         type_, template = _EQUIPMENT_DECISIONS[decision]
         _notify_coordinator_of(event, type_, template.format(name=event["name"]))
+
+
+# -- Technical Support Staff (IS-26) ------------------------------------------
+#
+# Every Technical Support Staff member is told: the system has no
+# assignment of staff to requests or events, so "the relevant Technical
+# Support Staff" can only mean the role (see docs/design-decisions.md).
+# "Relevant" is enforced on the other side: an event is only worth a
+# notification if it has an equipment request still waiting or confirmed,
+# and an event change only if it touched the date, time, equipment or room
+# layout. The person who did the thing is never told about it.
+
+
+def _technical_support_ids(actor_id: str | None) -> list[str]:
+    return [user for user in _users_with_role(TECHNICAL_SUPPORT_ROLE) if user != actor_id]
+
+
+def _live_equipment_requests(event_id: str) -> list[dict]:
+    result = (
+        supabase.table("equipment_requests")
+        .select("id, status")
+        .eq("event_id", event_id)
+        .in_("status", list(_LIVE_EQUIPMENT_REQUEST_STATUSES))
+        .execute()
+    )
+    return sorted(result.data or [], key=lambda row: str(row["id"]))
+
+
+_TECHNICAL_SUPPORT_REQUEST_NEWS = {
+    "submitted": (EQUIPMENT_REQUEST_SUBMITTED, 'A new equipment request for "{name}" is waiting for your review.'),
+    "change requested": (
+        EQUIPMENT_CHANGE_REQUESTED,
+        'The coordinator asked to change the quantity of an item on the equipment request for "{name}".',
+    ),
+    "cancelled": (
+        EQUIPMENT_REQUEST_CANCELLED,
+        'The equipment request for "{name}" was cancelled by the coordinator.',
+    ),
+}
+
+
+@_best_effort
+def technical_support_request_news(request_id: str, what: str, actor_id: str | None = None) -> None:
+    """IS-26 AC1/AC2: a request is submitted, a quantity change is asked
+    for on a confirmed one, or a request is withdrawn (IS-66)."""
+    if what not in _TECHNICAL_SUPPORT_REQUEST_NEWS:
+        return
+    result = supabase.table("equipment_requests").select("event_id").eq("id", request_id).maybe_single().execute()
+    request = result.data if result is not None else None
+    event = _event(request.get("event_id")) if request else None
+    if not event:
+        return
+    type_, template = _TECHNICAL_SUPPORT_REQUEST_NEWS[what]
+    notify(
+        _technical_support_ids(actor_id),
+        type_,
+        template.format(name=event["name"]),
+        ENTITY_EQUIPMENT_REQUEST,
+        request_id,
+    )
+
+
+@_best_effort
+def technical_support_event_news(
+    event_id: str, what: str, changed_fields: Iterable[str] = (), actor_id: str | None = None
+) -> None:
+    """IS-26 AC3/AC4: a session with equipment arranged was cancelled
+    (what == "cancelled") or had its date, time, equipment or room layout
+    changed (what == "changed", with the fields). Nothing is sent for a
+    session with no live equipment request, or for a change that touched
+    none of those fields."""
+    if what == "changed":
+        touched = set(changed_fields) & TECHNICAL_SUPPORT_FIELDS
+        if not touched:
+            return
+    elif what != "cancelled":
+        return
+    event = _event(event_id)
+    requests = _live_equipment_requests(event_id) if event else []
+    if not requests:
+        return
+    name = event["name"]
+    if what == "cancelled":
+        type_ = EQUIPMENT_EVENT_CANCELLED
+        message = f'"{name}" was cancelled. Its equipment has been released.'
+    elif touched & TECHNICAL_SUPPORT_TIMING_FIELDS:
+        type_ = EQUIPMENT_EVENT_CHANGED
+        message = f'"{name}" was rescheduled. Check that its equipment booking still fits the new date and time.'
+    else:
+        type_ = EQUIPMENT_EVENT_CHANGED
+        message = f'The equipment or room layout for "{name}" was changed. Check its equipment booking.'
+    notify(_technical_support_ids(actor_id), type_, message, ENTITY_EQUIPMENT_REQUEST, requests[0]["id"])
 
 
 _SAFETY_DECISIONS = {

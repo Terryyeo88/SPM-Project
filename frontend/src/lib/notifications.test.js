@@ -60,6 +60,15 @@ describe('notificationLink', () => {
     expect(link).toEqual({ name: 'attendee-event', params: { eventId: 's-1' } })
   })
 
+  it('links an equipment request notification to the request for Technical Support Staff (IS-26)', () => {
+    const link = notificationLink(
+      note('1', { entity_type: 'equipment_request', entity_id: 'q-1' }),
+      [ROLES.TECHNICAL_SUPPORT_STAFF],
+    )
+    expect(link).toEqual({ name: 'equipment-request-details', params: { requestId: 'q-1' } })
+    expect(notificationLinkLabel(note('1', { entity_type: 'equipment_request' }))).toBe('View equipment request')
+  })
+
   it('is null (plain text) with no entity', () => {
     expect(notificationLink(note('1'), Object.values(ROLES))).toBeNull()
   })
@@ -72,6 +81,7 @@ describe('notificationLink', () => {
     expect(notificationLink(note('1', { entity_type: 'event', entity_id: 'e-1' }), [ROLES.ATTENDEE])).toBeNull()
     expect(notificationLink(note('1', { entity_type: 'safety_review', entity_id: 'r-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
     expect(notificationLink(note('1', { entity_type: 'attendee_event', entity_id: 's-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
+    expect(notificationLink(note('1', { entity_type: 'equipment_request', entity_id: 'q-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
   })
 
   it('is null for half a link', () => {

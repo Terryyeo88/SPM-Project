@@ -780,6 +780,33 @@ database.
 | (design) Two clicks, so a mis-click cannot release units | `EquipmentChangeRequests.test.js::asks for a second click before cancelling, and Keep it backs out` | inline confirmation in `EquipmentChangeRequests.vue` |
 | Cancelled requests are visible, not hidden | `equipment.test.js` (Cancelled tab), `EquipmentBookingStatus.test.js::offers no Cancel for a rejected or already cancelled request` | `REQUEST_TABS`, `.status-cancelled` |
 
+## Sprint 4 — Receive Technical Support Notifications (IS-26, Nawaz)
+
+Source: IS-26 "Receive Technical Support Notifications" (the Sprint 1 user
+stories document): "As Technical Support Staff, I want to receive
+notifications about equipment and technical-support requirements or changes,
+so that I can prepare the necessary resources and support for events."
+Unit tests: `test_notification_technical_support.py` (who is told what),
+`test_notification_hook_technical_support.py` (when), plus the edit hooks in
+`test_event_update.py` and `test_event_change_requests.py`. Frontend:
+`notifications.test.js`. Integration (real Supabase, 4 tests):
+`test_notification_technical_support_integration.py`. No migration
+(`notifications.type` is free text).
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| A requirement is submitted for review: the relevant Technical Support Staff are notified | `test_notification_technical_support.py::test_a_submitted_request_tells_every_technical_support_member_and_nobody_else`, `test_notification_hook_technical_support.py::test_submitting_a_request_triggers_the_hook_with_the_new_request` | `create_request` -> `technical_support_request_news("submitted")` |
+| Requirements changed, affecting existing arrangements: notified | `test_a_quantity_change_tells_technical_support`, `test_a_withdrawn_request_tells_technical_support`, `test_asking_for_a_quantity_change_triggers_the_hook`, `test_withdrawing_a_request_triggers_the_hook` | `create_change_request` (IS-43), `cancel_request` (IS-66) |
+| ...and when the event's equipment or room layout is edited | `test_a_new_equipment_list_or_room_layout_tells_technical_support`, `test_is26_an_update_tells_technical_support_which_fields_changed_and_who_changed_them`, `test_is26_approving_a_change_tells_technical_support_which_fields_changed` | `update_event`, `approve_change_request` -> `technical_support_event_news("changed")` |
+| Rescheduled, when the new date or time affects the arrangements: notified | `test_a_new_date_or_time_tells_technical_support_the_session_was_rescheduled`, `test_a_session_with_no_equipment_request_is_not_news` | same; only if a request is `pending` or `confirmed` |
+| Cancelled: notified | `test_a_cancelled_session_with_a_live_request_tells_technical_support`, `test_cancelling_a_session_triggers_the_hook` | `cancel_event` -> `technical_support_event_news("cancelled")` |
+| Equipment becomes unavailable: notified | none | **not built**: nothing in the app changes a unit's status (open-questions) |
+| Only for matters relevant to their responsibilities | `test_a_session_whose_requests_are_over_is_not_news`, `test_a_change_to_something_technical_support_does_not_arrange_around_is_not_news`, `test_other_request_news_is_not_technical_supports_to_hear` | live-request filter and the field list in `notification_service` |
+| (design) Nobody is told about their own action | `test_the_person_who_acted_is_not_told_about_their_own_action`, `test_the_person_who_changed_the_session_is_not_told` (hand-mutated) | actor excluded in `_technical_support_ids` |
+| (design) A refused action tells nobody | `test_a_refused_request_triggers_nothing`, `test_a_refused_withdrawal_triggers_nothing`, `test_a_refused_cancellation_triggers_nothing`, `test_is26_an_update_refused_for_unacknowledged_impacts_tells_nobody` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+| (design) The notification opens the request | `notifications.test.js::links an equipment request notification ...` | `ENTITY_ROUTES.equipment_request` |
+
 ## Integration tests for the equipment workflow (IS-17, IS-19, IS-41, IS-43, IS-66, Nawaz)
 
 `backend/tests/test_equipment_workflow_integration.py` (20 tests, `@pytest.mark.integration`,

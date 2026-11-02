@@ -30,11 +30,17 @@ export const markAllNotificationsRead = () => apiPost('/notifications/read-all',
  *   event           -- the event details page (organiser, coordinator, Lead)
  *   safety_review   -- one safety review (Safety Officer)
  *   attendee_event  -- the attendee's own page for a session (IS-76)
+ *   equipment_request -- one equipment request (Technical Support Staff, IS-26)
  */
 export const ENTITY_ROUTES = Object.freeze({
   event: Object.freeze({ name: 'event-details', param: 'eventId', label: 'View event' }),
   safety_review: Object.freeze({ name: 'safety-review', param: 'reviewId', label: 'View safety review' }),
   attendee_event: Object.freeze({ name: 'attendee-event', param: 'eventId', label: 'View event' }),
+  equipment_request: Object.freeze({
+    name: 'equipment-request-details',
+    param: 'requestId',
+    label: 'View equipment request',
+  }),
 })
 
 const _rolesByRouteName = new Map(ROUTE_ACCESS.map((entry) => [entry.routeName, entry.roles]))
