@@ -820,3 +820,25 @@ not yet run** (see open-questions): they need a local Supabase stack.
 | IS-41 | reason, who and when are stored; the CHECK keeps reason and status in step; a rejection cannot overwrite an accepted request | `test_rejecting_stores_the_reason_and_who_decided`, `test_the_database_keeps_a_rejection_reason_and_the_status_in_step`, `test_a_request_accepted_first_cannot_then_be_rejected` |
 | IS-43 | an increase adds a unit and a decrease releases the highest tags; a change the stock cannot cover changes nothing; a rejection keeps the reservation; one pending change per item; no change to the same quantity | `test_an_accepted_increase_reserves_the_extra_unit_and_updates_the_quantity`, `test_an_accepted_decrease_releases_the_highest_tags`, `test_an_increase_the_stock_cannot_cover_is_refused_and_changes_nothing`, `test_a_rejected_change_stores_its_reason_and_leaves_the_reservation_alone`, `test_the_database_allows_only_one_pending_change_per_item`, `test_the_database_refuses_a_change_to_the_same_quantity` |
 | IS-66 | `cancelled` is a real enum value; cancelling frees units so another request can be accepted; a waiting change is rejected; a cancelled request cannot be cancelled again | `test_cancelling_a_confirmed_request_frees_its_units_for_another_request`, `test_cancelling_a_pending_request_marks_it_cancelled`, `test_cancelling_rejects_a_change_still_waiting_on_the_request`, `test_a_request_that_is_already_cancelled_cannot_be_cancelled_again` |
+
+## Sprint 4 — Notification (Event Organizer) (IS-23, Nawaz)
+
+Source: IS-23 "Notification (Event Organizer)" (the Sprint 1 user stories
+document): "As an Event Organizer, I want to receive notifications about
+important updates to my event request, so that I can keep track of its
+progress and respond when action is required." Unit tests:
+`test_notification_organizer.py` (who is told what),
+`test_notification_hook_organizer.py` (when). Integration (real Supabase, 2
+tests): `test_notification_organizer_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| The request is submitted: the organizer receives a submission notification | `test_notification_organizer.py::test_the_organizer_is_told_each_milestone_of_their_request[submitted]`, `test_the_organizer_is_told_of_their_own_submission`, `test_notification_hook_organizer.py::test_submitting_triggers_one_notification_with_the_organizer_as_the_actor` | `_submit_sessions` -> `organizer_event_news("submitted")` |
+| The coordinator requests clarification or amendment: notified | none | **not built**: no such request exists (open-questions) |
+| The coordinator approves or rejects: the organizer is notified of the decision | `[approved]`, `[rejected]` in `test_the_organizer_is_told_each_milestone_of_their_request`, `test_approving_triggers_one_notification_for_the_whole_request`, `test_rejecting_triggers_one_notification_for_the_whole_request` | `_decide` -> `organizer_event_news("approved" / "rejected")` |
+| The event becomes confirmed: a confirmation notification | `[confirmed]`, `test_confirming_a_session_triggers_the_hook` | `confirm_event` route |
+| The event is cancelled: a cancellation notification | `[cancelled]`, `test_cancelling_a_session_triggers_the_hook` | `cancel_event` route |
+| (design) Nobody is told about their own decision | `test_the_organizer_is_not_told_of_anything_else_they_did_themselves` (hand-mutated) | actor check in `organizer_event_news` |
+| (design) A refused or lost-race action tells nobody | `test_a_refused_decision_triggers_nothing`, `test_a_submission_that_lost_a_race_triggers_nothing`, `test_a_confirmation_that_loses_a_race_triggers_nothing`, `test_a_cancellation_that_loses_a_race_triggers_nothing` (hand-mutated) | hooks run after the status move |
+| (design) Planning is not news | `test_starting_planning_is_not_news_to_the_organizer` | `_decide` only notifies approved / rejected |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |

@@ -1450,3 +1450,29 @@ Notifications"). Please confirm:
   (the coordinator is told, IS-69; the decider is not), and the other
   roles' notification stories (IS-23, IS-24, IS-25).
 
+## Notification (Event Organizer) (IS-23, Nawaz, Sprint 4)
+
+Reasoning is in `design-decisions.md` ("Notification (Event Organizer)").
+Please confirm:
+
+- **"Clarification or amendment" is NOT built.** The criterion says "Given an
+  Event Coordinator requests clarification or amendment, when the request is
+  made, then the Event Organizer receives a notification". There is no such
+  request in the app: the coordinator can approve or reject (rejection needs a
+  reason, which the organizer is now told about), and `event_service.py`
+  already notes that replying to coordinator feedback "depends on a
+  clarification/feedback record that doesn't exist". With nothing to hook, a
+  notification has nothing to fire from. A rejection is the nearest thing and
+  is covered. Please confirm a clarification step is a separate story, or say
+  whether rejecting-with-a-reason is meant to be it.
+- **The organizer is not told when their own change request is decided.**
+  IS-21 lets the organizer ask for a change and the coordinator approve or
+  reject it with a comment; that is not in IS-23's list, so nothing is sent.
+  It reads like it should be. Say if it is wanted (one more hook in
+  `change_request_service`).
+- **Several sessions mean several "confirmed" and "cancelled"
+  notifications.** Approve and reject are one per request; confirm and cancel
+  are per session. Say if the organizer would rather have one.
+- **Not told:** a session moving to planning or completed, and the
+  coordinator being assigned (the Lead's step; the organizer sees the status
+  move to under review).
