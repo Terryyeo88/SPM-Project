@@ -1269,8 +1269,8 @@ Catalogue (IS-61)".
   Please confirm reminders are out of scope.
 - **Still not notified** (no hook existed; the owning stories can now add
   one `notify(...)` call each): the organiser on cancellation (IS-39, see
-  above), the coordinator on a new change request, and attendees promoted
-  off a waiting list. Please confirm which are needed.
+  above; done in IS-23), the coordinator on a new change request (done in
+  IS-24), and attendees promoted off a waiting list (done in IS-76). Please confirm which are needed.
 
 ## User contact and preferences (IS-68, 30 Oct)
 
@@ -1476,3 +1476,23 @@ Please confirm:
 - **Not told:** a session moving to planning or completed, and the
   coordinator being assigned (the Lead's step; the organizer sees the status
   move to under review).
+
+## Notification (Event Coordinator) (IS-24, Nawaz, Sprint 4)
+
+Reasoning is in `design-decisions.md` ("Notification (Event Coordinator)").
+Please confirm:
+
+- **"Incomplete arrangements ... require attention" is NOT built.** The last
+  criterion asks for a notification when an upcoming assigned event still has
+  outstanding arrangements. That is a reminder: nothing in the app runs on a
+  schedule (IS-69 listed reminders as out of scope), and "incomplete" is not
+  defined (no venue booking? no equipment request? both?). It needs a
+  scheduler and a definition. Please confirm it is a separate story, or give
+  the definition and where a scheduled job may run.
+- **An ordinary change request is not notified**, only a significant one, as
+  the criterion says. Say if the coordinator should hear about every request.
+- **"Change the booking" is read as a venue block.** If Venue Staff are meant
+  to be able to move a booking some other way, that way does not exist yet.
+- **An expired tentative hold is not notified.** The system releases it
+  silently (`release_expired_hold`), and the criterion does not list it. It
+  reads like it should be; say if it is wanted.

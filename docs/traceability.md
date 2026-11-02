@@ -842,3 +842,27 @@ tests): `test_notification_organizer_integration.py`. No migration.
 | (design) A refused or lost-race action tells nobody | `test_a_refused_decision_triggers_nothing`, `test_a_submission_that_lost_a_race_triggers_nothing`, `test_a_confirmation_that_loses_a_race_triggers_nothing`, `test_a_cancellation_that_loses_a_race_triggers_nothing` (hand-mutated) | hooks run after the status move |
 | (design) Planning is not news | `test_starting_planning_is_not_news_to_the_organizer` | `_decide` only notifies approved / rejected |
 | (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+
+## Sprint 4 — Notification (Event Coordinator) (IS-24, Nawaz)
+
+Source: IS-24 "Notification (Event Coordinator)" (the Sprint 1 user stories
+document): "As an Event Coordinator, I want to receive notifications about
+important updates to events assigned to me, so that I can coordinate the
+required arrangements and respond to issues promptly." Unit tests:
+`test_notification_event_coordinator.py` (who is told what),
+`test_notification_hook_event_coordinator.py` (when), plus the IS-69 tests it
+builds on (`test_notification_service.py`, `test_notification_hook_*.py`).
+Integration (real Supabase, 2 tests):
+`test_notification_event_coordinator_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Only for events assigned to them | `test_the_coordinator_told_is_the_current_one_not_the_organizer`, `test_only_the_coordinator_assigned_to_that_session_is_told`, `test_a_session_with_no_coordinator_yet_tells_nobody` | `_notify_coordinator_of` uses `events.coordinator_id` |
+| Auto-assigned: told | IS-69: `test_notification_hook_coordinator.py` | `coordinator_assigned` |
+| The organizer submits a significant change request: told | `test_a_significant_change_request_tells_the_assigned_coordinator_and_names_the_session`, `test_a_significant_change_request_triggers_the_hook`, `test_an_ordinary_change_request_triggers_nothing` (hand-mutated) | `request_event_change` -> `event_change_requested` |
+| Venue Staff approve or reject: told | IS-69: `test_notification_hook_booking.py` | `venue_booking_decided` |
+| Venue Staff change the booking: told | `test_a_blocked_venue_tells_the_sessions_coordinator_to_book_again`, `test_a_block_triggers_the_hook_once_for_each_booking_it_released` (hand-mutated) | `create_venue_block` -> `venue_booking_blocked` |
+| Equipment confirmed or unavailable: told | IS-69: `test_notification_hook_equipment.py` | `equipment_request_decided` |
+| Incomplete arrangements need attention: told | none | **not built**: needs a scheduler and a definition (open-questions) |
+| (design) A refused action tells nobody | `test_a_refused_change_request_triggers_nothing`, `test_a_refused_block_triggers_nothing`, `test_a_block_that_releases_nothing_triggers_nothing` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |

@@ -13,6 +13,11 @@ Two halves:
     safety_service._notify_safety_review             -> safety_review_changed
     venue_service._notify_venue_deleted              -> venue_booking_released
 
+  IS-24 (Notification (Event Coordinator)) -- the two additions:
+
+    block_service._notify_coordinator_venue_blocked  -> venue_booking_blocked
+    change_request_service._notify_change_requested  -> event_change_requested
+
   IS-23 (Notification (Event Organizer)) -- the "Event Organizer" section:
 
     event_service._notify_organizer                  -> organizer_event_news
@@ -124,6 +129,10 @@ TECHNICAL_SUPPORT_TIMING_FIELDS = frozenset(
 )
 TECHNICAL_SUPPORT_FIELDS = TECHNICAL_SUPPORT_TIMING_FIELDS | {"equipment", "room_layout"}
 _LIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
+
+# IS-24 (Notification (Event Coordinator)).
+EVENT_CHANGE_REQUESTED = "event_change_requested"
+VENUE_BOOKING_BLOCKED = "venue_booking_blocked"
 
 # IS-23 (Notification (Event Organizer)).
 EVENT_REQUEST_SUBMITTED = "event_request_submitted"
@@ -241,6 +250,33 @@ def venue_booking_released(released_booking: dict, venue: dict) -> None:
             VENUE_BOOKING_RELEASED,
             f'Venue "{venue["name"]}" was deleted from the venue catalogue, so the booking for '
             f'"{event["name"]}" was released. Book another venue.',
+        )
+
+
+@_best_effort
+def venue_booking_blocked(released_booking: dict) -> None:
+    """IS-24 AC4 ("Venue Staff ... change the booking"): Venue Staff blocked
+    a venue and the confirmed booking it overlapped was released (Venue
+    Becomes Unavailable). The session's coordinator is told to book again."""
+    event = _event(released_booking.get("event_id"))
+    if event:
+        _notify_coordinator_of(
+            event,
+            VENUE_BOOKING_BLOCKED,
+            f'The venue for "{event["name"]}" was blocked, so its booking was released. Book another venue.',
+        )
+
+
+@_best_effort
+def event_change_requested(event_id: str) -> None:
+    """IS-24 AC3: the organizer asked for a significant change to a session.
+    Only the assigned coordinator is told (nobody, before one is assigned)."""
+    session = _session(event_id)
+    if session:
+        _notify_coordinator_of(
+            session,
+            EVENT_CHANGE_REQUESTED,
+            f"The organizer asked for a significant change to {session_label(session)}. Review the request.",
         )
 
 
