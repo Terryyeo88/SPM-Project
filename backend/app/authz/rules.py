@@ -789,6 +789,22 @@ def rule_equipment_request_reject(user: Any, request: Any) -> Decision:
 CHANGEABLE_EVENT_STATUSES = ("planning", "safety_review", "confirmed")
 
 
+def rule_equipment_request_cancel(user: Any, request: Any) -> Decision:
+    """The coordinator who raised the request cancels it. 404 for anyone
+    else (same as viewing it). Only a pending or confirmed request can be
+    cancelled -- rejected and cancelled ones are already over -- and only
+    while the event is live: once the event itself is cancelled its
+    equipment is released by that story, and a completed or rejected
+    event's equipment is not this coordinator's to give back."""
+    if not (_has_role(user, "event_coordinator") and request.requested_by == user.id):
+        return Decision.DENY_NOT_FOUND
+    if request.status not in ("pending", "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 def rule_equipment_change_create(user: Any, request: Any) -> Decision:
     """The coordinator who raised the request asks to change a line's
     quantity. Only a CONFIRMED request has reservations to change (a
@@ -815,6 +831,9 @@ def rule_equipment_change_accept(user: Any, change: Any) -> Decision:
     if not _has_role(user, "technical_support_staff"):
         return Decision.DENY_NOT_FOUND
     if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    # A cancelled request has given its units back; there is nothing left to change.
+    if getattr(change, "request_status", "confirmed") != "confirmed":
         return Decision.DENY_FORBIDDEN
     if getattr(change, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
         return Decision.DENY_FORBIDDEN

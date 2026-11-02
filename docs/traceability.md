@@ -753,3 +753,43 @@ through real `transition()` history; an irrelevant change or an organiser's
 request tells nobody; a venue swap is told and rebooking the same venue is
 not, against real `venue_bookings` / `venue_booking_status_log`.
 
+## Sprint 4 — Withdrawal of Equipment Booking (IS-66, Nawaz)
+
+Source: IS-66's one acceptance criterion ("Allow for deletion of equipment
+booking request when it is pending and once it has been accepted"), plus a
+teammate's request that the coordinator can then ask again for a different date
+and time. Unit tests: `test_equipment_cancel.py` (service), `test_authz_equipment_cancel.py`
+(rule), `test_equipment_cancel_routes.py` (route). Frontend:
+`EquipmentChangeRequests.test.js` ("cancelling the booking"),
+`EquipmentBookingStatus.test.js`, `equipment.test.js`,
+`EquipmentRequestDetailView.test.js`. Needs migration
+`20261102000000_equipment_request_cancel.sql`. Not tested against a real
+database.
+
+| Requirement | Test | Implementation |
+|---|---|---|
+| IS-66: "Allow for deletion of equipment booking request when it is pending ..." | `test_equipment_cancel.py::test_cancelling_a_pending_request_just_marks_it_cancelled`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[pending]`, `EquipmentBookingStatus.test.js::offers only Cancel (no quantity form, no history call) for a request that is still pending`, `EquipmentChangeRequests.test.js::works for a pending request, without loading quantity changes or offering the form` | `cancel_request`: the request moves to `cancelled` (see open-questions: "deletion" read as withdrawal) |
+| IS-66: "... and once it has been accepted" | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[confirmed]`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | a confirmed request's reservation rows are deleted, which frees its units |
+| The coordinator can cancel an equipment booking | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `::test_cancelling_a_pending_request_just_marks_it_cancelled`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | `POST /equipment/requests/<id>/cancel`, `equipment_service.cancel_request`, "Cancel this booking" under each pending/confirmed request |
+| ...so a new request can be made for a different date and time | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses` (units freed), `EquipmentBookingStatus.test.js` (the list reloads) | reservation rows deleted; "Request more equipment" still shown |
+| Only the coordinator who raised it, only while the event is live | `test_authz_equipment_cancel.py` (all), `test_equipment_cancel_routes.py` | `rule_equipment_request_cancel` |
+| Not for a request already decided against or cancelled | `test_authz_equipment_cancel.py::test_a_request_that_is_already_over_cannot_be_cancelled`, `test_equipment_cancel.py::test_a_request_that_is_already_over_is_refused` | status check in the rule and the service |
+| (design) A racing accept/reject wins; nothing freed | `test_equipment_cancel.py::test_the_status_update_is_conditional_so_a_racing_decision_wins` (hand-mutated: removing the condition fails it) | update conditioned on the status read |
+| (design) A failure freeing the units leaves the request as it was | `test_equipment_cancel.py::test_a_failure_freeing_the_units_puts_the_status_back` (hand-mutated: removing the restore fails it) | status restored in `cancel_request` |
+| (design) A waiting quantity change is dropped, and cannot be accepted | `test_equipment_cancel.py::test_a_waiting_quantity_change_is_rejected_with_a_reason_and_others_are_untouched`, `test_authz_equipment_cancel.py::test_a_change_on_a_cancelled_request_cannot_be_accepted_but_can_be_rejected` | change requests rejected in `cancel_request`; `rule_equipment_change_accept` checks `request_status` |
+| (design) Two clicks, so a mis-click cannot release units | `EquipmentChangeRequests.test.js::asks for a second click before cancelling, and Keep it backs out` | inline confirmation in `EquipmentChangeRequests.vue` |
+| Cancelled requests are visible, not hidden | `equipment.test.js` (Cancelled tab), `EquipmentBookingStatus.test.js::offers no Cancel for a rejected or already cancelled request` | `REQUEST_TABS`, `.status-cancelled` |
+
+## Integration tests for the equipment workflow (IS-17, IS-19, IS-41, IS-43, IS-66, Nawaz)
+
+`backend/tests/test_equipment_workflow_integration.py` (20 tests, `@pytest.mark.integration`,
+local Supabase only). They prove what the unit tests' fake database cannot. **Written but
+not yet run** (see open-questions): they need a local Supabase stack.
+
+| Story | What the real database must prove | Test |
+|---|---|---|
+| IS-17 | the session's window is stored as the right instants; a request that cannot be saved leaves nothing behind; a zero quantity is refused by the CHECK | `test_a_request_stores_its_lines_and_the_sessions_window_as_the_right_instants`, `test_a_request_naming_an_unknown_type_leaves_no_request_behind`, `test_the_database_refuses_a_zero_quantity_line` |
+| IS-19 | accepting reserves the lowest tags and confirms; stock held by another event refuses it; the exclusion constraint refuses overlapping periods and allows back-to-back ones | `test_accepting_reserves_the_lowest_asset_tags_and_confirms_the_request`, `test_accepting_when_another_event_holds_the_stock_is_refused_and_reserves_nothing`, `test_the_exclusion_constraint_refuses_one_unit_reserved_for_two_overlapping_periods`, `test_a_unit_returned_when_the_next_period_starts_can_be_reserved_again` |
+| IS-41 | reason, who and when are stored; the CHECK keeps reason and status in step; a rejection cannot overwrite an accepted request | `test_rejecting_stores_the_reason_and_who_decided`, `test_the_database_keeps_a_rejection_reason_and_the_status_in_step`, `test_a_request_accepted_first_cannot_then_be_rejected` |
+| IS-43 | an increase adds a unit and a decrease releases the highest tags; a change the stock cannot cover changes nothing; a rejection keeps the reservation; one pending change per item; no change to the same quantity | `test_an_accepted_increase_reserves_the_extra_unit_and_updates_the_quantity`, `test_an_accepted_decrease_releases_the_highest_tags`, `test_an_increase_the_stock_cannot_cover_is_refused_and_changes_nothing`, `test_a_rejected_change_stores_its_reason_and_leaves_the_reservation_alone`, `test_the_database_allows_only_one_pending_change_per_item`, `test_the_database_refuses_a_change_to_the_same_quantity` |
+| IS-66 | `cancelled` is a real enum value; cancelling frees units so another request can be accepted; a waiting change is rejected; a cancelled request cannot be cancelled again | `test_cancelling_a_confirmed_request_frees_its_units_for_another_request`, `test_cancelling_a_pending_request_marks_it_cancelled`, `test_cancelling_rejects_a_change_still_waiting_on_the_request`, `test_a_request_that_is_already_cancelled_cannot_be_cancelled_again` |

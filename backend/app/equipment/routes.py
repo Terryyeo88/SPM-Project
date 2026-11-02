@@ -8,6 +8,7 @@ All read-only.
   GET /equipment/requests/<id>/availability   -- the availability check
   POST /equipment/requests/<id>/accept        -- accept and reserve stock (IS-19)
   POST /equipment/requests/<id>/reject        -- reject with a reason (IS-41)
+  POST /equipment/requests/<id>/cancel        -- the coordinator cancels their request
   GET /equipment/requests/<id>/change-requests  -- quantity changes asked for (IS-43)
   POST /equipment/requests/<id>/change-requests -- coordinator asks to change a line's quantity
   GET /equipment/change-requests               -- Technical Support's pending queue
@@ -32,6 +33,7 @@ from app.authz.actions import (
     EQUIPMENT_CHANGE_REJECT,
     EQUIPMENT_LIST,
     EQUIPMENT_REQUEST_ACCEPT,
+    EQUIPMENT_REQUEST_CANCEL,
     EQUIPMENT_REQUEST_CHECK_AVAILABILITY,
     EQUIPMENT_REQUEST_LIST,
     EQUIPMENT_REQUEST_REJECT,
@@ -50,6 +52,7 @@ from app.equipment.change_service import (
 )
 from app.equipment.equipment_service import (
     accept_request,
+    cancel_request,
     check_availability,
     get_equipment,
     list_equipment,
@@ -109,6 +112,13 @@ def accept_equipment_request_route(equipment_request, request_id):
 def reject_equipment_request_route(equipment_request, request_id):
     body = request.get_json(silent=True) or {}
     return jsonify(reject_request(request_id, body.get("reason"), current_user().id)), 200
+
+
+# Static path -- must come before GET /equipment/<equipment_id> below.
+@equipment_bp.route("/requests/<request_id>/cancel", methods=["POST"])
+@require(EQUIPMENT_REQUEST_CANCEL, loader=lambda request_id: load_request(request_id))
+def cancel_equipment_request_route(equipment_request, request_id):
+    return jsonify(cancel_request(request_id, current_user().id)), 200
 
 
 # IS-43. Static paths -- before GET /equipment/<equipment_id> below.

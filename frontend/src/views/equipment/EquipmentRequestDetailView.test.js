@@ -160,6 +160,7 @@ describe('EquipmentRequestDetailView', () => {
     it.each([
       ['an already confirmed request', { ...PENDING, status: 'confirmed' }],
       ['a rejected request', { ...PENDING, status: 'rejected' }],
+      ['a cancelled request', { ...PENDING, status: 'cancelled' }],
     ])('offers no decision for %s', async (_label, request) => {
       serve(request, ENOUGH)
       const wrapper = mountView()

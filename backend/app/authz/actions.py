@@ -187,6 +187,10 @@ EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
 # equipment_request.reject (IS-41): Technical Support Staff reject a pending
 # request with an explanation the coordinator can read.
 EQUIPMENT_REQUEST_REJECT = "equipment_request.reject"
+# equipment_request.cancel: the coordinator who raised a request withdraws it
+# (pending) or gives its units back (confirmed), e.g. to ask again for a
+# different date and time.
+EQUIPMENT_REQUEST_CANCEL = "equipment_request.cancel"
 # equipment_change.* (IS-43): the coordinator asks to change the quantity on
 # an already-confirmed request line; Technical Support accept or reject it.
 EQUIPMENT_CHANGE_CREATE = "equipment_change.create"
