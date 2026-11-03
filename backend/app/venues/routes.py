@@ -5,9 +5,9 @@ Sprint 2), venue blocking (Sprint 3, Josiah), and IS-61's venue CRUD:
   POST   /venues              -- add a venue
   POST   /venues/<venue_id>   -- edit a venue (only the fields sent change,
                                   tentative_hold_minutes included -- Sprint 3)
-  DELETE /venues/<venue_id>   -- delete it; releases ongoing events' bookings
-  GET    /venues/deleted      -- deleted venues, waiting to be permanently deleted
-  DELETE /venues/<venue_id>/permanent -- permanently delete a deleted venue
+  DELETE /venues/<venue_id>   -- delete it: removes its record, releases
+                                  ongoing events' bookings, and every booking
+                                  keeps the venue's name as text
 
 Booking routes use a static "/bookings" prefix, declared BEFORE the
 catalogue's own dynamic "/<venue_id>" route below -- otherwise Flask
@@ -64,9 +64,7 @@ from app.venues.venue_service import (
     create_venue,
     delete_venue,
     get_venue,
-    list_deleted_venues,
     list_venues,
-    permanently_delete_venue,
     update_venue,
 )
 
@@ -214,16 +212,6 @@ def load_booking(booking_id: str) -> SimpleNamespace:
     return SimpleNamespace(**get_booking(booking_id))
 
 
-# IS-61: venues deleted from the catalogue but not yet permanently deleted,
-# for Venue Staff to permanently delete. Same action as deleting (venue.delete):
-# only those who can delete need to see what's waiting to be removed.
-# Static path -- must come before GET /venues/<venue_id> below.
-@venues_bp.route("/deleted", methods=["GET"])
-@require(VENUE_DELETE)
-def list_deleted_venues_route():
-    return jsonify(list_deleted_venues()), 200
-
-
 @venues_bp.route("", methods=["GET"])
 @require(VENUE_LIST)
 def list_venues_route():
@@ -256,15 +244,6 @@ def update_venue_route(venue_id):
 @require(VENUE_DELETE)
 def delete_venue_route(venue_id):
     return jsonify(delete_venue(venue_id, current_user().id)), 200
-
-
-# The second step: remove a venue already deleted from the catalogue. Same
-# action as deleting, as IS-60's permanent delete shares room_layout.manage.
-@venues_bp.route("/<venue_id>/permanent", methods=["DELETE"])
-@require(VENUE_DELETE)
-def permanently_delete_venue_route(venue_id):
-    permanently_delete_venue(venue_id)
-    return "", 204
 
 
 # View Venue Availability Calendar (Nawaz, Sprint 2, IS-11). `start`/`end`

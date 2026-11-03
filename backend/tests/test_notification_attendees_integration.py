@@ -1,4 +1,4 @@
-"""Live Supabase integration tests for Notification (Attendees) (IS-76) --
+"""Live Supabase integration tests for Notification (Attendees) (IS-22) --
 what the unit tests' in-memory fake can't prove:
 
 - the real register_attendee / withdraw_registration functions: who ends

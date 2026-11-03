@@ -103,7 +103,7 @@ export function formatHoldExpiry(booking) {
  * "book another venue" alert on the event details page lists. A release
  * counts as replaced once the session has a pending or confirmed booking
  * made after it (released_at; updated_at only for a row released before that
- * column existed -- a permanent delete rewrites updated_at, so it can't be
+ * column existed -- deleting the venue rewrites updated_at, so it can't be
  * trusted after one). So the alert stays while the coordinator still only
  * has bookings they made before the delete, and goes once they rebook.
  * Nothing is listed for a completed or cancelled event.

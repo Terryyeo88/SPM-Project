@@ -399,7 +399,7 @@ def test_list_bookings_for_event_newest_first(fake_db):
     assert [b["id"] for b in bookings] == ["new", "old"]
 
 
-def test_list_bookings_for_event_fills_in_the_venue_name_for_a_permanently_deleted_venue(fake_db):
+def test_list_bookings_for_event_fills_in_the_venue_name_for_a_deleted_venue(fake_db):
     """Same IS-61 fallback as list_bookings -- see that function's own
     sibling test for why this needs its own assertion, not just trust by
     inspection, after merging with main."""
@@ -504,11 +504,11 @@ def test_list_bookings_rejects_an_unknown_status_filter(fake_db):
         service_module.list_bookings(make_user(["venue_staff"]), "archived")
 
 
-def test_list_bookings_fills_in_the_venue_name_for_a_permanently_deleted_venue(fake_db):
+def test_list_bookings_fills_in_the_venue_name_for_a_deleted_venue(fake_db):
     """IS-61: list_bookings must still run every row through
     with_venue_names (merged alongside this sprint's touch_expired_holds
     -- see docs/design-decisions.md), not just the booking queue's own
-    local venue embed -- a permanently-deleted venue has venue_id=None
+    local venue embed -- a deleted venue has venue_id=None
     and no venues(...) embed at all, only the booking's own venue_name."""
     fake_db.tables["venue_bookings"] = [
         _booking("orphaned", venue_id=None, venues=None, venue_name="Old Annex", requested_by="coord-1"),

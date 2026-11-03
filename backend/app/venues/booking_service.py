@@ -99,10 +99,8 @@ def _event_window(event: SimpleNamespace) -> tuple[datetime, datetime]:
 def _get_venue(venue_id: str) -> dict:
     result = supabase.table("venues").select("*").eq("id", venue_id).maybe_single().execute()
     if result is None or not result.data:
+        # Includes a venue deleted from the catalogue (IS-61): its row is gone.
         raise ValidationError("venue_id does not reference an existing venue.")
-    if result.data.get("deleted_at"):
-        # IS-61. The database refuses it too (trg_venue_bookings_refuse_deleted_venue).
-        raise ValidationError(f'Venue "{result.data["name"]}" has been deleted from the venue catalogue.')
     return result.data
 
 
@@ -129,7 +127,7 @@ def _confirmed_overlap_exists(
     UPDATE that would otherwise hit IS-16's exclusion constraint. See
     app.venues.booking_release and docs/design-decisions.md."""
     if venue_id is None:
-        return False  # IS-61: the venue was permanently deleted; nothing to overlap
+        return False  # IS-61: the venue was deleted; nothing to overlap
     result = (
         supabase.table("venue_bookings")
         .select("*")
@@ -158,6 +156,8 @@ def _blocked_period_exists(venue_id: str, booking_start: datetime, booking_end: 
     to reviewing it -- see block_service.create_venue_block's own
     docstring), but it must never be CONFIRMED into an already-blocked
     period. Checked by confirm_booking alongside _confirmed_overlap_exists."""
+    if venue_id is None:
+        return False  # IS-61: the venue was deleted; nothing left to be blocked
     result = (
         supabase.table("venue_blocks")
         .select("block_start, block_end")
@@ -211,8 +211,10 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
             .execute()
         )
     except APIError as exc:
-        # IS-61: the venue was deleted between the check above and the insert
-        # (trg_venue_bookings_refuse_deleted_venue).
+        # IS-61: the venue was deleted between the check above and the insert,
+        # so its row is gone and the foreign key refuses the booking.
+        if exc.code == "23503":
+            raise ValidationError("venue_id does not reference an existing venue.") from exc
         if exc.code == "23514":
             raise ValidationError(exc.message) from exc
         raise
@@ -342,7 +344,7 @@ def get_booking(booking_id: str) -> dict:
 
 
 def with_venue_names(rows: list[dict]) -> list[dict]:
-    """IS-61: a booking whose venue was permanently deleted has no venue_id
+    """IS-61: a booking whose venue was deleted has no venue_id
     (so the venues(...) embed comes back empty) and keeps the venue's name in
     venue_name. Fills the embed from it, so every list still shows which
     venue a past booking was for. Rows whose venue still exists are left as
@@ -524,6 +526,13 @@ def confirm_booking(booking_id: str, booking: SimpleNamespace, decided_by: str) 
     edit to the venue's own tentative_hold_minutes never changes an
     already-confirmed booking's deadline.
     """
+    if booking.venue_id is None:
+        # IS-61: the venue was deleted under this pending booking (a finished
+        # event's, so it wasn't released); there is nothing to confirm onto.
+        # The database refuses it too (trg_venue_bookings_refuse_deleted_venue).
+        venue_name = getattr(booking, "venue_name", None)
+        venue = f'Venue "{venue_name}"' if venue_name else "This booking's venue"
+        raise ValidationError(f"{venue} has been deleted from the venue catalogue, so it can't be confirmed.")
     if _confirmed_overlap_exists(
         booking.venue_id,
         _parse_timestamptz(booking.booking_start),

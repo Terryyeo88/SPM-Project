@@ -25,7 +25,6 @@ const venue = {
   turnaround_minutes: 30,
   operating_hours_start: '07:00:00',
   operating_hours_end: '23:59:00',
-  deleted_at: null,
 }
 
 beforeEach(() => {
@@ -268,12 +267,13 @@ describe('VenueFormView -- edit (IS-61 AC2)', () => {
   })
 
   it('does not offer to edit a deleted venue', async () => {
+    // Its record is gone, so loading it is a 404.
     apiGet.mockImplementation((path) =>
-      Promise.resolve(path === '/room-layouts' ? LAYOUTS : { ...venue, deleted_at: '2026-10-23T10:00:00+00:00' }),
+      path === '/room-layouts' ? Promise.resolve(LAYOUTS) : Promise.reject(new Error('Venue not found.')),
     )
     const wrapper = await render()
 
     expect(wrapper.find('form').exists()).toBe(false)
-    expect(wrapper.find('[role="alert"]').text()).toContain('deleted from the catalogue')
+    expect(wrapper.find('[role="alert"]').text()).toContain('Venue not found.')
   })
 })

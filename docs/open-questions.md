@@ -242,12 +242,12 @@ decisions worth double-checking.
 - **A freed place goes straight to the next person on the waiting list.**
   Week 2 says "eligible attendees are notified when a slot opens up to
   apply", which could mean they're offered the place rather than given it.
-  We move them up automatically, and since IS-76 they're notified that
+  We move them up automatically, and since IS-22 they're notified that
   their registration is now confirmed. Confirm.
 
 - **Not built yet:** editing a registration after submitting it, and
   organiser/coordinator views of who registered. (Attendee notifications:
-  IS-76.)
+  IS-22.)
 
 - **Organiser "discretion" and manual closing.** Week 4 says organisers have
   discretion over registration and close it manually. Here the window the
@@ -1242,6 +1242,22 @@ Catalogue (IS-61)".
   a venue is deleted; finished and rejected events keep their record.
   Please confirm rejected events shouldn't lose their booking too.
 
+Revised 3 Nov (Aaralyn): deleting a venue now removes its record in one
+step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
+"Revised 3 Nov").
+
+- **Only the venue's name is kept on past records**, as text on each
+  booking (`venue_bookings.venue_name`), not its location, capacity or
+  other details. Please confirm the name is enough when reviewing a past
+  event, or say which other details need keeping.
+- **The name is kept per booking, not per event.** An event can have
+  several venue bookings, so each booking keeps the name of the venue it
+  was for. Please confirm.
+- **A delete can't be undone, and there is no list of deleted venues.**
+  The earlier soft delete and its "Deleted" tab are gone, along with any
+  venues that were already soft-deleted (their bookings keep the name).
+  Please confirm Venue Staff don't need to see or restore deleted venues.
+
 ## Notification System (IS-69, 27 Oct)
 
 - **The acceptance criteria are our reading.** IS-69's ticket text isn't in
@@ -1270,7 +1286,7 @@ Catalogue (IS-61)".
 - **Still not notified** (no hook existed; the owning stories can now add
   one `notify(...)` call each): the organiser on cancellation (IS-39, see
   above; done in IS-23), the coordinator on a new change request (done in
-  IS-24), and attendees promoted off a waiting list (done in IS-76). Please confirm which are needed.
+  IS-24), and attendees promoted off a waiting list (done in IS-22). Please confirm which are needed.
 
 ## User contact and preferences (IS-68, 30 Oct)
 
@@ -1347,7 +1363,10 @@ Catalogue (IS-61)".
   unmatched URLs answering 500.
 
 
-## Notification (Attendees) (IS-76, Justin, 1 Nov)
+## Notification (Attendees) (IS-22, Justin, 1 Nov)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Decided and built; worth confirming with the customer:
 

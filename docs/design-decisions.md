@@ -77,6 +77,23 @@ inactivity detection on top, as UX polish (faster, friendlier logout, less
 wasted refresh traffic), but that's optional and doesn't change what actually
 enforces the timeout.
 
+## Signing in as someone else in another tab reloads this tab (IS-27, 3 Nov)
+
+Every API call sends the session Supabase keeps in browser storage, which
+all tabs of one browser share, but each tab loads its profile (roles, staff
+buttons, data) once. Signing in as a coordinator in a second tab therefore
+left a Venue Staff tab offering actions the backend refused ("Not authorised
+to perform 'venue.delete'"). `stores/auth.js::watchAccountChanges` listens
+for Supabase's cross-tab sign-in broadcast and **reloads** the tab when a
+different user has signed in, so the page is rebuilt for the account it is
+actually acting as. Reload rather than signing the tab out (the user did
+just sign in, as someone) or showing a warning (the stale buttons would
+still be there to press). A token refresh for the same user, this tab's own
+sign-in, and a sign-out are left alone: a sign-out already sends the tab to
+/login on its next request (`auth_missing_token`, see `lib/api.js`). Two
+accounts at once still need two browsers or a private window; that's how
+browser sessions work, not something the app can change.
+
 ## 403 vs 404: decided by relationship, not by caller judgement
 
 Phase 2 ruled that a 403 and a 404 must be indistinguishable to a caller who
@@ -1747,7 +1764,53 @@ migration `20261023100000_venue_catalogue_crud.sql`. Frontend:
 and `VenueRemovedAlert.vue` on the coordinator's event page. The calls below
 are flagged in docs/open-questions.md.
 
-### Deleting is a soft delete
+### Revised 3 Nov: deleting removes the record
+
+Deleting a venue now removes its row from `public.venues` in one step,
+instead of a soft delete followed by a separate permanent delete (the two
+sections below describe how it worked before). Migration
+`20261103000000_venue_hard_delete.sql`.
+
+- **Why it's safe now:** the original reasons for a soft delete no longer
+  hold. Since the permanent delete, `venue_bookings.venue_id` is
+  `ON DELETE SET NULL` and trigger `before_venue_delete` copies the venue's
+  name into `venue_bookings.venue_name` first, so removing the row erases
+  nothing a past record needs. The booking review page already shows a
+  booking with no venue as "Name (deleted)" without loading the venue.
+- **What one delete does,** in one transaction (`delete_venue()`): it
+  releases ongoing events' pending and confirmed bookings exactly as before
+  (cancelled, flagged, logged, `released_at`), then deletes the row. The
+  trigger then stamps the name on every booking of the venue, completed and
+  cancelled events' included, and unlinks them. The backend still sends
+  released confirmed or safety-review sessions back to planning, and
+  notifies their coordinators.
+- **Where the name lives:** on each booking, not on the event. An event can
+  hold several venue bookings (IS-9, View Event Venue), and every screen
+  that shows a past venue already reads it from the booking
+  (`booking_service.with_venue_names`, `registration_service._venue`).
+- **Removed:** `venues.deleted_at` / `deleted_by` (venues already
+  soft-deleted were removed by the migration, keeping their names on their
+  bookings), `GET /venues/deleted`, `DELETE /venues/<id>/permanent`, the
+  catalogue's Deleted tab, the venue page's "Delete permanently", and the
+  409 `venue_deleted`. A deleted venue is now a 404, like any other missing
+  venue.
+- **Requests racing the delete:** a booking request for a venue being
+  deleted waits on the row lock, then fails the foreign key (23503). The
+  backend turns that into the same 400 as a missing venue. A finished
+  event's pending booking left with no venue is refused by
+  `confirm_booking` before any query, and by the database trigger.
+- **Found by running the integration tests (3 Nov):** opening a booking
+  whose venue was deleted crashed, because `_blocked_period_exists` sent
+  the empty venue id to the query as "None" (it now treats no venue as
+  never blocked, like `_confirmed_overlap_exists`). And the
+  "authenticated update venues" RLS policy from
+  `20261019010000_venue_settings_and_hold.sql` let any signed-in user edit
+  any venue directly through the database, skipping the Venue Staff check;
+  `20261103200000_venues_drop_authenticated_update.sql` drops it. Nothing
+  used it: the frontend never writes venues, and Flask uses the service-role
+  key.
+
+### Deleting is a soft delete (before 3 Nov)
 
 `venues.deleted_at` / `deleted_by`, not a `DELETE`:
 
@@ -1761,7 +1824,7 @@ So a deleted venue leaves the catalogue (`GET /venues`), can't be edited
 (409 `venue_deleted`) or booked, but `GET /venues/<id>` still returns it,
 marked deleted. There is no restore: the story doesn't ask for one.
 
-### Then a permanent delete
+### Then a permanent delete (before 3 Nov)
 
 So a deleted venue isn't left as a stale row, Venue Staff can permanently
 delete it: the catalogue's **Deleted** tab (`GET /venues/deleted`) lists
@@ -2259,7 +2322,10 @@ brings the code in line. This supersedes "nullable with no backfill" and
   so a user who clears their phone can still untick SMS.
 
 
-## Notification (Attendees) (IS-76, Justin, 2026-11-01)
+## Notification (Attendees) (IS-22, Justin, 2026-11-01)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Built on IS-69's notification table and `notify()`, the same way: one
 `_notify_*` hook per trigger in the story's own module, passing its
@@ -2561,7 +2627,7 @@ Approving and rejecting apply to the whole request (`_decide` moves every
 under-review session together), so the organizer gets one notification for the
 request, linking to the session they opened. Confirming and cancelling are per
 session (each session has its own route call), so those notifications name the
-session by its date, the way IS-76 does for attendees. A request of three
+session by its date, the way IS-22 does for attendees. A request of three
 sessions is therefore one "approved" and, later, up to three "confirmed".
 
 ### Submission is told even though the organizer did it

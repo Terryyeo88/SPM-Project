@@ -42,7 +42,7 @@ Two halves:
     events.routes._notify_technical_support_cancelled -> technical_support_event_news
     event_update.notify_technical_support_of_change   -> technical_support_event_news
 
-  IS-76 (Notification (Attendees)) -- see the "attendees" section:
+  IS-22 (Notification (Attendees)) -- see the "attendees" section:
 
     registration_service._notify_registered          -> registration_recorded
     registration_service._notify_withdrawn           -> registration_withdrawn
@@ -598,7 +598,7 @@ def safety_review_changed(review: dict, what: str) -> None:
         _notify_coordinator_of(event, type_, template.format(name=event["name"]))
 
 
-# -- attendees (IS-76: Notification (Attendees)) -------------------------------
+# -- attendees (IS-22: Notification (Attendees)) -------------------------------
 #
 # Who is told: a session's attendees are its registrations that are
 # "confirmed" or "waitlisted" (withdrawing deletes the row, so nobody else
@@ -610,7 +610,7 @@ def safety_review_changed(review: dict, what: str) -> None:
 # not at each edit: a change to a confirmed session sends it back to
 # planning, and only reconfirmation means the new arrangements are final.
 # A session cancelled before that gets only the cancellation (AC6). See
-# docs/design-decisions.md (IS-76).
+# docs/design-decisions.md (IS-22).
 
 ATTENDEE_STATUSES = ("confirmed", "waitlisted")
 
@@ -844,7 +844,7 @@ def _details_changed_since(session: dict, since: datetime) -> bool:
 
 
 def _venue_key(booking: dict):
-    # A permanently deleted venue loses venue_id but keeps its name (IS-61).
+    # A deleted venue loses venue_id but keeps its name (IS-61).
     return booking.get("venue_id") or booking.get("venue_name")
 
 

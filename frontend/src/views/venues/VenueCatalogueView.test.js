@@ -13,13 +13,12 @@ import { apiGet } from '../../lib/api'
 import VenueCatalogueView from './VenueCatalogueView.vue'
 
 const ACTIVE = [{ id: 'venue-1', name: 'Grand Ballroom', location: 'Main', capacity: 300, status: 'available' }]
-const DELETED = [{ ...ACTIVE[0], id: 'venue-2', name: 'Old Hall', deleted_at: '2026-10-23T10:00:00+00:00' }]
 
 beforeEach(() => {
   apiGet.mockReset()
   auth.roles = ['venue_staff']
   route.query = {}
-  apiGet.mockImplementation((path) => Promise.resolve(path === '/venues/deleted' ? DELETED : ACTIVE))
+  apiGet.mockResolvedValue(ACTIVE)
 })
 
 async function render() {
@@ -29,29 +28,25 @@ async function render() {
 }
 
 describe('VenueCatalogueView -- IS-61', () => {
-  it('lets Venue Staff list deleted venues waiting to be permanently deleted', async () => {
+  it('lists the catalogue, with no separate list of deleted venues (a delete removes the record)', async () => {
     const wrapper = await render()
 
-    await wrapper.find('[data-test="deleted-tab"]').trigger('click')
-    await flushPromises()
-
-    expect(apiGet).toHaveBeenLastCalledWith('/venues/deleted')
-    expect(wrapper.text()).toContain('Old Hall')
-    expect(wrapper.find('.status-deleted').exists()).toBe(true)
+    expect(apiGet).toHaveBeenCalledWith('/venues')
+    expect(wrapper.text()).toContain('Grand Ballroom')
+    expect(wrapper.text()).not.toContain('Deleted')
   })
 
-  it('shows coordinators no Deleted tab and no Add venue', async () => {
-    auth.roles = ['event_coordinator']
-    const wrapper = await render()
+  it('offers Venue Staff Add venue, and coordinators not', async () => {
+    expect((await render()).text()).toContain('Add venue')
 
-    expect(wrapper.find('[data-test="deleted-tab"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Add venue')
+    auth.roles = ['event_coordinator']
+    expect((await render()).text()).not.toContain('Add venue')
   })
 
   it('shows what a delete did', async () => {
-    route.query = { deleted: 'Old Hall was permanently deleted. Past bookings still show its name.' }
+    route.query = { deleted: 'Old Hall was deleted. No ongoing events had booked it.' }
     const wrapper = await render()
 
-    expect(wrapper.find('[role="status"]').text()).toContain('Old Hall was permanently deleted')
+    expect(wrapper.find('[role="status"]').text()).toContain('Old Hall was deleted')
   })
 })
