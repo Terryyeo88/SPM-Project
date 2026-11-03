@@ -220,6 +220,7 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
         raise ValidationError("The venue booking database operation did not return a booking.")
     booking = result.data[0] if isinstance(result.data, list) else result.data
 
+    _notify_venue_staff(booking, requested_by)
     return booking
 
 
@@ -447,6 +448,12 @@ def _record_booking_status_change(
             "reason": reason,
         }
     ).execute()
+
+
+def _notify_venue_staff(booking: dict, actor_id: str | None = None) -> None:
+    """Venue Staff are told a booking request is waiting for review (IS-25,
+    notification_service.venue_staff_booking_requested)."""
+    notification_service.venue_staff_booking_requested(booking, actor_id)
 
 
 def _notify_booking_decision(booking: dict, decision: str) -> None:

@@ -57,7 +57,12 @@ from app.events.event_service import (
     _to_database_payload,
     validate_event_payload,
 )
-from app.events.event_update import apply_shared_details, notify_technical_support_of_change, revert_to_planning
+from app.events.event_update import (
+    apply_shared_details,
+    notify_technical_support_of_change,
+    notify_venue_staff_of_change,
+    revert_to_planning,
+)
 from app.extensions import supabase
 from app.notifications import notification_service
 from app.shared.errors import AppError, NotFoundError, ValidationError
@@ -270,6 +275,7 @@ def approve_change_request(
     apply_shared_details(event, shared_changes, reviewed_by)
     updated = revert_to_planning(event.id, event.status, change["requested_changes"], reviewed_by) or updated
     notify_technical_support_of_change(event.id, change["requested_changes"], reviewed_by)
+    notify_venue_staff_of_change(event.id, change["requested_changes"], reviewed_by)
     return {"change_request": claimed, "event": updated}
 
 

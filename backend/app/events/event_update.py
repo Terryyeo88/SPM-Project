@@ -170,6 +170,14 @@ def notify_technical_support_of_change(event_id: str, changed_fields, actor: str
     notification_service.technical_support_event_news(event_id, "changed", set(changed_fields), actor)
 
 
+def notify_venue_staff_of_change(event_id: str, changed_fields, actor: str | None) -> None:
+    """IS-25 AC2/AC3: tell Venue Staff when a change touched the date, time,
+    attendance, room layout or accessibility needs of a session they hold a
+    booking for (notification_service.venue_staff_event_news decides whether
+    it is relevant)."""
+    notification_service.venue_staff_event_news(event_id, "changed", set(changed_fields), actor)
+
+
 def apply_shared_details(event: SimpleNamespace, shared_changes: dict, actor: str | None) -> None:
     """Writes a changed name/description/purpose to the request's other
     sessions -- those still open to changes -- and sends any confirmed one
@@ -268,4 +276,5 @@ def update_event(event: SimpleNamespace, payload, updated_by: str, acknowledge_i
         apply_shared_details(event, {field: changes[field] for field in SHARED_FIELDS if field in changes}, updated_by)
     result = revert_to_planning(event.id, event.status, changes, updated_by) or updated
     notify_technical_support_of_change(event.id, changes, updated_by)
+    notify_venue_staff_of_change(event.id, changes, updated_by)
     return result

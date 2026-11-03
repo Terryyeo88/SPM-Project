@@ -1261,3 +1261,17 @@ def test_is26_approving_a_change_tells_technical_support_which_fields_changed(fa
     approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
 
     assert seen == [(("session-1", "changed", {"expected_attendance"}, COORDINATOR), {})]
+
+
+def test_is25_approving_a_change_tells_venue_staff_which_fields_changed(fake, monkeypatch):
+    import app.notifications.notification_service as notification_service
+
+    seen = []
+    monkeypatch.setattr(notification_service, "venue_staff_event_news", lambda *a, **k: seen.append((a, k)))
+    change = request_event_change(_event(fake), ORGANISER, {"changes": {"expected_attendance": 150}})
+    assert seen == []  # asking changes nothing yet
+
+    approve_change_request(_event(fake), change["event_change_req_id"], COORDINATOR)
+
+    assert seen == [(("session-1", "changed", {"expected_attendance"}, COORDINATOR), {})]
+

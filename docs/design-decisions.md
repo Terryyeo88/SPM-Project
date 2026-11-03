@@ -2636,3 +2636,58 @@ Removed in turn, each caught: telling for every change request; telling only
 for ordinary ones; telling before the pending check; the block hook; the hook
 firing when nothing was released; and the blocked notice going to the
 organizer.
+
+## Notification (Venue Staff) (IS-25, Nawaz, Sprint 4)
+
+Source: IS-25's criteria (see `traceability.md`): Venue Staff are notified
+when a coordinator submits a booking request that needs review, when an event
+with a venue arrangement is changed in a way that affects the venue, when it
+is rescheduled, and when it is cancelled, and only for venue matters. Built
+on IS-69's notification service, in the shape IS-26 gave Technical Support.
+No table, no migration.
+
+### "The relevant Venue Staff" is the role
+
+Bookings are not assigned to individual staff (`booking_service.list_bookings`:
+"venue_staff sees every booking ... no per-venue-staff-assignment"), so every
+user with the `venue_staff` role is told, the same choice as IS-26 and IS-69's
+Safety Officers. "Relevant" is enforced by what triggers it, not by who
+receives it: a booking request waiting for review, and a session that has a
+booking `pending` or `confirmed`.
+
+### Four triggers
+
+| Criterion | Trigger | Where |
+|---|---|---|
+| A booking request needs review | a request is created (`pending`) | `booking_service.create_booking_request` |
+| Changed in a way that affects the venue | an edit or approved change request touches attendance, room layout or accessibility needs | `event_update.update_event`, `change_request_service.approve_change_request` |
+| Rescheduled | the same, touching the date or time (different wording) | same |
+| Cancelled | the cancel route, once the status and the release have happened | `events.routes.cancel_event` |
+
+The field list is `change_impact.VENUE_DEPENDENT_FIELDS`, the fields the
+coordinator is already warned about for a venue. An edit to anything else
+(name, equipment, notes) is not told. Every hook runs after the change it
+reports, so a refused or conflicting action tells nobody.
+
+### A cancellation must count the booking it just released
+
+`cancel_event` releases the session's confirmed bookings before the
+notification runs, so by then they are `released`, not `confirmed`. Asking the
+database for live bookings alone would miss exactly the case that matters. The
+route passes the bookings it just released, and the lookup adds any still
+`pending` (a pending request is left alone by a cancellation). An older
+release, from before the cancellation, is not counted.
+
+### Notifications link to the booking
+
+The venue booking review page is what Venue Staff act on, so every one links to
+a booking: the new request, or (for event-level news) the session's first live
+booking by id. The frontend maps the new `venue_booking` entity to that page.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling the actor; ignoring whether a booking is
+live; telling for any edit; dropping the released bookings on cancel; counting
+any released booking instead of this cancellation's; and each of the booking,
+update, approve and cancel hooks, plus the booking and cancel hooks firing
+before their change.

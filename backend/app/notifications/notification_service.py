@@ -13,6 +13,12 @@ Two halves:
     safety_service._notify_safety_review             -> safety_review_changed
     venue_service._notify_venue_deleted              -> venue_booking_released
 
+  IS-25 (Notification (Venue Staff)) -- the "Venue Staff" section:
+
+    booking_service._notify_venue_staff              -> venue_staff_booking_requested
+    events.routes._notify_venue_staff_cancelled      -> venue_staff_event_news
+    event_update.notify_venue_staff_of_change        -> venue_staff_event_news
+
   IS-24 (Notification (Event Coordinator)) -- the two additions:
 
     block_service._notify_coordinator_venue_blocked  -> venue_booking_blocked
@@ -129,6 +135,21 @@ TECHNICAL_SUPPORT_TIMING_FIELDS = frozenset(
 )
 TECHNICAL_SUPPORT_FIELDS = TECHNICAL_SUPPORT_TIMING_FIELDS | {"equipment", "room_layout"}
 _LIVE_EQUIPMENT_REQUEST_STATUSES = ("pending", "confirmed")
+
+# IS-25 (Notification (Venue Staff)).
+VENUE_STAFF_ROLE = "venue_staff"
+ENTITY_VENUE_BOOKING = "venue_booking"
+VENUE_BOOKING_REQUESTED = "venue_booking_requested"
+VENUE_EVENT_CHANGED = "venue_event_changed"
+VENUE_EVENT_CANCELLED = "venue_event_cancelled"
+# The session details a venue booking depends on (the same list
+# change_impact's venue check uses): the date and time, the attendance, the
+# room layout and the accessibility needs.
+VENUE_STAFF_TIMING_FIELDS = frozenset(
+    {"preferred_start_date", "preferred_end_date", "preferred_start_time", "preferred_end_time"}
+)
+VENUE_STAFF_FIELDS = VENUE_STAFF_TIMING_FIELDS | {"expected_attendance", "room_layout", "accessibility_needs"}
+_LIVE_VENUE_BOOKING_STATUSES = ("pending", "confirmed")
 
 # IS-24 (Notification (Event Coordinator)).
 EVENT_CHANGE_REQUESTED = "event_change_requested"
@@ -302,6 +323,86 @@ def equipment_request_decided(request_id: str, decision: str) -> None:
     if event:
         type_, template = _EQUIPMENT_DECISIONS[decision]
         _notify_coordinator_of(event, type_, template.format(name=event["name"]))
+
+
+# -- Venue Staff (IS-25) ------------------------------------------------------
+#
+# Every Venue Staff member is told: bookings are not assigned to individual
+# staff (booking_service.list_bookings: "venue_staff sees every booking"), so
+# "the relevant Venue Staff" can only mean the role, as for Technical Support
+# (IS-26). "Relevant" is enforced by what triggers it: a booking request
+# waiting for review, and a session that has a booking pending or confirmed
+# whose date, time, attendance, room layout or accessibility needs changed,
+# or that was cancelled. The person who did the thing is never told.
+
+
+def _venue_staff_ids(actor_id: str | None) -> list[str]:
+    return [user for user in _users_with_role(VENUE_STAFF_ROLE) if user != actor_id]
+
+
+def _live_venue_booking_ids(event_id: str) -> list[str]:
+    result = (
+        supabase.table("venue_bookings")
+        .select("id")
+        .eq("event_id", event_id)
+        .in_("status", list(_LIVE_VENUE_BOOKING_STATUSES))
+        .execute()
+    )
+    return sorted(str(row["id"]) for row in result.data or [])
+
+
+@_best_effort
+def venue_staff_booking_requested(booking: dict, actor_id: str | None = None) -> None:
+    """IS-25 AC1: a coordinator's venue booking request is waiting for review."""
+    event = _event(booking.get("event_id"))
+    if not event:
+        return
+    notify(
+        _venue_staff_ids(actor_id),
+        VENUE_BOOKING_REQUESTED,
+        f'A venue booking request for "{event["name"]}" is waiting for your review.',
+        ENTITY_VENUE_BOOKING,
+        booking["id"],
+    )
+
+
+@_best_effort
+def venue_staff_event_news(
+    event_id: str,
+    what: str,
+    changed_fields: Iterable[str] = (),
+    actor_id: str | None = None,
+    released_booking_ids: Iterable[str] = (),
+) -> None:
+    """IS-25 AC2-AC4: a session with a venue booking was changed in a way
+    that affects the venue (what == "changed", with the fields; a new date or
+    time is a reschedule) or cancelled (what == "cancelled", with the
+    bookings the cancellation released, which are no longer pending or
+    confirmed by now). Nothing is sent for a session with no such booking, or
+    for a change that touched none of the fields."""
+    if what == "changed":
+        touched = set(changed_fields) & VENUE_STAFF_FIELDS
+        if not touched:
+            return
+    elif what != "cancelled":
+        return
+    event = _event(event_id)
+    if not event:
+        return
+    booking_ids = sorted(set(_live_venue_booking_ids(event_id)) | {str(b) for b in released_booking_ids})
+    if not booking_ids:
+        return
+    name = event["name"]
+    if what == "cancelled":
+        type_ = VENUE_EVENT_CANCELLED
+        message = f'"{name}" was cancelled. Its venue booking has been released.'
+    elif touched & VENUE_STAFF_TIMING_FIELDS:
+        type_ = VENUE_EVENT_CHANGED
+        message = f'"{name}" was rescheduled. Check that its venue booking still fits the new date and time.'
+    else:
+        type_ = VENUE_EVENT_CHANGED
+        message = f'A detail of "{name}" that affects its venue changed. Check its venue booking.'
+    notify(_venue_staff_ids(actor_id), type_, message, ENTITY_VENUE_BOOKING, booking_ids[0])
 
 
 # -- Technical Support Staff (IS-26) ------------------------------------------

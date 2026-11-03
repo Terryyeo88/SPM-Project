@@ -1496,3 +1496,27 @@ Please confirm:
 - **An expired tentative hold is not notified.** The system releases it
   silently (`release_expired_hold`), and the criterion does not list it. It
   reads like it should be; say if it is wanted.
+
+## Notification (Venue Staff) (IS-25, Nawaz, Sprint 4)
+
+Reasoning is in `design-decisions.md` ("Notification (Venue Staff)"). Please
+confirm:
+
+- **Every Venue Staff member is told.** Nothing assigns staff to a venue or a
+  booking. If the team wants assignment (or a venue manager), that is a new
+  story and these hooks would take a recipient list.
+- **"A change that affects the venue" is attendance, room layout and
+  accessibility needs.** That is the list the coordinator is already warned
+  about (`change_impact`). Facility needs, which a venue is also chosen for,
+  are not a field a coordinator can change on the session today. Say if
+  another field should be on the list.
+- **Only a session with a pending or confirmed booking is news.** A change or
+  cancellation of a session with no booking (or a rejected one) tells nobody.
+- **A booking the coordinator cancels, or a block that releases it, is not
+  told to Venue Staff.** The first is Venue Staff's own queue losing an item
+  the criterion does not list; the second is Venue Staff's own action.
+  Say if Venue Staff should hear when a coordinator withdraws a request.
+- **A reschedule does not move the booking.** The booking keeps its old
+  window (the booking snapshots it); Venue Staff are told to check, and the
+  coordinator has to cancel and ask again. Whether it should follow the event
+  is a separate story.
