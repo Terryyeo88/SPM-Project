@@ -11,10 +11,12 @@
  *                         (reason required).
  *
  * Both see the request's change history (GET /events/<id>/change-requests),
- * newest first, labelled by session when the request has more than one.
+ * newest first, labelled by session when the request has more than one,
+ * paged PAGE_SIZE at a time (lib/pagination).
  */
 import { computed, reactive, ref, watch } from 'vue'
 import { apiGet, apiPost } from '../lib/api'
+import { paginate } from '../lib/pagination'
 import {
   CHANGE_STATUS_LABELS,
   buildChanges,
@@ -44,6 +46,8 @@ const props = defineProps({
 })
 // `applied` carries the updated session row after an approval.
 const emit = defineEmits(['applied'])
+
+const PAGE_SIZE = 3
 
 const changes = ref([])
 const loading = ref(true)
@@ -193,7 +197,9 @@ async function run(action) {
 
 async function loadChanges() {
   try {
-    changes.value = await apiGet(`/events/${props.event.id}/change-requests`)
+    const loaded = await apiGet(`/events/${props.event.id}/change-requests`)
+    changes.value = [...loaded].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    page.value = 1 // newest first: a reload (e.g. after a new request) starts at the latest
   } catch (requestError) {
     error.value = `Couldn't load change requests: ${requestError.message}`
   } finally {
@@ -206,6 +212,13 @@ function when(value) {
 }
 
 const pendingCount = computed(() => changes.value.filter((change) => change.status === 'pending').length)
+
+const page = ref(1)
+const pageView = computed(() => paginate(changes.value, page.value, PAGE_SIZE))
+
+function goTo(target) {
+  page.value = Math.min(Math.max(1, target), pageView.value.pageCount)
+}
 
 watch(() => props.event.id, () => {
   requesting.value = false
@@ -295,8 +308,9 @@ watch(() => props.event.id, () => {
     <p v-if="loading" class="muted small">Loading change requests...</p>
     <p v-else-if="!changes.length" class="muted small">No changes have been requested.</p>
 
-    <ul v-else class="change-list">
-      <li v-for="change in changes" :key="change.event_change_req_id" class="change" :class="`change-${change.status}`">
+    <template v-else>
+    <ul class="change-list">
+      <li v-for="change in pageView.items" :key="change.event_change_req_id" class="change" :class="`change-${change.status}`">
         <div class="change-header">
           <span class="change-title">
             <template v-if="allSessions.length > 1">Session {{ sessionNumber(change.event_id) || '?' }} · </template>
@@ -366,6 +380,18 @@ watch(() => props.event.id, () => {
         </div>
       </li>
     </ul>
+    <nav v-if="pageView.pageCount > 1" class="pager" aria-label="Change request pages">
+      <button type="button" class="pager-btn" :disabled="pageView.page === 1" @click="goTo(pageView.page - 1)">
+        &larr; Newer
+      </button>
+      <span class="muted small" aria-live="polite">
+        {{ pageView.from }}–{{ pageView.to }} of {{ pageView.total }} · Page {{ pageView.page }} of {{ pageView.pageCount }}
+      </span>
+      <button type="button" class="pager-btn" :disabled="pageView.page === pageView.pageCount" @click="goTo(pageView.page + 1)">
+        Older &rarr;
+      </button>
+    </nav>
+    </template>
   </section>
 </template>
 
@@ -389,6 +415,14 @@ watch(() => props.event.id, () => {
 .change-pending { border-color: var(--cs-pending); }
 .change-header { display: flex; justify-content: space-between; align-items: center; gap: var(--cs-space-3); flex-wrap: wrap; }
 .change-title { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); flex-wrap: wrap; padding-top: 4px; }
+.pager .small { margin: 0; }
+.pager-btn {
+  min-height: 34px; padding: 0 var(--cs-space-4); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); background: var(--cs-surface);
+  font: inherit; font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); cursor: pointer;
+}
+.pager-btn:disabled { opacity: .5; cursor: not-allowed; }
+.pager-btn:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 2px; }
 
 .impact { display: flex; flex-direction: column; gap: var(--cs-space-2); padding: var(--cs-space-3) var(--cs-space-4); border-left: 3px solid var(--cs-pending); border-radius: var(--cs-radius-sm); background: var(--cs-pending-tint); font-size: var(--cs-text-sm); }
 .impact-title { font-size: var(--cs-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-pending); }
