@@ -184,11 +184,11 @@ onMounted(load)
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.hint { margin: 0 0 12px; font-size: 13px; color: #6b6b6b; }
-.line { display: flex; flex-direction: column; gap: 12px; border: 1px solid #e3e3e3; border-radius: 6px; padding: 14px 16px; margin: 0 0 14px; }
-.line-legend { font-size: 12px; font-weight: 700; color: #6b6b6b; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
-.line-grid { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(120px, 1fr); gap: 16px; align-items: start; }
-.link-btn { align-self: flex-start; border: none; background: none; color: #1f5fae; font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; }
-.link-btn.add { margin-bottom: 8px; }
+.hint { margin: 0 0 var(--cs-space-3); font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
+.line { display: flex; flex-direction: column; gap: var(--cs-space-3); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4); margin: 0 0 var(--cs-space-4); }
+.line-legend { font-size: var(--cs-text-xs); font-weight: 700; color: var(--cs-ink-soft); padding: 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.line-grid { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(120px, 1fr); gap: var(--cs-space-4); align-items: start; }
+.link-btn { align-self: flex-start; border: none; background: none; color: var(--cs-signal); font-size: var(--cs-text-sm); font-weight: 600; cursor: pointer; padding: 0; }
+.link-btn.add { margin-bottom: var(--cs-space-2); }
 @media (max-width: 520px) { .line-grid { grid-template-columns: 1fr; } }
 </style>

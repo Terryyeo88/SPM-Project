@@ -68,16 +68,17 @@ watch(() => [props.event.id, props.event.status], load)
 
 <style scoped>
 .venue-removed {
-  display: flex; flex-direction: column; gap: 8px;
-  background: #fff4e5; border: 1px solid #e0a54a; border-left: 4px solid #c27c0e; border-radius: 6px;
-  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: var(--cs-space-2);
+  background: var(--cs-signal-tint); border: 1px solid var(--cs-signal-light); border-left: 4px solid var(--cs-signal-strong); border-radius: var(--cs-radius-md);
+  padding: var(--cs-space-4) var(--cs-space-4);
 }
-h2 { margin: 0; font-size: 15px; color: #7a4a06; }
-p { margin: 0; font-size: 14px; color: #4a3a22; }
-.small { font-size: 13px; }
+h2 { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-signal-strong); }
+p { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink); }
+.small { font-size: var(--cs-text-sm); }
 .action {
-  align-self: flex-start; min-height: 36px; padding: 0 16px; border-radius: 4px;
-  background: #2568e8; color: #fff; font-size: 13px; font-weight: 700;
+  align-self: flex-start; min-height: 36px; padding: 0 var(--cs-space-4); border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal); color: #fff; font-size: var(--cs-text-sm); font-weight: 700;
   text-decoration: none; display: inline-flex; align-items: center;
 }
+.action:hover { background: var(--cs-signal-strong); }
 </style>

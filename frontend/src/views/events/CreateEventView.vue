@@ -225,5 +225,5 @@ async function saveDraft() {
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.container-form { display: flex; flex-direction: column; gap: 18px; }
+.container-form { display: flex; flex-direction: column; gap: var(--cs-space-4); }
 </style>

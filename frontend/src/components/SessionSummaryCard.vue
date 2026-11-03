@@ -42,7 +42,7 @@ function formatDateTime(value) {
         <router-link v-if="link" :to="`/events/${session.id}`">Session {{ index + 1 }}</router-link>
         <template v-else>Session {{ index + 1 }}</template>
       </h3>
-      <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+      <span class="status cs-pill" :class="`status-${session.status} cs-status-${session.status}`">{{ statusLabel(session.status) }}</span>
     </div>
     <dl>
       <dt>Preferred start</dt><dd>{{ session.preferred_start_date || 'Not provided' }}<template v-if="session.preferred_start_time"> at {{ timeValue(session.preferred_start_time) }}</template></dd>
@@ -63,14 +63,14 @@ function formatDateTime(value) {
 
 <style scoped src="../styles/event-form.css"></style>
 <style scoped>
-.session-card.current { border-style: solid; border-color: #444444; }
+.session-card.current { border-style: solid; border-color: var(--cs-ink); }
 .card-title a { color: inherit; }
-dl { display: grid; grid-template-columns: 180px 1fr; gap: 10px 16px; margin: 0; font-size: 14px; }
-dt { font-weight: 600; color: #6a6a6a; }
-dd { margin: 0; color: #2a2a2a; }
+dl { display: grid; grid-template-columns: 180px 1fr; gap: var(--cs-space-3) var(--cs-space-4); margin: 0; font-size: var(--cs-text-base); }
+dt { font-weight: 600; color: var(--cs-ink-soft); }
+dd { margin: 0; color: var(--cs-ink); }
 .capitalize { text-transform: capitalize; }
 @media (max-width: 640px) {
   dl { grid-template-columns: 1fr; gap: 4px; }
-  dd { margin-bottom: 8px; }
+  dd { margin-bottom: var(--cs-space-2); }
 }
 </style>

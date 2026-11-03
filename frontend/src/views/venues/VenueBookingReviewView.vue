@@ -163,7 +163,7 @@ onMounted(load)
             <h1 class="page-title">{{ event?.name }}</h1>
             <span class="page-subtitle">{{ venue?.name ?? deletedVenueLabel }}</span>
           </div>
-          <span class="status" :class="`status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
+          <span class="status cs-pill" :class="`status-${booking.status} cs-status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
 
           <section class="card" aria-labelledby="event-about-heading">
             <h2 id="event-about-heading" class="card-title">About the Event</h2>
@@ -302,50 +302,50 @@ onMounted(load)
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-/* "released" isn't an event status, so event-form.css's own .status-*
-   rules have no entry for it (unlike "confirmed"/"rejected", which
-   happen to also be real event statuses and so already got a colour
-   from there). */
-.status-released { color: #6a6a6a; background: #eeeeee; }
+/* Local .status-released override removed: "released" isn't a real event
+   status so event-form.css's own .status-* rules (not edited here --
+   shared by a dozen other files) have no entry for it, and base.css's
+   global .cs-status-released now supplies it via the cs-pill/cs-status-*
+   classes added in the template above. */
 
-.detail-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #ececec; font-size: 13px; }
+.detail-row { display: flex; justify-content: space-between; gap: var(--cs-space-4); padding: var(--cs-space-2) 0; border-bottom: 1px solid var(--cs-line); font-size: var(--cs-text-sm); }
 .detail-row:last-child { border-bottom: none; }
-.muted { color: #6b6b6b; }
-.small { font-size: 12px; margin: 4px 0 0; }
-.value { color: #2a2a2a; font-weight: 600; text-align: right; }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-xs); margin: 4px 0 0; }
+.value { color: var(--cs-ink); font-weight: 600; text-align: right; }
 .value-text { font-weight: 400; text-align: left; white-space: pre-line; overflow-wrap: anywhere; flex: 1; max-width: 75%; }
 
-.suitability-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; }
+.suitability-row { display: flex; align-items: flex-start; gap: var(--cs-space-2); padding: var(--cs-space-2) 0; }
 .suitability-icon {
   flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; font-size: 12px; font-weight: 700;
+  justify-content: center; font-size: var(--cs-text-xs); font-weight: 700;
 }
-.suitability-icon.ok { background: #eaf5ec; color: #2f6b3f; }
-.suitability-icon.warn { background: #fdf6ec; color: #8a5a12; }
-.suitability-label { font-size: 13px; font-weight: 600; color: #2a2a2a; }
+.suitability-icon.ok { background: var(--cs-available-tint); color: var(--cs-available); }
+.suitability-icon.warn { background: var(--cs-pending-tint); color: var(--cs-pending); }
+.suitability-label { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
 
-.decision { display: flex; flex-direction: column; gap: 14px; }
-.decision h2 { margin: 0; font-size: 15px; color: #222; }
-.buttons { display: flex; flex-wrap: wrap; gap: 12px; }
+.decision { display: flex; flex-direction: column; gap: var(--cs-space-4); }
+.decision h2 { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.buttons { display: flex; flex-wrap: wrap; gap: var(--cs-space-3); }
 .btn {
-  min-height: 46px; padding: 0 22px; border-radius: 4px; font: inherit; font-size: 14px; font-weight: 700;
-  cursor: pointer; background: #fff;
+  min-height: 46px; padding: 0 var(--cs-space-5); border-radius: var(--cs-radius-sm); font: inherit; font-size: var(--cs-text-base); font-weight: 700;
+  cursor: pointer; background: var(--cs-surface);
 }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
-.btn.small { min-height: 38px; padding: 0 16px; font-size: 13px; }
-.approve { border: none; background: #2f6b3f; color: #fff; }
-.reject { border: 1px solid #a33f3f; color: #a33f3f; }
-.reject-solid { border: none; background: #a33f3f; color: #fff; }
-.neutral { border: 1px solid #b8b8b8; color: #444; }
+.btn.small { min-height: 38px; padding: 0 var(--cs-space-4); font-size: var(--cs-text-sm); }
+.approve { border: none; background: var(--cs-available); color: #fff; }
+.reject { border: 1px solid var(--cs-occupied); color: var(--cs-occupied); }
+.reject-solid { border: none; background: var(--cs-occupied); color: #fff; }
+.neutral { border: 1px solid var(--cs-line-strong); color: var(--cs-ink); }
 
 .panel {
-  display: flex; flex-direction: column; gap: 8px;
-  background: #fbf1f1; border: 1px solid #d9a3a3; border-radius: 6px; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: var(--cs-space-2);
+  background: var(--cs-occupied-tint); border: 1px solid var(--cs-occupied); border-radius: var(--cs-radius-md); padding: var(--cs-space-4) var(--cs-space-5);
 }
-.panel label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6a6a6a; }
+.panel label { font-size: var(--cs-text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-ink-soft); }
 .panel textarea {
-  box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #b8b8b8; border-radius: 4px;
-  background: #fff; font: inherit; font-size: 14px; resize: vertical;
+  box-sizing: border-box; width: 100%; padding: var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface); font: inherit; font-size: var(--cs-text-base); resize: vertical;
 }
-.panel-actions { display: flex; gap: 10px; margin-top: 4px; }
+.panel-actions { display: flex; gap: var(--cs-space-3); margin-top: 4px; }
 </style>

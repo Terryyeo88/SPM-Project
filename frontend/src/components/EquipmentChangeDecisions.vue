@@ -116,23 +116,24 @@ onMounted(load)
 </template>
 
 <style scoped>
-.card { background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 16px 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
-.card-title { margin: 0; font-size: 14px; font-weight: 700; color: #1f1f1f; }
-.change { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px dashed #e2e2e2; }
-.change-head { margin: 0; font-size: 14px; color: #2a2a2a; }
-.change-check { margin: 0; font-size: 13px; font-weight: 600; }
-.ok { color: #2f6b3f; }
-.warn { color: #8a5a12; }
-.hint { margin: 0; font-size: 12px; color: #8a8a8a; }
-.error { margin: 0; font-size: 13px; color: #a33f3f; }
-.btn-accept-change, .btn-reject-change { align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
-.btn-accept-change { background: #2568e8; }
-.btn-accept-change:disabled { background: #b9c7e6; cursor: not-allowed; }
-.btn-reject-change { background: #b42318; }
-.btn-reject-change:disabled { background: #e3b5b0; cursor: not-allowed; }
+.card { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4) var(--cs-space-5); box-sizing: border-box; display: flex; flex-direction: column; gap: var(--cs-space-3); }
+.card-title { margin: 0; font-size: var(--cs-text-sm); font-weight: 700; color: var(--cs-ink); }
+.change { display: flex; flex-direction: column; gap: var(--cs-space-2); padding-bottom: var(--cs-space-3); border-bottom: 1px solid var(--cs-line); }
+.change-head { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink); }
+.change-check { margin: 0; font-size: var(--cs-text-sm); font-weight: 600; }
+.ok { color: var(--cs-available); }
+.warn { color: var(--cs-pending); }
+.hint { margin: 0; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+.error { margin: 0; font-size: var(--cs-text-sm); color: var(--cs-occupied); }
+.btn-accept-change, .btn-reject-change { align-self: flex-start; min-height: 38px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm); color: #fff; font: inherit; font-size: var(--cs-text-base); font-weight: 700; cursor: pointer; }
+.btn-accept-change { background: var(--cs-signal); }
+.btn-accept-change:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.btn-accept-change:disabled { background: var(--cs-line-strong); cursor: not-allowed; }
+.btn-reject-change { background: var(--cs-occupied); }
+.btn-reject-change:disabled { background: var(--cs-occupied-tint); color: var(--cs-occupied); cursor: not-allowed; }
 .reject-box { display: flex; flex-direction: column; gap: 6px; }
-.reject-label { font-size: 13px; font-weight: 600; color: #2a2a2a; }
-.change-reason-input { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #c8c8c8; border-radius: 4px; resize: vertical; }
-.history { margin: 0; padding-left: 18px; font-size: 13px; color: #444; display: flex; flex-direction: column; gap: 4px; }
-.history-reason { display: block; color: #a33f3f; white-space: pre-wrap; }
+.reject-label { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.change-reason-input { font: inherit; font-size: var(--cs-text-base); padding: var(--cs-space-2) var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); resize: vertical; }
+.history { margin: 0; padding-left: 18px; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); display: flex; flex-direction: column; gap: 4px; }
+.history-reason { display: block; color: var(--cs-occupied); white-space: pre-wrap; }
 </style>

@@ -133,7 +133,7 @@ onMounted(load)
         <template v-else>
           <div class="heading">
             <h1 class="title">{{ request.event_name ?? 'Untitled event' }}</h1>
-            <span class="status" :class="`status-${request.status}`">{{ statusLabel(request.status) }}</span>
+            <span class="status cs-pill" :class="`status-${request.status} cs-status-${request.status}`">{{ statusLabel(request.status) }}</span>
           </div>
 
           <section class="card" aria-labelledby="needed-heading">
@@ -153,7 +153,7 @@ onMounted(load)
             <div v-for="line in lines" :key="line.equipment_type_id" class="line" :class="`line-${line.state}`">
               <div class="line-head">
                 <span class="line-type">{{ line.type }}</span>
-                <span class="flag" :class="`flag-${line.state}`">
+                <span class="flag cs-pill" :class="[`flag-${line.state}`, line.state === 'insufficient' ? 'cs-pill--pending' : 'cs-pill--available']">
                   {{ line.state === 'insufficient' ? '⚠ ' : '✓ ' }}{{ line.label }}
                 </span>
               </div>
@@ -237,56 +237,49 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
-.back-link { font-size: 13px; color: #1f5fae; text-decoration: none; }
-.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.message { margin: 0; padding: 8px 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
-.hint { margin: 0; font-size: 12px; color: #8a8a8a; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: var(--cs-space-4); }
+.back-link { font-size: var(--cs-text-sm); color: var(--cs-signal); text-decoration: none; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.message { margin: 0; padding: var(--cs-space-2) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
+.hint { margin: 0; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
 
-.card { background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 16px 18px; box-sizing: border-box; }
-.card-title { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #1f1f1f; }
-.period { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #2a2a2a; }
+.card { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4) var(--cs-space-5); box-sizing: border-box; }
+.card-title { margin: 0 0 var(--cs-space-2); font-size: var(--cs-text-sm); font-weight: 700; color: var(--cs-ink); }
+.period { margin: 0 0 4px; font-size: var(--cs-text-base); font-weight: 600; color: var(--cs-ink); }
 
-.banner { border-radius: 6px; padding: 12px 16px; font-size: 14px; font-weight: 600; }
-.banner-ok { background: #eaf5ec; color: #2f6b3f; }
-.banner-warn { background: #fdf6ec; color: #8a5a12; }
+.banner { border-radius: var(--cs-radius-sm); padding: var(--cs-space-3) var(--cs-space-4); font-size: var(--cs-text-base); font-weight: 600; }
+.banner-ok { background: var(--cs-available-tint); color: var(--cs-available); }
+.banner-warn { background: var(--cs-pending-tint); color: var(--cs-pending); }
 
-.line { padding: 14px 0; border-bottom: 1px dashed #e2e2e2; }
+.line { padding: var(--cs-space-4) 0; border-bottom: 1px solid var(--cs-line); }
 .line:last-child { border-bottom: none; padding-bottom: 0; }
-.line-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.line-type { font-size: 14px; font-weight: 700; color: #1f1f1f; text-transform: capitalize; }
-.flag { font-size: 11px; font-weight: 700; border-radius: 10px; padding: 3px 10px; white-space: nowrap; }
-.flag-sufficient { background: #eaf5ec; color: #2f6b3f; }
-.flag-insufficient { background: #fdf6ec; color: #8a5a12; }
-.line-numbers { margin: 6px 0 0; font-size: 13px; color: #2a2a2a; }
-.line-detail, .line-units, .line-notes { margin: 4px 0 0; font-size: 12px; color: #6a6a6a; }
-.conflicts { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: #6a6a6a; }
+.line-head { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); }
+.line-type { font-size: var(--cs-text-base); font-weight: 700; color: var(--cs-ink); text-transform: capitalize; }
+.line-numbers { margin: 6px 0 0; font-size: var(--cs-text-sm); color: var(--cs-ink); }
+.line-detail, .line-units, .line-notes { margin: 4px 0 0; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+.conflicts { margin: var(--cs-space-2) 0 0; padding-left: 18px; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
 .conflicts li { margin: 2px 0; }
 
-.status { font-size: 11px; font-weight: 600; color: #6a6a6a; background: #f0f0f0; border-radius: 10px; padding: 3px 10px; white-space: nowrap; }
-.status-pending { color: #8a6d00; background: #fff4c2; }
-.status-confirmed { color: #0f6e6a; background: #ddf3f1; }
-.status-rejected { color: #b42318; background: #fde8e6; }
-.status-cancelled { color: #6a6a6a; background: #eeeeee; }
-.error { margin: 0; font-size: 13px; color: #a33f3f; }
+.error { margin: 0; font-size: var(--cs-text-sm); color: var(--cs-occupied); }
 .btn-accept {
-  align-self: flex-start; min-height: 40px; padding: 0 18px; border: none; border-radius: 4px;
-  background: #2568e8; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  align-self: flex-start; min-height: 40px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal); color: #fff; font: inherit; font-size: var(--cs-text-base); font-weight: 700; cursor: pointer;
 }
-.btn-accept:disabled { background: #b9c7e6; cursor: not-allowed; }
-.suggest { color: #8a5a12; font-weight: 600; }
-.reject-box { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #e2e2e2; display: flex; flex-direction: column; gap: 8px; }
-.reject-label { font-size: 13px; font-weight: 600; color: #2a2a2a; }
-.reject-reason { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #c8c8c8; border-radius: 4px; resize: vertical; }
+.btn-accept:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.btn-accept:disabled { background: var(--cs-line-strong); cursor: not-allowed; }
+.suggest { color: var(--cs-pending); font-weight: 600; }
+.reject-box { margin-top: var(--cs-space-4); padding-top: var(--cs-space-4); border-top: 1px solid var(--cs-line); display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.reject-label { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.reject-reason { font: inherit; font-size: var(--cs-text-base); padding: var(--cs-space-2) var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); resize: vertical; }
 .btn-reject {
-  align-self: flex-start; min-height: 40px; padding: 0 18px; border: none; border-radius: 4px;
-  background: #b42318; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  align-self: flex-start; min-height: 40px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm);
+  background: var(--cs-occupied); color: #fff; font: inherit; font-size: var(--cs-text-base); font-weight: 700; cursor: pointer;
 }
-.btn-reject:disabled { background: #e3b5b0; cursor: not-allowed; }
-.rejection-reason { margin: 0; font-size: 14px; color: #2a2a2a; white-space: pre-wrap; }
-.reserved { margin: 0; padding-left: 18px; font-size: 14px; color: #2a2a2a; display: flex; flex-direction: column; gap: 4px; }
+.btn-reject:disabled { background: var(--cs-occupied-tint); color: var(--cs-occupied); cursor: not-allowed; }
+.rejection-reason { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink); white-space: pre-wrap; }
+.reserved { margin: 0; padding-left: 18px; font-size: var(--cs-text-base); color: var(--cs-ink); display: flex; flex-direction: column; gap: 4px; }
 </style>

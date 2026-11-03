@@ -179,7 +179,7 @@ function statusSummary(request) {
                 </span>
               </div>
               <span class="badges">
-                <span v-for="badge in statusSummary(request)" :key="badge.status" class="status" :class="`status-${badge.status}`">
+                <span v-for="badge in statusSummary(request)" :key="badge.status" class="status cs-pill" :class="`status-${badge.status} cs-status-${badge.status}`">
                   {{ badge.label }}
                 </span>
               </span>
@@ -194,7 +194,7 @@ function statusSummary(request) {
                       {{ sessionWhen(session) }}<template v-if="session.expected_attendance"> · {{ session.expected_attendance }} attendees</template>
                     </span>
                   </div>
-                  <span class="status" :class="`status-${session.status}`">{{ statusLabel(session.status) }}</span>
+                  <span class="status cs-pill" :class="`status-${session.status} cs-status-${session.status}`">{{ statusLabel(session.status) }}</span>
                 </router-link>
               </li>
             </ol>
@@ -210,11 +210,10 @@ function statusSummary(request) {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #eeeeee;
 }
 .content {
   flex: 1 1 auto;
-  padding: 32px 16px;
+  padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8);
   display: flex;
   justify-content: center;
 }
@@ -223,34 +222,37 @@ function statusSummary(request) {
   max-width: 880px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--cs-space-5);
 }
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--cs-space-3);
   flex-wrap: wrap;
 }
 .title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: #1f1f1f;
+  font-size: var(--cs-text-xl);
+  font-family: var(--cs-font-display);
+  color: var(--cs-ink);
 }
 .new-request {
   height: 42px;
-  border-radius: 4px;
-  background: #444444;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal);
   color: #ffffff;
-  font-size: 13px;
+  font-size: var(--cs-text-sm);
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  gap: var(--cs-space-2);
+  padding: 0 var(--cs-space-4);
   text-decoration: none;
   box-sizing: border-box;
+}
+.new-request:hover {
+  background: var(--cs-signal-strong);
 }
 .search {
   position: relative;
@@ -264,44 +266,45 @@ function statusSummary(request) {
 .search-input {
   width: 100%;
   height: 46px;
-  border: 1px solid #b0b0b0;
-  border-radius: 8px;
-  background: #ffffff;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface);
   padding: 0 16px 0 44px;
-  font-size: 14px;
-  color: #333333;
+  font-size: var(--cs-text-base);
+  color: var(--cs-ink);
   box-sizing: border-box;
 }
-.search-input:focus {
-  outline: none;
-  border-color: #555555;
+.search-input:focus-visible {
+  outline: 2px solid var(--cs-signal);
+  outline-offset: 1px;
+  border-color: var(--cs-signal);
 }
 .tabs {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--cs-space-2);
   flex-wrap: wrap;
 }
 .tab {
-  border: 1px solid #b0b0b0;
-  background: #ffffff;
-  color: #555555;
-  font-size: 13px;
+  border: 1px solid var(--cs-line);
+  background: var(--cs-surface);
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
   font-weight: 600;
-  padding: 7px 16px;
-  border-radius: 20px;
+  padding: 7px var(--cs-space-4);
+  border-radius: var(--cs-radius-full);
   cursor: pointer;
   text-transform: capitalize;
 }
 .tab.active {
-  border-color: #444444;
-  background: #444444;
+  border-color: var(--cs-ink);
+  background: var(--cs-ink);
   color: #ffffff;
 }
 .list {
-  background: #ffffff;
-  border: 1px dashed #9a9a9a;
-  border-radius: 6px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
   padding: 4px 18px;
   box-sizing: border-box;
 }
@@ -311,12 +314,12 @@ function statusSummary(request) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--cs-space-3);
 }
 .request {
-  background: #ffffff;
-  border: 1px dashed #9a9a9a;
-  border-radius: 6px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
   padding: 4px 18px;
   box-sizing: border-box;
 }
@@ -324,13 +327,13 @@ function statusSummary(request) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--cs-space-2);
 }
 .sessions {
   list-style: none;
   margin: 0 0 10px;
   padding: 0 0 0 14px;
-  border-left: 2px solid #e2e2e2;
+  border-left: 2px solid var(--cs-line);
 }
 .session-row {
   padding: 10px 0;
@@ -339,29 +342,29 @@ function statusSummary(request) {
   border-bottom: none;
 }
 .session-name {
-  font-size: 13px;
+  font-size: var(--cs-text-sm);
   font-weight: 600;
-  color: #444444;
+  color: var(--cs-ink);
 }
 .session-row:hover .session-name {
   text-decoration: underline;
 }
 .message {
   margin: 0;
-  padding: 16px 0;
-  font-size: 14px;
-  color: #8a8a8a;
+  padding: var(--cs-space-4) 0;
+  font-size: var(--cs-text-base);
+  color: var(--cs-ink-soft);
 }
 .error {
-  color: #b42318;
+  color: var(--cs-occupied);
 }
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 0;
-  border-bottom: 1px dashed #e2e2e2;
+  gap: var(--cs-space-3);
+  padding: var(--cs-space-4) 0;
+  border-bottom: 1px solid var(--cs-line);
   text-decoration: none;
   color: inherit;
   cursor: pointer;
@@ -378,63 +381,12 @@ function statusSummary(request) {
   gap: 3px;
 }
 .row-name {
-  font-size: 14px;
+  font-size: var(--cs-text-sm);
   font-weight: 600;
-  color: #2a2a2a;
+  color: var(--cs-ink);
 }
 .row-meta {
-  font-size: 12px;
-  color: #8a8a8a;
-}
-.status {
-  font-size: 11px;
-  font-weight: 600;
-  color: #6a6a6a;
-  background: #f0f0f0;
-  border-radius: 10px;
-  padding: 3px 10px;
-  text-transform: capitalize;
-  white-space: nowrap;
-}
-/* One colour per status. */
-.status-draft {
-  color: #5f5f5f;
-  background: #efefef;
-}
-.status-submitted {
-  color: #6b3fa0;
-  background: #f1ebf8;
-}
-.status-under_review {
-  color: #8a6d00;
-  background: #fff4c2;
-}
-.status-approved {
-  color: #1f5a9e;
-  background: #e4eefb;
-}
-.status-planning {
-  color: #2f7a3f;
-  background: #e4f5e8;
-}
-.status-safety_review {
-  color: #3d4fa8;
-  background: #e8ebfa;
-}
-.status-confirmed {
-  color: #0f6e6a;
-  background: #ddf3f1;
-}
-.status-completed {
-  color: #3f4a57;
-  background: #e3e7ec;
-}
-.status-cancelled {
-  color: #a3521b;
-  background: #fcebdd;
-}
-.status-rejected {
-  color: #b42318;
-  background: #fde8e6;
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
 }
 </style>
