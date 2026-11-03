@@ -55,7 +55,7 @@ describe('notificationLink', () => {
     expect(link).toEqual({ name: 'safety-review', params: { reviewId: 'r-1' } })
   })
 
-  it("links an attendee's session notification to their own event page (IS-76)", () => {
+  it("links an attendee's session notification to their own event page (IS-22)", () => {
     const link = notificationLink(note('1', { entity_type: 'attendee_event', entity_id: 's-1' }), [ROLES.ATTENDEE])
     expect(link).toEqual({ name: 'attendee-event', params: { eventId: 's-1' } })
   })

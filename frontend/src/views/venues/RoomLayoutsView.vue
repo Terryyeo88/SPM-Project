@@ -186,14 +186,14 @@ onMounted(load)
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.add-form { flex-direction: row; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.add-form { flex-direction: row; align-items: flex-end; gap: var(--cs-space-3); flex-wrap: wrap; }
 .grow { flex: 1 1 220px; }
 .layout-list { list-style: none; margin: 0; padding: 0; }
 .layout-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 12px 0; border-bottom: 1px dashed #e2e2e2;
+  display: flex; align-items: center; gap: var(--cs-space-2); flex-wrap: wrap;
+  padding: var(--cs-space-3) 0; border-bottom: 1px solid var(--cs-line);
 }
 .layout-row:last-child { border-bottom: none; }
-.layout-name { flex: 1 1 160px; font-size: 14px; font-weight: 600; color: #2a2a2a; text-transform: capitalize; }
-.muted { color: #8a8a8a; }
+.layout-name { flex: 1 1 160px; font-size: var(--cs-text-base); font-weight: 600; color: var(--cs-ink); text-transform: capitalize; }
+.muted { color: var(--cs-ink-soft); }
 </style>

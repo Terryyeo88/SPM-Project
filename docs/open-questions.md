@@ -242,12 +242,12 @@ decisions worth double-checking.
 - **A freed place goes straight to the next person on the waiting list.**
   Week 2 says "eligible attendees are notified when a slot opens up to
   apply", which could mean they're offered the place rather than given it.
-  We move them up automatically, and since IS-76 they're notified that
+  We move them up automatically, and since IS-22 they're notified that
   their registration is now confirmed. Confirm.
 
 - **Not built yet:** editing a registration after submitting it, and
   organiser/coordinator views of who registered. (Attendee notifications:
-  IS-76.)
+  IS-22.)
 
 - **Organiser "discretion" and manual closing.** Week 4 says organisers have
   discretion over registration and close it manually. Here the window the
@@ -1286,7 +1286,7 @@ step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
 - **Still not notified** (no hook existed; the owning stories can now add
   one `notify(...)` call each): the organiser on cancellation (IS-39, see
   above; done in IS-23), the coordinator on a new change request (done in
-  IS-24), and attendees promoted off a waiting list (done in IS-76). Please confirm which are needed.
+  IS-24), and attendees promoted off a waiting list (done in IS-22). Please confirm which are needed.
 
 ## User contact and preferences (IS-68, 30 Oct)
 
@@ -1363,7 +1363,10 @@ step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
   unmatched URLs answering 500.
 
 
-## Notification (Attendees) (IS-76, Justin, 1 Nov)
+## Notification (Attendees) (IS-22, Justin, 1 Nov)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Decided and built; worth confirming with the customer:
 
@@ -1547,15 +1550,16 @@ narrowly on purpose. Please confirm:
   venue-blocking mechanism (`venue_blocks`, `reason='maintenance'`), not a
   demand to also flip `venues.status`. If the story's author actually meant
   a literal status flip in addition to blocking, that's new scope.
-- **The revert-to-planning scope is `confirmed` only, not also
-  `safety_review`**, matching `cancel_booking`'s existing precedent rather
-  than `delete_venue`'s broader one. A session can sit in `safety_review`
-  with its venue booking overwritten and not revert -- an existing,
-  pre-existing gap `cancel_booking` already has, not introduced here. If
-  the Safety Officer approves a session in that state, `confirm_event`'s
-  own `has_live_confirmed_booking` gate still catches it before the event
-  reaches `confirmed` -- so the worst case is a safety review spent on an
-  already-invalid venue, not an event reaching `confirmed` with one.
+- ~~**The revert-to-planning scope is `confirmed` only, not also
+  `safety_review`**~~ **Resolved, 3 Nov: the team decided NOT to waste a
+  Safety Officer's time reviewing a session whose venue was just
+  overwritten.** The route now reverts from `safety_review` too (same scope
+  as `delete_venue`, withdrawing the pending review first) -- see
+  `docs/design-decisions.md`. `cancel_booking` (IS-9) was deliberately left
+  unchanged, still `confirmed`-only, so the same question is open there too:
+  should a coordinator's own cancellation also revert a `safety_review`
+  session, for the same reason? Not changed here since it wasn't part of
+  this story -- worth a team decision of its own.
 - **No stronger relationship check than "any venue_staff, any confirmed
   booking."** Like booking approve/reject, there's no per-venue-staff
   assignment table, so any Venue Staff member can overwrite any confirmed

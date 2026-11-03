@@ -1,7 +1,7 @@
 /*
  * Shared look for the event request pages, after the "New Event Request"
- * wireframe: grey page, 880px column, white dashed cards, #444 accent --
- * the same visual language as EventsListView.
+ * wireframe -- now using the sitewide Venue Operations / Wayfinding design
+ * tokens (tokens.css/base.css) instead of its own hardcoded palette.
  *
  * Pulled into CreateEventView, EventDetailsView and EventSessionFields with
  * <style scoped src="..."> so each component keeps scoped styles while
@@ -9,107 +9,110 @@
  */
 
 /* -- Page --------------------------------------------------------------- */
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 18px; padding-bottom: 40px; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-4); padding-bottom: var(--cs-space-8); }
 
-.back-link { align-self: flex-start; font-size: 13px; color: #666666; text-decoration: underline; }
+.back-link { align-self: flex-start; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); text-decoration: underline; }
 
 .page-heading { display: flex; flex-direction: column; gap: 2px; }
-.page-title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.page-subtitle { font-size: 13px; color: #8a8a8a; }
+.page-title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.page-subtitle { font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 
 .section-heading { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
-.section-title { margin: 0; font-size: 15px; font-weight: 700; color: #222222; }
-.section-subtitle { font-size: 13px; color: #8a8a8a; }
+.section-title { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.section-subtitle { font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 
 /* -- Cards -------------------------------------------------------------- */
 .card {
-  margin: 0; min-width: 0; background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px;
-  padding: 28px 32px; display: flex; flex-direction: column; gap: 18px; box-sizing: border-box;
+  margin: 0; min-width: 0; background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md);
+  padding: var(--cs-space-6) var(--cs-space-7); display: flex; flex-direction: column; gap: var(--cs-space-4); box-sizing: border-box;
 }
-.card-title { margin: 0; padding: 0; font-size: 15px; font-weight: 700; color: #222222; }
-.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-title { margin: 0; padding: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); }
 
 /* -- Fields ------------------------------------------------------------- */
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 13px; font-weight: 600; color: #444444; }
-.optional { font-weight: 400; color: #8a8a8a; }
-.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.field-label { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink-soft); }
+.optional { font-weight: 400; color: var(--cs-ink-soft); }
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--cs-space-4); }
 
 .input {
-  box-sizing: border-box; width: 100%; height: 44px; padding: 0 12px;
-  border: 1px solid #b0b0b0; border-radius: 4px; background: #fafafa;
-  font: inherit; font-size: 14px; color: #333333;
+  box-sizing: border-box; width: 100%; height: 44px; padding: 0 var(--cs-space-3);
+  border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); background: var(--cs-surface);
+  font: inherit; font-size: var(--cs-text-base); color: var(--cs-ink);
 }
-textarea.input { height: auto; min-height: 76px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+textarea.input { height: auto; min-height: 76px; padding: var(--cs-space-3); resize: vertical; line-height: 1.5; }
 select.input { text-transform: capitalize; }
-.input:focus { outline: none; border-color: #555555; background: #ffffff; }
-.input::placeholder { color: #9a9a9a; }
+.input:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 1px; border-color: var(--cs-signal); }
+.input::placeholder { color: var(--cs-ink-soft); }
 .input.small { width: 140px; height: 38px; }
 
-.invalid .input { border-color: #b42318; }
-.field-error { color: #b42318; font-size: 12px; }
+.invalid .input { border-color: var(--cs-occupied); }
+.field-error { color: var(--cs-occupied); font-size: var(--cs-text-xs); }
 
 /* Checkbox rows (accessibility, equipment, registration) */
-.option-list { display: flex; flex-direction: column; gap: 8px; }
-.option-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-height: 38px; }
-.check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #333333; cursor: pointer; }
-.check input { width: 16px; height: 16px; margin: 0; accent-color: #444444; }
+.option-list { display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.option-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px var(--cs-space-4); min-height: 38px; }
+.check { display: flex; align-items: center; gap: var(--cs-space-2); font-size: var(--cs-text-base); color: var(--cs-ink); cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--cs-signal); }
 
 /* -- Buttons ------------------------------------------------------------ */
 .btn {
-  height: 46px; padding: 0 22px; border-radius: 4px; box-sizing: border-box;
-  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; padding: 0 var(--cs-space-5); border-radius: var(--cs-radius-sm); box-sizing: border-box;
+  font: inherit; font-size: var(--cs-text-base); font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--cs-space-2);
 }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn:focus-visible, .add-session:focus-visible, .remove-session:focus-visible { outline: 2px solid #2568e8; outline-offset: 2px; }
-.btn-primary { border: none; background: #444444; color: #ffffff; }
-.btn-outline { border: 1px solid #b0b0b0; background: #ffffff; color: #444444; font-weight: 600; }
-.btn-danger { border: 1px solid #b42318; background: #ffffff; color: #b42318; font-weight: 600; }
+.btn:focus-visible, .add-session:focus-visible, .remove-session:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 2px; }
+.btn-primary { border: none; background: var(--cs-signal); color: #ffffff; }
+.btn-primary:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.btn-outline { border: 1px solid var(--cs-line-strong); background: var(--cs-surface); color: var(--cs-ink); font-weight: 600; }
+.btn-danger { border: 1px solid var(--cs-occupied); background: var(--cs-surface); color: var(--cs-occupied); font-weight: 600; }
 
 .add-session {
-  align-self: flex-start; height: 42px; padding: 0 16px; border: 1px dashed #444444; border-radius: 4px;
-  background: #ffffff; color: #444444; font: inherit; font-size: 13px; font-weight: 700;
-  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  align-self: flex-start; height: 42px; padding: 0 var(--cs-space-4); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface); color: var(--cs-ink); font: inherit; font-size: var(--cs-text-sm); font-weight: 700;
+  display: flex; align-items: center; gap: var(--cs-space-2); cursor: pointer;
 }
 .remove-session {
-  border: none; background: transparent; color: #a33f3f; font: inherit; font-size: 12px; font-weight: 600;
+  border: none; background: transparent; color: var(--cs-occupied); font: inherit; font-size: var(--cs-text-xs); font-weight: 600;
   display: flex; align-items: center; gap: 5px; padding: 4px 6px; cursor: pointer;
 }
 
 /* -- Footer & messages -------------------------------------------------- */
 .form-footer {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
-  margin-top: 4px; padding-top: 20px; border-top: 1px dashed #dcdcdc;
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--cs-space-3);
+  margin-top: 4px; padding-top: var(--cs-space-5); border-top: 1px solid var(--cs-line);
 }
-.footer-note { font-size: 12px; color: #9a9a9a; }
+.footer-note { font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
 .push-right { margin-left: auto; }
 
-.message { margin: 0; font-size: 14px; }
-.error { color: #b42318; }
-.success { color: #2f6b3f; }
-.notice { margin: 0; padding: 12px 16px; background: #f5f5f5; border: 1px solid #dddddd; border-radius: 6px; font-size: 13px; color: #555555; }
+.message { margin: 0; font-size: var(--cs-text-base); }
+.error { color: var(--cs-occupied); }
+.success { color: var(--cs-available); }
+.notice { margin: 0; padding: var(--cs-space-3) var(--cs-space-4); background: var(--cs-neutral-tint); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 
-/* -- Status badges (same colours as EventsListView) ---------------------- */
+/* -- Status badges -------------------------------------------------------
+   Same mapping as base.css's global .cs-status-* (kept here too since this
+   stylesheet is pulled in scoped, not globally, by each consuming view). */
 .status {
-  font-size: 11px; font-weight: 600; color: #6a6a6a; background: #f0f0f0; border-radius: 10px;
+  font-size: var(--cs-text-xs); font-weight: 600; color: var(--cs-neutral); background: var(--cs-neutral-tint); border-radius: var(--cs-radius-full);
   padding: 3px 10px; text-transform: capitalize; white-space: nowrap;
 }
-.status-draft { color: #5f5f5f; background: #efefef; }
-.status-submitted { color: #6b3fa0; background: #f1ebf8; }
-.status-under_review { color: #8a6d00; background: #fff4c2; }
-.status-approved { color: #1f5a9e; background: #e4eefb; }
-.status-planning { color: #2f7a3f; background: #e4f5e8; }
-.status-safety_review { color: #3d4fa8; background: #e8ebfa; }
-.status-confirmed { color: #0f6e6a; background: #ddf3f1; }
-.status-completed { color: #3f4a57; background: #e3e7ec; }
-.status-cancelled { color: #a3521b; background: #fcebdd; }
-.status-rejected { color: #b42318; background: #fde8e6; }
+.status-approved,
+.status-planning,
+.status-confirmed { color: var(--cs-available); background: var(--cs-available-tint); }
+.status-submitted,
+.status-under_review,
+.status-safety_review { color: var(--cs-pending); background: var(--cs-pending-tint); }
+.status-rejected { color: var(--cs-occupied); background: var(--cs-occupied-tint); }
+.status-draft,
+.status-completed,
+.status-cancelled { color: var(--cs-neutral); background: var(--cs-neutral-tint); }
 
 @media (max-width: 640px) {
-  .card { padding: 20px 18px; }
+  .card { padding: var(--cs-space-5) var(--cs-space-4); }
   .grid-2 { grid-template-columns: 1fr; }
   .form-footer .btn { flex: 1 1 100%; }
   .push-right { margin-left: 0; }

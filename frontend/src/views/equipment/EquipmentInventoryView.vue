@@ -75,7 +75,7 @@ onMounted(load)
                 <span class="row-name">{{ unit.asset_tag }}</span>
                 <span class="row-meta">{{ unit.type }}</span>
               </div>
-              <span class="status" :class="`status-${unit.status}`">{{ unitStatusLabel(unit.status) }}</span>
+              <span class="status cs-pill" :class="`status-${unit.status} cs-status-${unit.status}`">{{ unitStatusLabel(unit.status) }}</span>
             </router-link>
           </div>
         </template>
@@ -85,34 +85,29 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 20px; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.message { margin: 0; padding: 16px 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-5); }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.message { margin: 0; padding: var(--cs-space-4) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.filters { display: flex; gap: var(--cs-space-3); flex-wrap: wrap; }
 .filters input, .filters select {
-  height: 46px; box-sizing: border-box; padding: 0 16px; border: 1px solid #b0b0b0; border-radius: 8px;
-  background: #fff; font: inherit; font-size: 14px;
+  height: 46px; box-sizing: border-box; padding: 0 var(--cs-space-4); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface); font: inherit; font-size: var(--cs-text-base);
 }
 .filters input { flex: 1 1 240px; }
 
-.list { background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 4px 18px; box-sizing: border-box; }
+.list { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: 4px 18px; box-sizing: border-box; }
 .row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 0; border-bottom: 1px dashed #e2e2e2; text-decoration: none; color: inherit;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3);
+  padding: var(--cs-space-4) 0; border-bottom: 1px solid var(--cs-line); text-decoration: none; color: inherit;
 }
 .row:last-child { border-bottom: none; }
 .row:hover .row-name { text-decoration: underline; }
 .row-main { display: flex; flex-direction: column; gap: 3px; }
-.row-name { font-size: 14px; font-weight: 600; color: #2a2a2a; }
-.row-meta { font-size: 12px; color: #8a8a8a; text-transform: capitalize; }
-
-.status { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 3px 10px; white-space: nowrap; }
-.status-available { color: #0f6e6a; background: #ddf3f1; }
-.status-maintenance { color: #8a6d00; background: #fff4c2; }
-.status-retired { color: #6a6a6a; background: #f0f0f0; }
+.row-name { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.row-meta { font-size: var(--cs-text-xs); color: var(--cs-ink-soft); text-transform: capitalize; }
 </style>

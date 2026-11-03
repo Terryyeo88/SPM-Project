@@ -29,7 +29,7 @@ async function handleSubmit() {
   <div class="login-page">
     <form class="login-card" @submit.prevent="handleSubmit">
       <div class="brand">
-        <div class="logo">LOGO</div>
+        <div class="logo" aria-hidden="true">CS</div>
         <h1 class="brand-name">ConnectSphere</h1>
         <div class="brand-tagline">Event Planning &amp; Venue Booking</div>
       </div>
@@ -84,86 +84,124 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
+/* A faint architectural grid, the one ambient texture this direction
+   allows itself -- floor-plan ruled paper, barely visible, never
+   competing with the form. */
 .login-page {
   min-height: 100vh;
   box-sizing: border-box;
-  background: #eeeeee;
+  background-color: var(--cs-paper);
+  background-image:
+    linear-gradient(var(--cs-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cs-line) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: var(--cs-space-4);
 }
 .login-card {
+  position: relative;
   width: 100%;
   max-width: 420px;
-  background: #ffffff;
-  border: 1px dashed #9a9a9a;
-  border-radius: 6px;
-  padding: 44px 40px 36px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  padding: var(--cs-space-7) var(--cs-space-6) var(--cs-space-6);
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: var(--cs-space-5);
   box-sizing: border-box;
+  box-shadow: var(--cs-shadow-md);
+}
+/* Same corner-tick signature as .cs-card, at the login card's own scale --
+   the one place in the whole app a visitor sees before anything else, so
+   the motif is established right here. */
+.login-card::before,
+.login-card::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+.login-card::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--cs-ink);
+  border-left: 2px solid var(--cs-ink);
+}
+.login-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--cs-ink);
+  border-right: 2px solid var(--cs-ink);
 }
 .brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: var(--cs-space-3);
 }
 .logo {
-  width: 56px;
-  height: 56px;
-  border: 1px dashed #9a9a9a;
-  border-radius: 4px;
-  background: #f5f5f5;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-ink);
+  color: var(--cs-paper);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  color: #9a9a9a;
-  letter-spacing: 0.05em;
+  font-family: var(--cs-font-display);
+  font-weight: 700;
+  font-size: 22px;
 }
 .brand-name {
   margin: 0;
-  font-size: 20px;
+  font-family: var(--cs-font-display);
+  font-size: var(--cs-text-lg);
   font-weight: 700;
-  color: #222222;
+  color: var(--cs-ink);
+  letter-spacing: -0.01em;
 }
 .brand-tagline {
-  font-size: 12px;
-  color: #8a8a8a;
+  font-family: var(--cs-font-mono);
+  font-size: var(--cs-text-xs);
+  letter-spacing: 0.04em;
+  color: var(--cs-ink-soft);
 }
 .divider {
   height: 1px;
-  background: #e2e2e2;
+  background: var(--cs-line);
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--cs-space-2);
 }
 .field label {
-  font-size: 11px;
+  font-size: var(--cs-text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #7a7a7a;
+  color: var(--cs-ink-soft);
 }
 .field input {
-  height: 44px;
-  border: 1px solid #b0b0b0;
-  border-radius: 4px;
-  background: #fafafa;
-  padding: 0 12px;
-  font-size: 14px;
-  color: #333333;
+  height: 46px;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface);
+  padding: 0 var(--cs-space-3);
+  font-family: inherit;
+  font-size: var(--cs-text-base);
+  color: var(--cs-ink);
   box-sizing: border-box;
 }
-.field input:focus {
-  outline: none;
-  border-color: #555555;
-  background: #ffffff;
+.field input:focus-visible {
+  outline: 2px solid var(--cs-signal);
+  outline-offset: 1px;
+  border-color: var(--cs-signal);
 }
 .options {
   display: flex;
@@ -173,34 +211,40 @@ async function handleSubmit() {
 .remember {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #666666;
+  gap: var(--cs-space-2);
+  font-size: var(--cs-text-sm);
+  color: var(--cs-ink-soft);
 }
 .remember input {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   margin: 0;
+  accent-color: var(--cs-signal);
 }
 .forgot {
-  font-size: 13px;
-  color: #666666;
+  font-size: var(--cs-text-sm);
+  color: var(--cs-ink-soft);
   text-decoration: underline;
 }
 .error {
   margin: 0;
-  color: #c0392b;
-  font-size: 13px;
+  color: var(--cs-occupied);
+  font-size: var(--cs-text-sm);
 }
 .submit {
   height: 48px;
   border: none;
-  border-radius: 4px;
-  background: #444444;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal);
   color: #ffffff;
-  font-size: 14px;
-  font-weight: 600;
+  font-family: inherit;
+  font-size: var(--cs-text-sm);
+  font-weight: 700;
   cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.submit:hover:not(:disabled) {
+  background: var(--cs-signal-strong);
 }
 .submit:disabled {
   opacity: 0.6;
@@ -208,10 +252,10 @@ async function handleSubmit() {
 }
 .footnote {
   text-align: center;
-  font-size: 12px;
-  color: #9a9a9a;
+  font-size: var(--cs-text-xs);
+  color: var(--cs-ink-soft);
   line-height: 1.5;
-  border-top: 1px dashed #e2e2e2;
-  padding-top: 16px;
+  border-top: 1px solid var(--cs-line);
+  padding-top: var(--cs-space-4);
 }
 </style>

@@ -61,7 +61,7 @@ To run them:
 | IS-17, IS-19, IS-41, IS-43 Equipment requests and reservations | Sprint 3 equipment sections; Integration tests for the equipment workflow |
 | IS-18 Check equipment availability | Sprint 2 — Check Equipment Availability |
 | IS-21 Request for event change | Request for Event Change, and its follow-ups |
-| IS-23, IS-24, IS-25, IS-26, IS-76 Role notifications | Sprint 4 — Notification sections |
+| IS-23, IS-24, IS-25, IS-26, IS-22 Role notifications | Sprint 4 — Notification sections |
 | IS-27 Role-based frontend | Role-based frontend and session logout |
 | IS-31 Only the coordinator edits once submitted | Phase 4 (event edit rows) |
 | IS-36, IS-38, IS-39 Status transitions | Sprint 2 — status transitions |
@@ -942,13 +942,16 @@ every profile directly through the existing RLS policy
 (`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
 
 
-## Sprint 4 — Notification (Attendees) (IS-76, Justin)
+## Sprint 4 — Notification (Attendees) (IS-22, Justin)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Unit: `test_notification_attendees.py` (who, what, when),
 `test_notification_hook_attendees.py` (which actions trigger which hook).
 Integration: `test_notification_attendees_integration.py`.
 Frontend: `lib/notifications.test.js`. Design: `docs/design-decisions.md`
-(IS-76). "Relevant event details" = event name, session date and time,
+(IS-22). "Relevant event details" = event name, session date and time,
 venue.
 
 | Criterion | Test | Implementation |
@@ -1132,8 +1135,11 @@ mutation-tested by hand.
 | Only a confirmed booking can be overwritten (not pending/rejected/released/cancelled) | `test_only_a_confirmed_booking_can_be_overwritten[*]` (guard), `test_the_route_refuses_a_pending_booking` (guard) | `rule_venue_booking_overwrite`'s `_booking_status_in(booking, "confirmed")` check |
 | Set status of a venue to under maintenance, with dates/timings and a reason | satisfied by the existing venue-blocking mechanism -- see "Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry" above | `block_service.create_venue_block` (unchanged, not new for this story) |
 | If venue booking is overwritten, trigger stakeholder notifications | `test_the_route_notifies_the_coordinator`, `test_a_refused_overwrite_notifies_nobody`, `test_an_overwritten_booking_tells_the_sessions_coordinator_and_the_reason`, `test_the_coordinator_told_of_an_overwrite_is_the_current_one`, `test_an_overwritten_booking_of_an_unknown_session_tells_nobody`, `test_an_overwritten_booking_of_a_session_with_no_coordinator_tells_nobody` | `notification_service.venue_booking_overwritten`, called via `venues/routes.py::_notify_booking_overwritten` |
-| If the event is confirmed, the status reverts to planning | `test_the_route_reverts_a_confirmed_event_to_planning`, `test_an_event_that_is_not_confirmed_keeps_its_status[*]` (guard), `test_transition_is_never_attempted_for_a_non_confirmed_event[*]` (guard, isolates the route's own guard from `transition()`'s redundant `expected_from` check), `test_the_overwrite_stands_if_the_event_moved_on_since_it_was_loaded` | `overwrite_venue_booking_route`'s `event_status == "confirmed"` check + `transition(..., expected_from="confirmed")` |
+| If the event is confirmed, the status reverts to planning | `test_the_route_reverts_a_confirmed_event_to_planning`, `test_an_event_in_planning_keeps_its_status` (guard), `test_transition_is_never_attempted_for_a_planning_event` (guard, isolates the route's own guard from `transition()`'s redundant `expected_from` check), `test_the_overwrite_stands_if_the_event_moved_on_since_it_was_loaded` | `overwrite_venue_booking_route`'s `event_status in _OVERWRITE_REVERTS_FROM` check + `transition(..., expected_from=event_status)` |
+| (team decision, 3 Nov) A session in `safety_review` also reverts to planning, with its pending safety review withdrawn -- don't waste a Safety Officer's time on an invalidated venue | `test_the_route_reverts_a_safety_review_event_to_planning` (guard), `test_overwriting_withdraws_a_pending_safety_review`, `test_overwriting_with_no_pending_review_does_not_error` | `_OVERWRITE_REVERTS_FROM = ("confirmed", "safety_review")`, `safety_service.withdraw_pending_review` |
 
-Not built, so not tested: reverting an event still in `safety_review` (see
-`docs/open-questions.md`); any per-venue-staff ownership/assignment
-restriction (none exists anywhere in this codebase).
+Not built, so not tested: the same revert-from-`safety_review` question for
+`cancel_booking` (IS-9, the coordinator's own cancel) -- deliberately left
+unchanged by this story, flagged in `docs/open-questions.md` as worth its
+own team decision; any per-venue-staff ownership/assignment restriction
+(none exists anywhere in this codebase).

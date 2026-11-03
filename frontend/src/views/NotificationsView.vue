@@ -80,14 +80,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page">
+  <div class="cs-page">
     <AppNavBar />
 
-    <main class="content">
-      <div class="container">
+    <main class="cs-content">
+      <div class="cs-container cs-container--narrow">
         <router-link :to="{ name: 'dashboard' }" class="back">&larr; Back to Dashboard</router-link>
 
-        <section class="card" aria-labelledby="notifications-heading">
+        <section class="card cs-card" aria-labelledby="notifications-heading">
           <div class="card-header">
             <div>
               <h1 id="notifications-heading">Notifications</h1>
@@ -157,47 +157,44 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 20px; }
-.back { align-self: flex-start; font-size: 13px; color: #666666; }
+.back { align-self: flex-start; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 .card {
-  width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px;
-  background: #ffffff; border: 1px solid #c9c9c9; border-radius: 6px; padding: 32px 36px;
+  width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--cs-space-4);
+  padding: var(--cs-space-7) var(--cs-space-8);
 }
-.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-h1 { margin: 0 0 4px; font-size: 20px; color: #1f1f1f; }
-.muted { margin: 0; font-size: 13px; color: #6f6f6f; }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--cs-space-3); flex-wrap: wrap; }
+h1 { margin: 0 0 4px; font-size: var(--cs-text-xl); color: var(--cs-ink); }
+.muted { margin: 0; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 .mark-all {
-  height: 38px; padding: 0 14px; border: 1px solid #444444; border-radius: 4px; background: #ffffff;
-  color: #444444; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  height: 38px; padding: 0 var(--cs-space-4); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); background: var(--cs-surface);
+  color: var(--cs-ink); font: inherit; font-size: var(--cs-text-sm); font-weight: 700; cursor: pointer;
 }
-.mark-all:hover:not(:disabled) { background: #f0f0f0; }
+.mark-all:hover:not(:disabled) { border-color: var(--cs-ink); }
 .mark-all:disabled { opacity: 0.5; cursor: default; }
-.mark-all:focus-visible { outline: 2px solid #2568e8; outline-offset: 2px; }
+.mark-all:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 2px; }
 .empty {
-  margin: 0; padding: 28px 16px; text-align: center; font-size: 14px; color: #6f6f6f;
-  border: 1px dashed #c9c9c9; border-radius: 4px;
+  margin: 0; padding: var(--cs-space-7) var(--cs-space-4); text-align: center; font-size: var(--cs-text-base); color: var(--cs-ink-soft);
+  border: 1px solid var(--cs-line); border-radius: var(--cs-radius-sm);
 }
 .list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 .item {
-  position: relative; display: flex; gap: 12px; padding: 14px 12px 14px 28px;
-  border-top: 1px solid #e2e2e2;
+  position: relative; display: flex; gap: var(--cs-space-3); padding: var(--cs-space-4) var(--cs-space-3) var(--cs-space-4) var(--cs-space-7);
+  border-top: 1px solid var(--cs-line);
 }
 .item:first-child { border-top: 0; }
-.item.unread { background: #f2f6fe; }
-.dot { position: absolute; left: 10px; top: 20px; width: 8px; height: 8px; border-radius: 50%; background: #2568e8; }
+.item.unread { background: var(--cs-signal-tint); }
+.dot { position: absolute; left: 10px; top: 20px; width: 8px; height: 8px; border-radius: 50%; background: var(--cs-signal); }
 .body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .message {
   margin: 0; padding: 0; border: 0; background: none; text-align: left;
-  font: inherit; font-size: 14px; color: #555555; overflow-wrap: anywhere;
+  font: inherit; font-size: var(--cs-text-base); color: var(--cs-ink-soft); overflow-wrap: anywhere;
 }
-.unread .message { color: #1f1f1f; font-weight: 700; }
+.unread .message { color: var(--cs-ink); font-weight: 700; }
 button.message { cursor: pointer; }
 button.message:hover { text-decoration: underline; }
-button.message:focus-visible { outline: 2px solid #2568e8; outline-offset: 2px; }
-.meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #8a8a8a; }
-.entity-link { color: #2568e8; font-weight: 600; }
-.error { margin: 0; color: #a33f3f; font-size: 13px; }
-@media (max-width: 600px) { .card { padding: 24px 18px; } }
+button.message:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 2px; }
+.meta { display: flex; align-items: center; gap: var(--cs-space-4); flex-wrap: wrap; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+.entity-link { color: var(--cs-signal-strong); font-weight: 600; }
+.error { margin: 0; color: var(--cs-occupied); font-size: var(--cs-text-sm); }
+@media (max-width: 600px) { .card { padding: var(--cs-space-5) var(--cs-space-4); } }
 </style>

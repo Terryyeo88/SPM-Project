@@ -1,0 +1,366 @@
+/**
+ * Global resets and the shared component classes every view builds on:
+ * buttons, cards (with the corner-tick signature), status pills, form
+ * fields, and tables. One definition each, used everywhere, instead of
+ * every view's own scoped <style> re-inventing its own button/card/pill.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--cs-paper);
+  color: var(--cs-ink);
+  font-family: var(--cs-font-body);
+  font-size: var(--cs-text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--cs-font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cs-signal);
+  outline-offset: 2px;
+}
+
+/* -- layout shell ---------------------------------------------------------
+   Every page's outermost wrapper -- replaces each view's own ad hoc
+   ".page { min-height: 100vh; background: #eeeeee; }" with one shared
+   rule, so the page background is consistent app-wide. */
+.cs-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-content {
+  flex: 1 1 auto;
+  padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8);
+  display: flex;
+  justify-content: center;
+}
+
+.cs-container {
+  width: 100%;
+  max-width: 1040px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-space-5);
+}
+
+.cs-container--narrow {
+  max-width: 640px;
+}
+
+/* -- typography -------------------------------------------------------- */
+.cs-eyebrow {
+  font-family: var(--cs-font-mono);
+  font-size: var(--cs-text-xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cs-ink-soft);
+}
+
+.cs-page-title {
+  font-size: var(--cs-text-xl);
+}
+
+.cs-muted {
+  color: var(--cs-ink-soft);
+}
+
+/* -- card, with the corner-tick signature --------------------------------
+   Small registration-mark ticks at two opposing corners, the kind
+   printed on architectural drawings and floor plans to align sheets --
+   the one consistent, subject-specific device every bounded panel in the
+   app shares. Rendered with ::before/::after so no extra markup is
+   needed anywhere a card is used. */
+.cs-card {
+  position: relative;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  padding: var(--cs-space-5);
+}
+
+.cs-card::before,
+.cs-card::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+}
+
+.cs-card::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--cs-line-strong);
+  border-left: 2px solid var(--cs-line-strong);
+}
+
+.cs-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--cs-line-strong);
+  border-right: 2px solid var(--cs-line-strong);
+}
+
+.cs-card-title {
+  font-size: var(--cs-text-md);
+  margin-bottom: var(--cs-space-3);
+}
+
+/* -- buttons ------------------------------------------------------------- */
+.cs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cs-space-2);
+  min-height: 42px;
+  padding: 0 var(--cs-space-4);
+  border-radius: var(--cs-radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--cs-font-body);
+  font-size: var(--cs-text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.cs-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cs-btn--primary {
+  background: var(--cs-signal);
+  border-color: var(--cs-signal);
+  color: #ffffff;
+}
+
+.cs-btn--primary:hover:not(:disabled) {
+  background: var(--cs-signal-strong);
+  border-color: var(--cs-signal-strong);
+}
+
+.cs-btn--neutral {
+  background: var(--cs-surface);
+  border-color: var(--cs-line-strong);
+  color: var(--cs-ink);
+}
+
+.cs-btn--neutral:hover:not(:disabled) {
+  border-color: var(--cs-ink);
+}
+
+.cs-btn--danger {
+  background: var(--cs-surface);
+  border-color: var(--cs-occupied);
+  color: var(--cs-occupied);
+}
+
+.cs-btn--danger:hover:not(:disabled) {
+  background: var(--cs-occupied-tint);
+}
+
+.cs-btn--danger-solid {
+  background: var(--cs-occupied);
+  border-color: var(--cs-occupied);
+  color: #ffffff;
+}
+
+.cs-btn--sm {
+  min-height: 34px;
+  padding: 0 var(--cs-space-3);
+}
+
+/* -- status pills, styled as venue indicator lights ------------------------
+   A small filled dot plus a label -- literally the room-status indicator
+   convention (green = available, amber = pending, red = occupied) this
+   app's own domain already uses, now applied consistently everywhere a
+   status shows instead of each view inventing its own pill colors. */
+.cs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cs-space-2);
+  padding: var(--cs-space-1) var(--cs-space-3);
+  border-radius: var(--cs-radius-full);
+  font-size: var(--cs-text-xs);
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.cs-pill::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.cs-pill--available {
+  background: var(--cs-available-tint);
+  color: var(--cs-available);
+}
+
+.cs-pill--pending {
+  background: var(--cs-pending-tint);
+  color: var(--cs-pending);
+}
+
+.cs-pill--occupied {
+  background: var(--cs-occupied-tint);
+  color: var(--cs-occupied);
+}
+
+.cs-pill--neutral {
+  background: var(--cs-neutral-tint);
+  color: var(--cs-neutral);
+}
+
+/* Every status name used anywhere in the app, mapped once to one of the
+   four indicator-light colors above, instead of each view re-declaring
+   its own 10-17-line status -> color table (confirmed duplicated,
+   independently, across CoordinatorDashboard/LeadDashboard/
+   CoordinatorEventReview/EventsListView alone before this existed).
+   Use as `class="cs-pill cs-status-<name>"`.
+
+   available / confirmed / positive-and-moving-forward -- green
+   waiting on someone / in review -- amber
+   blocked / negative outcome -- red
+   inactive / historical / done -- gray */
+.cs-status-approved,
+.cs-status-available,
+.cs-status-confirmed,
+.cs-status-planning {
+  background: var(--cs-available-tint);
+  color: var(--cs-available);
+}
+
+.cs-status-pending,
+.cs-status-safety_review,
+.cs-status-submitted,
+.cs-status-under_review {
+  background: var(--cs-pending-tint);
+  color: var(--cs-pending);
+}
+
+.cs-status-maintenance,
+.cs-status-occupied,
+.cs-status-rejected {
+  background: var(--cs-occupied-tint);
+  color: var(--cs-occupied);
+}
+
+.cs-status-cancelled,
+.cs-status-completed,
+.cs-status-deleted,
+.cs-status-draft,
+.cs-status-released,
+.cs-status-retired {
+  background: var(--cs-neutral-tint);
+  color: var(--cs-neutral);
+}
+
+/* -- form fields --------------------------------------------------------- */
+.cs-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-space-2);
+}
+
+.cs-field label {
+  font-size: var(--cs-text-sm);
+  font-weight: 600;
+  color: var(--cs-ink-soft);
+}
+
+.cs-input,
+.cs-field input[type='text'],
+.cs-field input[type='email'],
+.cs-field input[type='password'],
+.cs-field input[type='number'],
+.cs-field input[type='date'],
+.cs-field input[type='datetime-local'],
+.cs-field select,
+.cs-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--cs-space-3);
+  border: 1px solid var(--cs-line-strong);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface);
+  color: var(--cs-ink);
+  font-family: inherit;
+  font-size: var(--cs-text-base);
+}
+
+.cs-field input:focus-visible,
+.cs-field select:focus-visible,
+.cs-field textarea:focus-visible {
+  outline: 2px solid var(--cs-signal);
+  outline-offset: 1px;
+  border-color: var(--cs-signal);
+}
+
+.cs-field .cs-error {
+  font-size: var(--cs-text-xs);
+  color: var(--cs-occupied);
+}
+
+/* -- data / meta text, in the mono utility face -------------------------- */
+.cs-data {
+  font-family: var(--cs-font-mono);
+  font-size: var(--cs-text-sm);
+}
+
+/* -- messages -------------------------------------------------------------- */
+.cs-message {
+  margin: 0;
+  font-size: var(--cs-text-sm);
+}
+
+.cs-message--error {
+  color: var(--cs-occupied);
+}
+
+.cs-message--success {
+  color: var(--cs-available);
+}
+
+@media (max-width: 560px) {
+  .cs-content {
+    padding: var(--cs-space-4) var(--cs-space-3) var(--cs-space-6);
+  }
+}

@@ -1,0 +1,88 @@
+/**
+ * ConnectSphere design tokens.
+ *
+ * Direction: venue wayfinding / architectural floor-plan signage -- the
+ * actual vernacular of the product (rooms, floor plans, booking status,
+ * building directories), not a generic SaaS palette. Drafting-ink text,
+ * technical-drawing-paper background, venue-signage amber for action,
+ * and the app's own existing available/occupied status colors kept as
+ * the literal signal-light semantics they already were (green = open,
+ * red = taken) rather than replaced with something arbitrary.
+ *
+ * Every color below is named once here; nothing else in the app should
+ * hardcode a hex value for these roles -- that repetition (the same
+ * blue/red/green pasted into two dozen scoped <style> blocks) is exactly
+ * what this file replaces.
+ */
+
+:root {
+  /* -- color: surfaces -------------------------------------------------- */
+  --cs-ink: #1c2127; /* primary text -- drafting ink, not pure black */
+  --cs-ink-soft: #4a5160; /* secondary text */
+  --cs-paper: #f6f4ef; /* page background -- technical drawing paper */
+  --cs-surface: #ffffff; /* card / panel background */
+  --cs-line: #d8d4ca; /* hairline borders, on paper */
+  --cs-line-strong: #828a9b; /* structural / blueprint linework */
+
+  /* -- color: signal (action, not status) --------------------------------
+     --cs-signal is deliberately the DARKER of the two ambers: it's the
+     default for button fills and small text, so it has to clear 4.5:1
+     against white on its own (checked by hand -- 4.67:1). The brighter,
+     more "venue signage amber" #c97a1a only reaches ~3:1, which is fine
+     for large text, icons and non-text UI (borders, focus rings -- WCAG
+     only requires 3:1 there) but not for a button's own label, so it's
+     --cs-signal-light, used for decorative/large-scale accents only,
+     never as a small-text fill. */
+  --cs-signal: #a8640f;
+  --cs-signal-strong: #7a4707;
+  --cs-signal-light: #c97a1a;
+  --cs-signal-tint: #faf0de;
+
+  /* -- color: status (venue indicator-light semantics, kept from the
+     existing app rather than invented fresh) ------------------------------ */
+  --cs-available: #2b6e4f; /* confirmed / available / success */
+  --cs-available-tint: #e6f2ea;
+  --cs-pending: #9a6b12; /* pending / in review */
+  --cs-pending-tint: #faf0de;
+  --cs-occupied: #b3261e; /* rejected / occupied / blocked / danger */
+  --cs-occupied-tint: #fbeae9;
+  --cs-neutral: #5b6372; /* released / cancelled / inactive */
+  --cs-neutral-tint: #eceae4;
+
+  /* -- type --------------------------------------------------------------- */
+  --cs-font-display: 'Space Grotesk', 'Archivo', system-ui, sans-serif;
+  --cs-font-body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --cs-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  --cs-text-xs: 0.75rem; /* 12px -- captions, meta */
+  --cs-text-sm: 0.8125rem; /* 13px -- UI labels, buttons */
+  --cs-text-base: 0.9375rem; /* 15px -- body */
+  --cs-text-md: 1.0625rem; /* 17px -- card titles */
+  --cs-text-lg: 1.375rem; /* 22px -- section headings */
+  --cs-text-xl: 2rem; /* 32px -- page titles */
+  --cs-text-2xl: 2.75rem; /* 44px -- hero / brand */
+
+  /* -- spacing (4px scale) -------------------------------------------------- */
+  --cs-space-1: 0.25rem;
+  --cs-space-2: 0.5rem;
+  --cs-space-3: 0.75rem;
+  --cs-space-4: 1rem;
+  --cs-space-5: 1.5rem;
+  --cs-space-6: 2rem;
+  --cs-space-7: 3rem;
+  --cs-space-8: 4rem;
+
+  /* -- shape ---------------------------------------------------------------- */
+  --cs-radius-sm: 4px;
+  --cs-radius-md: 6px;
+  --cs-radius-full: 999px;
+
+  /* Hairline linework over soft shadows -- the architectural-drawing
+     stance this direction takes instead of skeuomorphic elevation. Used
+     sparingly, only where a surface genuinely needs to lift (menus,
+     the mobile nav), never as the default card treatment. */
+  --cs-shadow-sm: 0 1px 2px rgba(28, 33, 39, 0.08);
+  --cs-shadow-md: 0 4px 16px rgba(28, 33, 39, 0.1);
+
+  color-scheme: light;
+}

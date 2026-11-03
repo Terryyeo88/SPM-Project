@@ -36,6 +36,21 @@ const success = ref('')
 const check = computed(() => safetyCheckState(props.event, reviews.value))
 const latest = computed(() => check.value.latest)
 
+// Review statuses don't all match base.css's 17-name `.cs-status-*` table
+// (changes_requested isn't one of them), so map to the indicator-light
+// bucket directly -- same mapping as SafetyReviewView.vue.
+const REVIEW_PILL_BUCKET = {
+  pending: 'pending',
+  changes_requested: 'pending',
+  approved: 'available',
+  confirmed: 'available',
+  rejected: 'occupied',
+}
+
+function reviewPillClass(status) {
+  return `cs-pill--${REVIEW_PILL_BUCKET[status] ?? 'neutral'}`
+}
+
 async function load() {
   loading.value = true
   loadError.value = ''
@@ -96,7 +111,7 @@ watch(() => [props.event.id, props.event.status], load)
 
     <template v-else>
       <div v-if="latest" class="latest">
-        <span class="status" :class="`review-${latest.status}`">{{ reviewStatusLabel(latest.status) }}</span>
+        <span class="status cs-pill" :class="[`review-${latest.status}`, reviewPillClass(latest.status)]">{{ reviewStatusLabel(latest.status) }}</span>
         <span class="muted small">
           <template v-if="latest.reviewed_at">
             {{ when(latest.reviewed_at) }}<template v-if="latest.reviewed_by_name"> by {{ latest.reviewed_by_name }}</template>
@@ -143,27 +158,22 @@ watch(() => [props.event.id, props.event.status], load)
 </template>
 
 <style scoped>
-.safety-check { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid #dcdcdc; }
-h2 { margin: 0; font-size: 15px; color: #222; }
-.muted { color: #6b6b6b; }
-.small { font-size: 13px; margin: 0; }
-.error { color: #a33f3f; margin: 0; font-size: 13px; }
-.success { color: #2f6b3f; margin: 0; font-size: 13px; }
-.latest { display: flex; align-items: center; gap: 12px; }
-.comment { margin: 0; font-size: 13px; font-style: italic; color: #444; }
-.comment.warn { color: #8a5a12; }
-
-.status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; }
-.review-pending { color: #3d4fa8; background: #e8ebfa; }
-.review-approved { color: #2f6b3f; background: #eaf5ec; }
-.review-changes_requested { color: #8a5a12; background: #f7efe1; }
-.review-rejected { color: #a33f3f; background: #f5e6e6; }
+.safety-check { display: flex; flex-direction: column; gap: var(--cs-space-3); padding-top: var(--cs-space-4); border-top: 1px solid var(--cs-line); }
+h2 { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-sm); margin: 0; }
+.error { color: var(--cs-occupied); margin: 0; font-size: var(--cs-text-sm); }
+.success { color: var(--cs-available); margin: 0; font-size: var(--cs-text-sm); }
+.latest { display: flex; align-items: center; gap: var(--cs-space-3); }
+.comment { margin: 0; font-size: var(--cs-text-sm); font-style: italic; color: var(--cs-ink); }
+.comment.warn { color: var(--cs-pending); }
 
 .btn {
-  align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;
-  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; color: #fff;
+  align-self: flex-start; min-height: 38px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm);
+  font: inherit; font-size: var(--cs-text-sm); font-weight: 700; cursor: pointer; color: #fff;
 }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
-.primary { background: #2568e8; }
-.approve { background: #2f6b3f; }
+.primary { background: var(--cs-signal); }
+.primary:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.approve { background: var(--cs-available); }
 </style>

@@ -102,7 +102,7 @@ watch(() => [props.event.id, props.event.status], load)
               <td class="num">{{ request.total_quantity }}</td>
               <td>{{ formatPeriod(request.needed_start, request.needed_end) }}</td>
               <td>
-                <span class="status" :class="`status-${eventRequestStatus(request, event.status).key}`">
+                <span class="status cs-pill" :class="[`status-${eventRequestStatus(request, event.status).key}`, `cs-status-${eventRequestStatus(request, event.status).key}`]">
                   {{ eventRequestStatus(request, event.status).label }}
                 </span>
                 <p v-if="request.status === 'rejected'" class="rejection">
@@ -155,41 +155,36 @@ watch(() => [props.event.id, props.event.status], load)
 </template>
 
 <style scoped>
-.equipment-booking { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid #dcdcdc; }
-h2 { margin: 0; font-size: 15px; color: #222; }
-h3 { margin: 0; font-size: 14px; color: #222; }
-.muted { color: #6b6b6b; }
-.small { font-size: 13px; margin: 0; }
-.error { color: #a33f3f; margin: 0; }
+.equipment-booking { display: flex; flex-direction: column; gap: var(--cs-space-2); padding-top: var(--cs-space-4); border-top: 1px solid var(--cs-line); }
+h2 { margin: 0; font-size: var(--cs-text-sm); font-family: var(--cs-font-display); color: var(--cs-ink); }
+h3 { margin: 0; font-size: var(--cs-text-base); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-sm); margin: 0; }
+.error { color: var(--cs-occupied); margin: 0; }
 
-.table-wrap { overflow-x: auto; background: #fff; border: 1px solid #dcdcdc; border-radius: 6px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6b6b6b; padding: 10px 14px; border-bottom: 1px solid #e6e6e6; }
-td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; color: #2a2a2a; vertical-align: middle; }
+.table-wrap { overflow-x: auto; background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); }
+table { width: 100%; border-collapse: collapse; font-size: var(--cs-text-sm); }
+th { text-align: left; font-size: var(--cs-text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--cs-ink-soft); padding: var(--cs-space-3) var(--cs-space-4); border-bottom: 1px solid var(--cs-line); }
+td { padding: var(--cs-space-3) var(--cs-space-4); border-bottom: 1px solid var(--cs-line); color: var(--cs-ink); vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 
-.status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; white-space: nowrap; }
-.rejection { margin: 6px 0 0; font-size: 12px; color: #a33f3f; white-space: pre-wrap; }
-.status-pending { background: #f7efe1; color: #8a5a12; }
-.status-confirmed { background: #eaf5ec; color: #2f6b3f; }
-.status-rejected { background: #f5e6e6; color: #a33f3f; }
-.status-cancelled { background: #eeeeee; color: #6a6a6a; }
-.status-released { background: #eeeeee; color: #5a5a5a; }
+.rejection { margin: 6px 0 0; font-size: var(--cs-text-xs); color: var(--cs-occupied); white-space: pre-wrap; }
 
 .btn.small.primary {
-  align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;
-  background: #2568e8; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  align-self: flex-start; min-height: 38px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal); color: #fff; font: inherit; font-size: var(--cs-text-sm); font-weight: 700;
   text-decoration: none; display: inline-flex; align-items: center;
 }
+.btn.small.primary:hover { background: var(--cs-signal-strong); }
 
-.allocated { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #dcdcdc; border-radius: 6px; padding: 14px 16px; }
+.allocated { display: flex; flex-direction: column; gap: var(--cs-space-2); background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4); }
 .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.group { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+.group { display: flex; flex-direction: column; gap: 6px; padding: var(--cs-space-3) 0; border-bottom: 1px solid var(--cs-line); }
 .group:last-child { border-bottom: none; padding-bottom: 0; }
-.group-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
-.group-type { font-weight: 700; color: #222; }
-.group-qty { color: #6b6b6b; }
+.group-head { display: flex; align-items: baseline; gap: var(--cs-space-2); font-size: var(--cs-text-sm); }
+.group-type { font-weight: 700; color: var(--cs-ink); }
+.group-qty { color: var(--cs-ink-soft); }
 .units { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.unit { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f3f3f3; border-radius: 4px; padding: 3px 8px; color: #333; }
+.unit { font-size: var(--cs-text-xs); font-family: var(--cs-font-mono); background: var(--cs-neutral-tint); border-radius: var(--cs-radius-sm); padding: 3px 8px; color: var(--cs-ink); }
 </style>

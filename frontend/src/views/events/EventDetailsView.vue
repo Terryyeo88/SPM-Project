@@ -411,7 +411,7 @@ watch(() => route.params.eventId, (eventId) => {
                 {{ canEdit && isDraft ? 'Draft event request' : 'Event request' }}<template v-if="visibleSessions.length > 1"> · {{ visibleSessions.length }} sessions</template>
               </span>
             </div>
-            <span class="status" :class="`status-${event.status}`">{{ statusLabel(event.status) }}</span>
+            <span class="status cs-pill" :class="`status-${event.status} cs-status-${event.status}`">{{ statusLabel(event.status) }}</span>
           </div>
 
           <form v-if="canEdit" class="container-form" novalidate @submit.prevent="mode === 'draft' ? submitEvent() : resubmitRejected()">
@@ -561,21 +561,21 @@ watch(() => route.params.eventId, (eventId) => {
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.container-form { display: flex; flex-direction: column; gap: 18px; }
+.container-form { display: flex; flex-direction: column; gap: var(--cs-space-4); }
 .card-header .page-heading { min-width: 0; }
 .card-title { margin: 0; }
 .rejection {
   display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 16px; border-left: 3px solid #b42318; border-radius: 4px; background: #fde8e6;
+  padding: var(--cs-space-3) var(--cs-space-4); border-left: 3px solid var(--cs-occupied); border-radius: var(--cs-radius-sm); background: var(--cs-occupied-tint);
 }
-.rejection-title { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #b42318; }
-.rejection-reason { margin: 0; font-size: 14px; color: #2a2a2a; white-space: pre-line; }
-.rejection-meta { font-size: 12px; color: #6a6a6a; }
-dl { display: grid; grid-template-columns: 180px 1fr; gap: 10px 16px; margin: 0; font-size: 14px; }
-dt { font-weight: 600; color: #6a6a6a; }
-dd { margin: 0; color: #2a2a2a; }
+.rejection-title { font-size: var(--cs-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-occupied); }
+.rejection-reason { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink); white-space: pre-line; }
+.rejection-meta { font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+dl { display: grid; grid-template-columns: 180px 1fr; gap: 10px 16px; margin: 0; font-size: var(--cs-text-base); }
+dt { font-weight: 600; color: var(--cs-ink-soft); }
+dd { margin: 0; color: var(--cs-ink); }
 @media (max-width: 640px) {
   dl { grid-template-columns: 1fr; gap: 4px; }
-  dd { margin-bottom: 8px; }
+  dd { margin-bottom: var(--cs-space-2); }
 }
 </style>
