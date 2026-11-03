@@ -37,7 +37,15 @@ test.describe('Login', () => {
     await signOut(page)
     await loginAs(page, USERS.safetyOfficer)
 
-    await expect(page).toHaveURL('/')
+    // The weak version of this test just checks we landed on '/', which
+    // loginAs's own waitForURL already guarantees -- it wouldn't catch a
+    // stale Pinia auth store carrying the coordinator role into the new
+    // session. Assert the actually-displayed role instead: the nav's role
+    // badge (AppNavBar.vue's roleText) must say the NEW role, and must not
+    // still say the old one.
+    const roleBadge = page.getByRole('banner').locator('.role-badge')
+    await expect(roleBadge).toHaveText('Safety Officer')
+    await expect(roleBadge).not.toContainText('Event Coordinator')
   })
 })
 

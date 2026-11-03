@@ -56,12 +56,16 @@ test.describe('Venue catalogue journey', () => {
     await page.goto('/venues')
     await expect(page).toHaveURL(/\/venues$/)
 
+    // backend/seed.py always seeds 4 venues (Grand Ballroom, Innovation
+    // Hub, Executive Boardroom, Riverside Pavilion) unconditionally on
+    // every run, so this is a hard assertion, not a "skip if empty"
+    // fallback -- a previous version of this test silently skipped the
+    // drill-in on an empty catalogue, which would have reported "passed"
+    // while testing nothing if the seed ever regressed.
     const firstVenue = page.locator('a.row').first()
-    // Only drill in if the catalogue actually has a venue to click --
-    // a fresh/empty seed shouldn't fail this test, just skip the drill-in.
-    if (await firstVenue.count()) {
-      await firstVenue.click()
-      await expect(page).toHaveURL(/\/venues\/.+/)
-    }
+    await expect(firstVenue).toBeVisible()
+
+    await firstVenue.click()
+    await expect(page).toHaveURL(/\/venues\/.+/)
   })
 })
