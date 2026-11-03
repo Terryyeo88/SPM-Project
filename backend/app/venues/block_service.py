@@ -31,6 +31,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import ValidationError
 from app.venues.booking_release import release_bookings_overlapping_block
 from app.venues.venue_service import get_venue
@@ -75,10 +76,9 @@ def _block_fields_from(body) -> dict:
 
 
 def _notify_coordinator_venue_blocked(booking: dict) -> None:
-    """Hook for the Notification System story (later sprint). No-op
-    placeholder, same shape as every other _notify_* stub in this
-    codebase -- no real notification plumbing exists anywhere yet."""
-    print(f"[notify] venue booking {booking['id']} released: venue blocked")
+    """The session's coordinator is told its booking was released because
+    the venue was blocked (IS-24, notification_service.venue_booking_blocked)."""
+    notification_service.venue_booking_blocked(booking)
 
 
 def create_venue_block(venue_id: str, body, created_by: str) -> dict:

@@ -2595,3 +2595,44 @@ Removed in turn, each caught: telling the organizer of their own decisions;
 never telling them of their own submission; telling for planning; telling
 before a decision or the confirm move is final; telling once per session on
 decisions; and each of the submit, confirm and cancel hooks.
+
+## Notification (Event Coordinator) (IS-24, Nawaz, Sprint 4)
+
+Source: IS-24's criteria (see `traceability.md`). IS-69 already covers
+assignment, a venue booking confirmed or rejected, and an equipment request
+confirmed, rejected or changed. IS-24 adds what was missing. No table, no
+migration.
+
+### What was already there, and what was added
+
+| Criterion | Status |
+|---|---|
+| Only for events assigned to them | every notification goes to the session's current `coordinator_id` (IS-69) |
+| Auto-assigned: told | IS-69 `coordinator_assigned` (also on reassignment) |
+| Organizer submits a significant change request: told | **added** `event_change_requested` |
+| Venue Staff approve, reject or change the booking: told | approve/reject: IS-69; "change": **added** `venue_booking_blocked` |
+| Equipment confirmed or found unavailable: told | IS-69 `equipment_request_decided` (a rejection is "unavailable") |
+| Incomplete arrangements need attention: told | **not built**, see open-questions |
+
+### Only a significant change request is told
+
+The criterion says "significant". `event_log.significance` already splits
+changes into significant (date, time, attendance, layout, equipment) and
+ordinary (name, notes), and the coordinator's review page shows that label, so
+the hook uses the same rule. An ordinary request waits in the coordinator's
+review queue without a notification.
+
+### "Change the booking" is a venue block
+
+Venue Staff cannot edit a confirmed booking. The one thing that changes it
+under the coordinator is Venue Staff blocking the venue (Venue Becomes
+Unavailable), which releases the booking. `_notify_coordinator_venue_blocked`
+was still a print placeholder from that story; it now tells the coordinator
+to book another venue, one notification per booking released.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling for every change request; telling only
+for ordinary ones; telling before the pending check; the block hook; the hook
+firing when nothing was released; and the blocked notice going to the
+organizer.
