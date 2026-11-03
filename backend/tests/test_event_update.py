@@ -831,3 +831,28 @@ def test_is26_an_update_refused_for_unacknowledged_impacts_tells_nobody(fake, te
         update_event(_event(fake), {"preferred_start_date": LATER, "preferred_end_date": LATER}, COORDINATOR)
 
     assert tech_news == []
+
+
+# -- IS-25: Venue Staff are told about changes their booking depends on --------------------------
+
+
+@pytest.fixture
+def venue_news(monkeypatch):
+    import app.notifications.notification_service as notification_service
+
+    seen = []
+    monkeypatch.setattr(notification_service, "venue_staff_event_news", lambda *a, **k: seen.append((a, k)))
+    return seen
+
+
+def test_is25_an_update_tells_venue_staff_which_fields_changed_and_who_changed_them(fake, venue_news):
+    update_event(_event(fake), {"expected_attendance": 150}, COORDINATOR)
+
+    assert venue_news == [(("session-1", "changed", {"expected_attendance"}, COORDINATOR), {})]
+
+
+def test_is25_an_update_that_changes_nothing_tells_nobody(fake, venue_news):
+    update_event(_event(fake), {"name": _session()["name"]}, COORDINATOR)
+
+    assert venue_news == []
+

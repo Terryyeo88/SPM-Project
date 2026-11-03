@@ -361,6 +361,9 @@ def cancel_event(event, event_id):
 
     IS-23: the organizer is told too (the reason is on the event page).
 
+    IS-25 AC4: Venue Staff are told too, if the session had a venue booking
+    pending or confirmed.
+
     IS-26 AC4: Technical Support Staff are told too, if the session had an
     equipment request waiting or confirmed."""
     updated = _move(event, event_id, "cancelled")
@@ -369,6 +372,7 @@ def cancel_event(event, event_id):
     _notify_organizer(event_id, "cancelled")
     _notify_attendees_cancelled(event_id)
     _notify_technical_support_cancelled(event_id)
+    _notify_venue_staff_cancelled(event_id, released_bookings)
     return jsonify(
         {
             **updated,
@@ -387,6 +391,18 @@ def _notify_attendees_reconfirmed(event_id: str) -> None:
 def _notify_organizer(event_id: str, what: str) -> None:
     """IS-23 (notification_service.organizer_event_news)."""
     notification_service.organizer_event_news(event_id, what, current_user().id)
+
+
+def _notify_venue_staff_cancelled(event_id: str, released_bookings: list[dict]) -> None:
+    """IS-25 AC4 (notification_service.venue_staff_event_news). The bookings
+    this cancellation just released are passed in: they are no longer
+    pending or confirmed, so the lookup alone would miss them."""
+    notification_service.venue_staff_event_news(
+        event_id,
+        "cancelled",
+        actor_id=current_user().id,
+        released_booking_ids=[booking["id"] for booking in released_bookings],
+    )
 
 
 def _notify_technical_support_cancelled(event_id: str) -> None:

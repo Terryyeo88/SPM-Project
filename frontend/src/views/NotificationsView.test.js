@@ -20,7 +20,7 @@ import { useNotificationStore } from '../stores/notifications'
 const READ_AT = '2026-10-29T02:00:00Z'
 const NOTIFICATIONS = [
   { id: 'n-3', message: 'You were assigned Annual Tech Symposium', read_at: null, created_at: '2026-10-29T03:00:00Z', entity_type: 'event', entity_id: 'e-1' },
-  { id: 'n-2', message: 'Your venue booking was released', read_at: null, created_at: '2026-10-29T02:00:00Z', entity_type: 'venue_booking', entity_id: 'b-1' },
+  { id: 'n-2', message: 'Your venue booking was released', read_at: null, created_at: '2026-10-29T02:00:00Z', entity_type: 'registration', entity_id: 'r-1' },
   { id: 'n-1', message: 'An older one', read_at: '2026-10-28T01:00:00Z', created_at: '2026-10-28T00:00:00Z', entity_type: null, entity_id: null },
 ]
 

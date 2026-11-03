@@ -69,12 +69,18 @@ describe('notificationLink', () => {
     expect(notificationLinkLabel(note('1', { entity_type: 'equipment_request' }))).toBe('View equipment request')
   })
 
+  it('links a venue booking notification to the booking for Venue Staff (IS-25)', () => {
+    const link = notificationLink(note('1', { entity_type: 'venue_booking', entity_id: 'b-1' }), [ROLES.VENUE_STAFF])
+    expect(link).toEqual({ name: 'venue-booking-review', params: { bookingId: 'b-1' } })
+    expect(notificationLinkLabel(note('1', { entity_type: 'venue_booking' }))).toBe('View booking')
+  })
+
   it('is null (plain text) with no entity', () => {
     expect(notificationLink(note('1'), Object.values(ROLES))).toBeNull()
   })
 
   it('is null (plain text) for an entity type with no page', () => {
-    expect(notificationLink(note('1', { entity_type: 'venue_booking', entity_id: 'b-1' }), Object.values(ROLES))).toBeNull()
+    expect(notificationLink(note('1', { entity_type: 'registration', entity_id: 'r-1' }), Object.values(ROLES))).toBeNull()
   })
 
   it('is null when the caller cannot reach that page, rather than a link the router would bounce', () => {
@@ -82,6 +88,7 @@ describe('notificationLink', () => {
     expect(notificationLink(note('1', { entity_type: 'safety_review', entity_id: 'r-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
     expect(notificationLink(note('1', { entity_type: 'attendee_event', entity_id: 's-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
     expect(notificationLink(note('1', { entity_type: 'equipment_request', entity_id: 'q-1' }), [ROLES.EVENT_COORDINATOR])).toBeNull()
+    expect(notificationLink(note('1', { entity_type: 'venue_booking', entity_id: 'b-1' }), [ROLES.EVENT_ORGANIZER])).toBeNull()
   })
 
   it('is null for half a link', () => {

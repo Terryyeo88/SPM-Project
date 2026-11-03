@@ -866,3 +866,27 @@ Integration (real Supabase, 2 tests):
 | Incomplete arrangements need attention: told | none | **not built**: needs a scheduler and a definition (open-questions) |
 | (design) A refused action tells nobody | `test_a_refused_change_request_triggers_nothing`, `test_a_refused_block_triggers_nothing`, `test_a_block_that_releases_nothing_triggers_nothing` (hand-mutated) | hooks run after the write |
 | (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+
+## Sprint 4 — Notification (Venue Staff) (IS-25, Nawaz)
+
+Source: IS-25 "Notification (Venue Staff)" (the Sprint 1 user stories
+document): "As Venue Staff, I want to receive notifications about
+venue-related requests and changes, so that I can review and maintain the
+appropriate venue arrangements for events." Unit tests:
+`test_notification_venue_staff.py` (who is told what),
+`test_notification_hook_venue_staff.py` (when), plus the edit hooks in
+`test_event_update.py` and `test_event_change_requests.py`. Frontend:
+`notifications.test.js`. Integration (real Supabase, 4 tests):
+`test_notification_venue_staff_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| A coordinator submits a booking request that needs review: Venue Staff are notified | `test_a_booking_request_tells_every_venue_staff_member_and_nobody_else`, `test_requesting_a_venue_triggers_the_hook_with_the_new_booking` | `create_booking_request` -> `venue_staff_booking_requested` |
+| An event with a venue arrangement is changed in a way that affects the venue: notified | `test_a_change_to_attendance_layout_or_accessibility_tells_venue_staff`, `test_is25_an_update_tells_venue_staff_which_fields_changed_and_who_changed_them`, `test_is25_approving_a_change_tells_venue_staff_which_fields_changed` | `update_event`, `approve_change_request` -> `venue_staff_event_news("changed")` |
+| The event is rescheduled, the new date or time affecting the booking: notified | `test_a_new_date_or_time_tells_venue_staff_the_session_was_rescheduled`, `test_a_change_to_a_session_with_no_live_booking_is_not_news` | same; only if a booking is pending or confirmed |
+| The event is cancelled: notified | `test_a_cancelled_session_with_a_live_booking_tells_venue_staff`, `test_a_booking_the_cancellation_just_released_still_counts`, `test_cancelling_a_session_triggers_the_hook_with_the_bookings_it_released` | `cancel_event` -> `venue_staff_event_news("cancelled", released_booking_ids)` |
+| Only for venue matters relevant to them | `test_a_change_the_venue_does_not_depend_on_is_not_news`, `test_a_session_whose_bookings_are_over_is_not_news`, `test_an_old_release_from_before_the_cancellation_does_not_count` (hand-mutated) | live-booking filter and the field list in `notification_service` |
+| (design) Nobody is told about their own action | `test_the_person_who_requested_is_not_told_even_when_they_are_venue_staff`, `test_the_person_who_changed_the_session_is_not_told` (hand-mutated) | actor excluded in `_venue_staff_ids` |
+| (design) A refused action tells nobody | `test_a_refused_booking_request_triggers_nothing`, `test_a_refused_cancellation_triggers_nothing` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+| (design) The notification opens the booking | `notifications.test.js::links a venue booking notification ...` | `ENTITY_ROUTES.venue_booking` |
