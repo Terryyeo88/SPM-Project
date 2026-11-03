@@ -12,8 +12,9 @@ can easily manage what venues ConnectSphere currently has."
 
 These run against the in-memory FakeSupabase, with the delete_venue()
 database function stubbed (_db_delete_venue). What the database itself does
-on delete -- the soft delete and releasing bookings in one transaction, and
-refusing bookings on a deleted venue -- is tested against a real database in
+on delete -- releasing bookings and removing the venue's row in one
+transaction, every booking keeping the venue's name, and refusing bookings
+on a deleted venue -- is tested against a real database in
 test_venue_catalogue_crud_integration.py. The coordinator's alert is
 frontend (VenueRemovedAlert.test.js, lib/venueBookings.test.js).
 """
@@ -34,7 +35,6 @@ from app.authz import actions
 from app.authz.policy import can
 from app.events.transitions import TransitionConflictError
 from app.shared.errors import NotFoundError, ValidationError
-from app.venues.venue_service import VenueDeletedError, VenuePermanentDeleteError
 from tests.factories import make_user
 from tests.fake_supabase import FakeSupabase
 
@@ -75,8 +75,6 @@ def _venue(**overrides):
         "tentative_hold_minutes": 1440,
         "operating_hours_start": "07:00:00",
         "operating_hours_end": "23:59:00",
-        "deleted_at": None,
-        "deleted_by": None,
         **overrides,
     }
 
@@ -281,18 +279,20 @@ def test_ac2_an_unknown_venue_is_not_found(db):
 
 
 def test_ac2_a_deleted_venue_cannot_be_edited(db):
-    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
+    db.tables["venues"] = []
 
-    with pytest.raises(VenueDeletedError, match="deleted from the catalogue"):
+    with pytest.raises(NotFoundError):
         service.update_venue("venue-1", {"capacity": 5})
     assert not [call for call in db.calls if call["op"] == "update"]
 
 
-def test_ac2_an_edit_is_conditioned_on_the_venue_not_being_deleted(db):
-    service.update_venue("venue-1", {"capacity": 5})
+def test_ac2_a_venue_deleted_while_being_edited_is_not_found(db, monkeypatch):
+    # Read before the delete, written after it: the update matches no row.
+    monkeypatch.setattr(service, "get_venue", lambda venue_id: _venue())
+    db.tables["venues"] = []
 
-    [write] = [call for call in db.calls if call["op"] == "update"]
-    assert ("is", "deleted_at", None) in write["filters"]
+    with pytest.raises(NotFoundError, match="deleted from the catalogue"):
+        service.update_venue("venue-1", {"capacity": 5})
 
 
 def _refused(code, message):
@@ -314,14 +314,14 @@ def test_ac2_a_layout_deleted_meanwhile_is_a_400_with_the_databases_message():
 
 
 def _deleted_outcome(released=()):
-    return {"outcome": "deleted", "venue": _venue(deleted_at="2026-10-23T10:00:00+00:00"), "released": list(released)}
+    return {"outcome": "deleted", "venue": _venue(), "released": list(released)}
 
 
 @pytest.fixture
 def deleting(monkeypatch):
     """Stubs the database function and the status/safety follow-ups;
     records every call."""
-    calls = SimpleNamespace(rpc=[], transitions=[], withdrawn=[], outcome=_deleted_outcome())
+    calls = SimpleNamespace(rpc=[], transitions=[], withdrawn=[], notified=[], outcome=_deleted_outcome())
 
     def fake_db_delete(venue_id, deleted_by):
         calls.rpc.append((venue_id, deleted_by))
@@ -334,6 +334,7 @@ def deleting(monkeypatch):
     monkeypatch.setattr(service, "_db_delete_venue", fake_db_delete)
     monkeypatch.setattr(service, "transition", fake_transition)
     monkeypatch.setattr(service, "withdraw_pending_review", lambda *args: calls.withdrawn.append(args))
+    monkeypatch.setattr(service, "_notify_venue_deleted", lambda *args: calls.notified.append(args))
     return calls
 
 
@@ -341,7 +342,7 @@ def test_ac3_venue_staff_delete_a_venue(deleting):
     result = service.delete_venue("venue-1", "staff-1")
 
     assert deleting.rpc == [("venue-1", "staff-1")]
-    assert result["venue"]["deleted_at"]
+    assert result["venue"]["name"] == "Grand Ballroom"  # the row as it was, for the message
     assert result["released_bookings"] == []
     assert result["returned_to_planning"] == []
 
@@ -353,23 +354,24 @@ def test_ac3_an_unknown_venue_is_not_found(deleting):
         service.delete_venue("missing", "staff-1")
 
 
-def test_ac3_deleting_twice_is_refused(deleting):
-    deleting.outcome = {"outcome": "already_deleted"}
+def test_ac3_a_deleted_venue_is_gone_from_the_catalogue(db):
+    # Its row is removed by delete_venue(); nothing is left to list or open.
+    db.tables["venues"] = []
 
-    with pytest.raises(VenueDeletedError, match="already been deleted"):
-        service.delete_venue("venue-1", "staff-1")
-
-
-def test_ac3_a_deleted_venue_leaves_the_catalogue(db):
-    db.tables["venues"].append(_venue(id="venue-2", name="Old Hall", deleted_at="2026-10-23T10:00:00+00:00"))
-
-    assert [venue["id"] for venue in service.list_venues()] == ["venue-1"]
+    assert service.list_venues() == []
+    with pytest.raises(NotFoundError):
+        service.get_venue("venue-1")
 
 
-def test_ac3_a_deleted_venue_can_still_be_looked_up_for_old_bookings(db):
-    db.tables["venues"].append(_venue(id="venue-2", name="Old Hall", deleted_at="2026-10-23T10:00:00+00:00"))
+def test_ac3_past_bookings_of_a_deleted_venue_still_show_its_name():
+    rows = [
+        {"id": "b-1", "venue_id": None, "venue_name": "Old Hall", "venues": None},
+        {"id": "b-2", "venue_id": "venue-1", "venue_name": None, "venues": {"name": "Grand Ballroom"}},
+    ]
 
-    assert service.get_venue("venue-2")["deleted_at"]
+    shown = booking_service.with_venue_names(rows)
+
+    assert [row["venues"]["name"] for row in shown] == ["Old Hall", "Grand Ballroom"]
 
 
 # -- AC4: ongoing events lose their booking ----------------------------------
@@ -390,6 +392,24 @@ def test_ac4_released_bookings_are_reported(deleting):
     result = service.delete_venue("venue-1", "staff-1")
 
     assert result["released_bookings"] == [_released("b-1", "e-1", "planning", "pending")]
+
+
+def test_ac4_each_released_booking_or_request_notifies_its_coordinator(deleting):
+    pending = _released("b-1", "e-1", "planning", "pending")
+    confirmed = _released("b-2", "e-2", "confirmed", "confirmed")
+    deleting.outcome = _deleted_outcome([pending, confirmed])
+
+    service.delete_venue("venue-1", "staff-1")
+
+    # One notification per released booking, naming the venue that went.
+    assert [booking for booking, _ in deleting.notified] == [pending, confirmed]
+    assert {venue["name"] for _, venue in deleting.notified} == {"Grand Ballroom"}
+
+
+def test_ac4_nobody_is_notified_when_no_ongoing_event_had_booked_it(deleting):
+    service.delete_venue("venue-1", "staff-1")
+
+    assert deleting.notified == []
 
 
 def test_ac4_a_planning_session_stays_in_planning(deleting):
@@ -483,16 +503,45 @@ def test_ac4_withdrawing_with_nothing_pending_does_nothing(monkeypatch):
 
 def test_a_deleted_venue_cannot_be_requested(monkeypatch):
     fake = FakeSupabase()
-    fake.tables["venues"] = [_venue(deleted_at="2026-10-23T10:00:00+00:00")]
+    fake.tables["venues"] = []  # its row was removed
     monkeypatch.setattr(booking_service, "supabase", fake)
     event = SimpleNamespace(id="e-1", preferred_start_date="2026-12-01")
 
-    with pytest.raises(ValidationError, match='Venue "Grand Ballroom" has been deleted'):
+    with pytest.raises(ValidationError, match="does not reference an existing venue"):
         booking_service.create_booking_request(event, "venue-1", "coordinator-1")
     assert fake.tables.get("venue_bookings", []) == []
 
 
-def test_a_booking_racing_the_delete_gets_the_databases_message(monkeypatch):
+def test_a_booking_whose_venue_was_deleted_is_never_blocked(monkeypatch):
+    # get_booking reads the blocked flag for the review page; a NULL venue_id
+    # used to reach the query as "None" and crash it.
+    fake = FakeSupabase()
+    monkeypatch.setattr(booking_service, "supabase", fake)
+
+    assert booking_service._blocked_period_exists(None, None, None) is False
+    assert fake.calls == []
+
+
+def test_a_pending_booking_whose_venue_was_deleted_cannot_be_confirmed(monkeypatch):
+    # A finished event's pending booking isn't released by the delete; it
+    # keeps the venue's name and loses only the link.
+    fake = FakeSupabase()
+    monkeypatch.setattr(booking_service, "supabase", fake)
+    booking = SimpleNamespace(
+        id="b-1",
+        venue_id=None,
+        venue_name="Grand Ballroom",
+        status="pending",
+        booking_start="2026-12-01T09:00:00+08:00",
+        booking_end="2026-12-01T12:00:00+08:00",
+    )
+
+    with pytest.raises(ValidationError, match='Venue "Grand Ballroom" has been deleted'):
+        booking_service.confirm_booking("b-1", booking, "staff-1")
+    assert not [call for call in fake.calls if call["op"] == "update"]
+
+
+def test_a_booking_racing_the_delete_is_a_400_not_a_500(monkeypatch):
     fake = FakeSupabase()
     fake.tables["venues"] = [_venue()]
     monkeypatch.setattr(booking_service, "supabase", fake)
@@ -501,11 +550,13 @@ def test_a_booking_racing_the_delete_gets_the_databases_message(monkeypatch):
     def refusing_table(name):
         query = table(name)
         if name == "venue_bookings":
+            # Deleted between the venue check and the insert: the venue's row
+            # is gone, so the foreign key refuses the booking.
             query.execute = lambda: (_ for _ in ()).throw(
                 APIError(
                     {
-                        "message": 'Venue "Grand Ballroom" has been deleted',
-                        "code": "23514",
+                        "message": 'insert or update on table "venue_bookings" violates foreign key constraint',
+                        "code": "23503",
                         "hint": None,
                         "details": None,
                     }
@@ -516,7 +567,7 @@ def test_a_booking_racing_the_delete_gets_the_databases_message(monkeypatch):
     monkeypatch.setattr(fake, "table", refusing_table)
     event = SimpleNamespace(id="e-1", preferred_start_date="2026-12-01")
 
-    with pytest.raises(ValidationError, match="has been deleted"):
+    with pytest.raises(ValidationError, match="does not reference an existing venue"):
         booking_service.create_booking_request(event, "venue-1", "coordinator-1")
 
 
@@ -572,14 +623,13 @@ def test_route_ac2_venue_staff_edit_a_venue(client, signing_key, monkeypatch):
     assert response.get_json() == {"id": "venue-1", "capacity": 12}
 
 
-def test_route_ac2_editing_a_deleted_venue_is_a_409(client, signing_key, monkeypatch, db):
+def test_route_ac2_editing_a_deleted_venue_is_a_404(client, signing_key, monkeypatch, db):
     _mock_profile(monkeypatch, ["venue_staff"])
-    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
+    db.tables["venues"] = []
 
     response = client.post("/venues/venue-1", json={"capacity": 12}, headers=_headers(signing_key))
 
-    assert response.status_code == 409
-    assert response.get_json()["error"]["code"] == "venue_deleted"
+    assert response.status_code == 404
 
 
 def test_route_ac3_venue_staff_delete_a_venue_as_themselves(client, signing_key, monkeypatch):
@@ -607,8 +657,6 @@ def test_route_ac3_venue_staff_delete_a_venue_as_themselves(client, signing_key,
         ("post", "/venues", "create_venue"),
         ("post", "/venues/venue-1", "update_venue"),
         ("delete", "/venues/venue-1", "delete_venue"),
-        ("get", "/venues/deleted", "list_deleted_venues"),
-        ("delete", "/venues/venue-1/permanent", "permanently_delete_venue"),
     ],
 )
 def test_route_only_venue_staff_add_edit_or_delete(client, signing_key, monkeypatch, role, method, path, patched):
@@ -618,105 +666,3 @@ def test_route_only_venue_staff_add_edit_or_delete(client, signing_key, monkeypa
     response = getattr(client, method)(path, json={"capacity": 1}, headers=_headers(signing_key))
 
     assert response.status_code == 403
-
-
-# -- permanent delete (the second step after deleting) -------------------------
-
-
-def test_permanent_delete_lists_only_deleted_venues(db):
-    db.tables["venues"].append(_venue(id="venue-2", name="Old Hall", deleted_at="2026-10-23T10:00:00+00:00"))
-
-    assert [venue["id"] for venue in service.list_deleted_venues()] == ["venue-2"]
-
-
-def test_permanent_delete_needs_the_venue_deleted_from_the_catalogue_first(db):
-    with pytest.raises(VenuePermanentDeleteError, match="must be deleted from the catalogue before"):
-        service.permanently_delete_venue("venue-1")
-    assert not [call for call in db.calls if call["op"] == "delete"]
-    assert len(db.tables["venues"]) == 1
-
-
-def test_permanent_delete_removes_a_deleted_venue(db):
-    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
-
-    service.permanently_delete_venue("venue-1")
-
-    [delete] = [call for call in db.calls if call["op"] == "delete"]
-    assert ("eq", "id", "venue-1") in delete["filters"]
-    assert db.tables["venues"] == []
-
-
-def test_permanent_delete_of_an_unknown_venue_is_not_found(db):
-    with pytest.raises(NotFoundError):
-        service.permanently_delete_venue("missing")
-
-
-def test_permanent_delete_turns_the_databases_refusal_into_a_409(db, monkeypatch):
-    _stored(db)["deleted_at"] = "2026-10-23T10:00:00+00:00"
-    table = db.table
-
-    def refusing_table(name):
-        query = table(name)
-        if name == "venues":
-            execute = query.execute
-
-            def refuse_delete():
-                if query.op == "delete":
-                    raise APIError(
-                        {
-                            "message": 'Venue "Grand Ballroom" still has bookings for ongoing events',
-                            "code": "23503",
-                            "hint": None,
-                            "details": None,
-                        }
-                    )
-                return execute()
-
-            query.execute = refuse_delete
-        return query
-
-    monkeypatch.setattr(db, "table", refusing_table)
-
-    with pytest.raises(VenuePermanentDeleteError, match="still has bookings for ongoing events"):
-        service.permanently_delete_venue("venue-1")
-
-
-def test_a_permanently_deleted_venues_bookings_still_show_its_name():
-    rows = [
-        {"id": "b-1", "venue_id": None, "venue_name": "Old Hall", "venues": None},
-        {"id": "b-2", "venue_id": "venue-1", "venue_name": None, "venues": {"name": "Grand Ballroom"}},
-    ]
-
-    shown = booking_service.with_venue_names(rows)
-
-    assert [row["venues"]["name"] for row in shown] == ["Old Hall", "Grand Ballroom"]
-
-
-def test_route_lists_deleted_venues_for_venue_staff(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["venue_staff"])
-    monkeypatch.setattr(routes_module, "list_deleted_venues", lambda: [_venue(deleted_at="2026-10-23T10:00:00+00:00")])
-
-    response = client.get("/venues/deleted", headers=_headers(signing_key))
-
-    assert response.status_code == 200
-    assert response.get_json()[0]["id"] == "venue-1"
-
-
-def test_route_permanently_deletes_with_204(client, signing_key, monkeypatch):
-    _mock_profile(monkeypatch, ["venue_staff"])
-    seen = []
-    monkeypatch.setattr(routes_module, "permanently_delete_venue", seen.append)
-
-    response = client.delete("/venues/venue-1/permanent", headers=_headers(signing_key))
-
-    assert response.status_code == 204
-    assert seen == ["venue-1"]
-
-
-def test_route_permanent_delete_of_an_active_venue_is_a_409(client, signing_key, monkeypatch, db):
-    _mock_profile(monkeypatch, ["venue_staff"])
-
-    response = client.delete("/venues/venue-1/permanent", headers=_headers(signing_key))
-
-    assert response.status_code == 409
-    assert response.get_json()["error"]["code"] == "venue_permanent_delete_refused"

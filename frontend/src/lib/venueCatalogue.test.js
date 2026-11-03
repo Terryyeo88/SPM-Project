@@ -9,11 +9,11 @@ import { apiDelete } from './api'
 import {
   changedFields,
   deleteOutcomeMessage,
+  deleteVenue,
   emptyVenueForm,
   formatOperatingHours,
   layoutOptions,
   newVenuePayload,
-  permanentlyDeleteVenue,
   validateVenueForm,
   venuePayload,
   venueToForm,
@@ -169,10 +169,10 @@ describe('deleteOutcomeMessage (IS-61 AC3/AC4)', () => {
   })
 })
 
-describe('permanentlyDeleteVenue', () => {
-  it('calls the permanent delete route', async () => {
-    apiDelete.mockResolvedValue(null)
-    await permanentlyDeleteVenue('venue-1')
-    expect(apiDelete).toHaveBeenCalledWith('/venues/venue-1/permanent')
+describe('deleteVenue', () => {
+  it('calls the one delete route, which removes the record', async () => {
+    apiDelete.mockResolvedValue({ venue, released_bookings: [], returned_to_planning: [] })
+    await deleteVenue('venue-1')
+    expect(apiDelete).toHaveBeenCalledWith('/venues/venue-1')
   })
 })

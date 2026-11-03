@@ -148,9 +148,9 @@ describe('unreplacedVenueReleases (IS-61 AC4)', () => {
     expect(unreplacedVenueReleases([older, released], { status: 'planning' })).toEqual([released])
   })
 
-  it('uses released_at, which a later permanent delete does not move, over updated_at', () => {
+  it('uses released_at, which removing the venue does not move, over updated_at', () => {
     const rebooked = { id: 'new', status: 'pending', created_at: '2026-10-21T09:00:00+00:00' }
-    // The permanent delete rewrote updated_at to after the rebooking.
+    // Removing the venue (which unlinks its bookings) rewrote updated_at to after the rebooking.
     const releasedThenVenueRemoved = {
       ...released,
       released_at: '2026-10-20T09:00:00+00:00',

@@ -1,12 +1,11 @@
 <script setup>
 /**
  * One venue's details (View Venue Catalogue). IS-61: Venue Staff also edit
- * it (VenueFormView.vue) or delete it from here. Deleting releases the
- * bookings of ongoing events that booked it; their coordinators are alerted
- * on the event page (VenueRemovedAlert.vue). A deleted venue is still shown
- * when opened by link (an old booking's venue), marked as deleted, without
- * the edit/delete actions; Venue Staff can then permanently delete it (its
- * past bookings keep its name).
+ * it (VenueFormView.vue) or delete it from here. Deleting removes the
+ * venue's record; every booking of it, completed and cancelled events'
+ * included, keeps the venue's name. It also releases the bookings of
+ * ongoing events that booked it; their coordinators are alerted on the
+ * event page (VenueRemovedAlert.vue).
  *
  * "Block this venue" (Sprint 3, Josiah, Week 7 #2) is a link to its own
  * focused form (BlockVenueView.vue), the same reachability pattern
@@ -21,12 +20,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiGet } from '../../lib/api'
 import { ROLES, hasAnyRole } from '../../lib/roles'
-import {
-  deleteOutcomeMessage,
-  deleteVenue,
-  formatOperatingHours,
-  permanentlyDeleteVenue,
-} from '../../lib/venueCatalogue'
+import { deleteOutcomeMessage, deleteVenue, formatOperatingHours } from '../../lib/venueCatalogue'
 import { useAuthStore } from '../../stores/auth'
 import AppNavBar from '../../components/AppNavBar.vue'
 
@@ -38,9 +32,7 @@ const loading = ref(true)
 const error = ref('')
 
 const isVenueStaff = computed(() => hasAnyRole(auth.roles, [ROLES.VENUE_STAFF]))
-const canManage = computed(() => isVenueStaff.value && venue.value && !venue.value.deleted_at)
-// The second step, once the venue is deleted from the catalogue.
-const canPermanentlyDelete = computed(() => isVenueStaff.value && Boolean(venue.value?.deleted_at))
+const canManage = computed(() => isVenueStaff.value && Boolean(venue.value))
 const savedMessage = computed(() => {
   if (route.query.saved === 'created') return 'Venue added to the catalogue.'
   if (route.query.saved === 'updated') return 'Venue details saved.'
@@ -81,23 +73,6 @@ async function confirmDelete() {
   }
 }
 
-async function confirmPermanentDelete() {
-  deleting.value = true
-  deleteError.value = ''
-  try {
-    const name = venue.value.name
-    await permanentlyDeleteVenue(venue.value.id)
-    router.push({
-      name: 'venues',
-      query: { deleted: `${name} was permanently deleted. Past bookings still show its name.` },
-    })
-  } catch (requestError) {
-    deleteError.value = requestError.message
-  } finally {
-    deleting.value = false
-  }
-}
-
 onMounted(loadVenue)
 </script>
 
@@ -110,9 +85,6 @@ onMounted(loadVenue)
     <p v-else-if="error" class="error" role="alert">{{ error }}</p>
     <template v-else-if="venue">
       <p v-if="savedMessage" class="saved" role="status">{{ savedMessage }}</p>
-      <p v-if="venue.deleted_at" class="deleted-banner" role="status" data-test="venue-deleted">
-        This venue has been deleted from the catalogue. It can no longer be booked.
-      </p>
       <header>
         <div>
           <p class="eyebrow">Venue</p>
@@ -133,9 +105,10 @@ onMounted(loadVenue)
       <div v-if="canManage && confirmingDelete" class="delete-panel" data-test="delete-panel">
         <p><strong>Delete {{ venue.name }}?</strong></p>
         <p>
-          It will be removed from the venue catalogue and can no longer be booked. Ongoing events that have
-          booked it will lose their booking, and their coordinators will be asked to book another venue.
-          Confirmed events go back to planning. Completed, cancelled and rejected events keep their record.
+          Its record will be removed from the venue catalogue for good, and this can't be undone. Ongoing events
+          that have booked it will lose their booking, and their coordinators will be asked to book another venue.
+          Confirmed events go back to planning. Past bookings, including completed and cancelled events', keep the
+          venue's name.
         </p>
         <div class="panel-actions">
           <button type="button" class="btn danger-solid" :disabled="deleting" @click="confirmDelete">
@@ -143,27 +116,6 @@ onMounted(loadVenue)
           </button>
           <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
             Keep venue
-          </button>
-        </div>
-        <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
-      </div>
-
-      <div v-if="canPermanentlyDelete && !confirmingDelete" class="staff-actions" data-test="permanent-actions">
-        <button type="button" class="btn danger" @click="confirmingDelete = true">Delete permanently</button>
-      </div>
-
-      <div v-if="canPermanentlyDelete && confirmingDelete" class="delete-panel" data-test="permanent-delete-panel">
-        <p><strong>Permanently delete {{ venue.name }}?</strong></p>
-        <p>
-          The venue's record will be removed for good and this can't be undone. Past bookings, including completed
-          and cancelled events', keep the venue's name.
-        </p>
-        <div class="panel-actions">
-          <button type="button" class="btn danger-solid" :disabled="deleting" @click="confirmPermanentDelete">
-            {{ deleting ? 'Deleting...' : 'Delete permanently' }}
-          </button>
-          <button type="button" class="btn neutral" :disabled="deleting" @click="confirmingDelete = false">
-            Keep record
           </button>
         </div>
         <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
@@ -219,7 +171,6 @@ dd { margin: 0; text-transform: capitalize; }
 .block-link { color: #b42318; }
 .calendar-link:hover, .block-link:hover { text-decoration: underline; }
 .saved { padding: .6rem .75rem; background: #eaf5ec; color: #2f6b3f; border-radius: 4px; }
-.deleted-banner { padding: .75rem; background: #f5e6e6; color: #a33f3f; border-radius: 4px; font-weight: 600; }
 .staff-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
 .delete-panel {
   margin-top: 1rem; padding: .9rem 1rem; background: #fbf1f1; border: 1px solid #d9a3a3; border-radius: 6px;
