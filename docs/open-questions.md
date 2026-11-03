@@ -1550,15 +1550,16 @@ narrowly on purpose. Please confirm:
   venue-blocking mechanism (`venue_blocks`, `reason='maintenance'`), not a
   demand to also flip `venues.status`. If the story's author actually meant
   a literal status flip in addition to blocking, that's new scope.
-- **The revert-to-planning scope is `confirmed` only, not also
-  `safety_review`**, matching `cancel_booking`'s existing precedent rather
-  than `delete_venue`'s broader one. A session can sit in `safety_review`
-  with its venue booking overwritten and not revert -- an existing,
-  pre-existing gap `cancel_booking` already has, not introduced here. If
-  the Safety Officer approves a session in that state, `confirm_event`'s
-  own `has_live_confirmed_booking` gate still catches it before the event
-  reaches `confirmed` -- so the worst case is a safety review spent on an
-  already-invalid venue, not an event reaching `confirmed` with one.
+- ~~**The revert-to-planning scope is `confirmed` only, not also
+  `safety_review`**~~ **Resolved, 3 Nov: the team decided NOT to waste a
+  Safety Officer's time reviewing a session whose venue was just
+  overwritten.** The route now reverts from `safety_review` too (same scope
+  as `delete_venue`, withdrawing the pending review first) -- see
+  `docs/design-decisions.md`. `cancel_booking` (IS-9) was deliberately left
+  unchanged, still `confirmed`-only, so the same question is open there too:
+  should a coordinator's own cancellation also revert a `safety_review`
+  session, for the same reason? Not changed here since it wasn't part of
+  this story -- worth a team decision of its own.
 - **No stronger relationship check than "any venue_staff, any confirmed
   booking."** Like booking approve/reject, there's no per-venue-staff
   assignment table, so any Venue Staff member can overwrite any confirmed

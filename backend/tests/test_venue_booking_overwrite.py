@@ -20,6 +20,7 @@ import pytest
 
 import app.auth.context as context_module
 import app.events.transitions as transitions
+import app.safety.safety_service as safety_service
 import app.venues.booking_release as booking_release
 import app.venues.booking_service as booking_service
 import app.venues.routes as venues_routes
@@ -67,6 +68,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(booking_service, "supabase", db)
     monkeypatch.setattr(venues_routes, "supabase", db)
     monkeypatch.setattr(transitions, "supabase", db)
+    monkeypatch.setattr(safety_service, "supabase", db)
     return db
 
 
@@ -186,13 +188,56 @@ def test_the_route_reverts_a_confirmed_event_to_planning(client, signing_key, mo
     assert "Burst pipe." in log[0]["reason"]
 
 
-@pytest.mark.parametrize("event_status", ["planning", "safety_review"])
-def test_an_event_that_is_not_confirmed_keeps_its_status(client, signing_key, monkeypatch, fake, event_status):
-    """Deliberately narrower than venue_service.delete_venue's revert scope
-    -- see the route's own docstring. safety_review is a known,
-    pre-existing gap shared with cancel_booking, not new here."""
+def test_the_route_reverts_a_safety_review_event_to_planning(client, signing_key, monkeypatch, fake):
+    """Team decision (2026-11-03): don't waste a Safety Officer's time
+    reviewing a session whose venue was just overwritten -- same
+    REVERT_TO_PLANNING scope as venue_service.delete_venue, not
+    cancel_booking's narrower "confirmed only"."""
     _mock_profile(monkeypatch, ["venue_staff"])
-    fake.get("session-1")["status"] = event_status
+    fake.get("session-1")["status"] = "safety_review"
+
+    response = client.post(
+        "/venues/bookings/main-hall/overwrite", headers=_auth(signing_key), json={"reason": "Burst pipe."}
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["event_reverted_to_planning"] is True
+    assert fake.get("session-1")["status"] == "planning"
+    log = fake.tables["event_status_log"]
+    assert len(log) == 1
+    assert (log[0]["from_status"], log[0]["to_status"]) == ("safety_review", "planning")
+
+
+def test_overwriting_withdraws_a_pending_safety_review(client, signing_key, monkeypatch, fake):
+    fake.get("session-1")["status"] = "safety_review"
+    fake.tables["safety_reviews"] = [{"id": "review-1", "event_id": "session-1", "status": "pending"}]
+    _mock_profile(monkeypatch, ["venue_staff"])
+
+    client.post(
+        "/venues/bookings/main-hall/overwrite", headers=_auth(signing_key), json={"reason": "Burst pipe."}
+    )
+
+    [review] = fake.tables["safety_reviews"]
+    assert review["status"] == "changes_requested"
+    assert review["reviewed_by"] == VENUE_STAFF
+
+
+def test_overwriting_with_no_pending_review_does_not_error(client, signing_key, monkeypatch, fake):
+    fake.get("session-1")["status"] = "safety_review"
+    _mock_profile(monkeypatch, ["venue_staff"])
+
+    response = client.post(
+        "/venues/bookings/main-hall/overwrite", headers=_auth(signing_key), json={"reason": "Burst pipe."}
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["event_reverted_to_planning"] is True
+
+
+def test_an_event_in_planning_keeps_its_status(client, signing_key, monkeypatch, fake):
+    """planning is the one status this route never reverts from -- there's
+    nothing to revert, the event never left planning."""
+    _mock_profile(monkeypatch, ["venue_staff"])
 
     response = client.post(
         "/venues/bookings/main-hall/overwrite", headers=_auth(signing_key), json={"reason": "Burst pipe."}
@@ -200,20 +245,18 @@ def test_an_event_that_is_not_confirmed_keeps_its_status(client, signing_key, mo
 
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["event_reverted_to_planning"] is False
-    assert fake.get("session-1")["status"] == event_status
+    assert fake.get("session-1")["status"] == "planning"
     assert fake.tables.get("event_status_log", []) == []
 
 
-@pytest.mark.parametrize("event_status", ["planning", "safety_review"])
-def test_transition_is_never_attempted_for_a_non_confirmed_event(client, signing_key, monkeypatch, fake, event_status):
-    """Narrower than the two tests above: proves the route's own
-    event_status == "confirmed" guard is what skips the revert, not just
-    transition()'s own expected_from race-guard happening to refuse it --
-    the two are redundant defense-in-depth, and this isolates the first
-    one specifically, so removing it is still caught even though the
-    observable outcome would otherwise be identical either way."""
+def test_transition_is_never_attempted_for_a_planning_event(client, signing_key, monkeypatch, fake):
+    """Proves the route's own event_status-in-scope guard is what skips the
+    revert, not just transition()'s own expected_from race-guard happening
+    to refuse it -- the two are redundant defense-in-depth, and this
+    isolates the first one specifically, so removing it is still caught
+    even though the observable outcome would otherwise be identical
+    either way."""
     _mock_profile(monkeypatch, ["venue_staff"])
-    fake.get("session-1")["status"] = event_status
     calls = []
     monkeypatch.setattr(venues_routes, "transition", lambda *a, **k: calls.append((a, k)))
 

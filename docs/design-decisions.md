@@ -2796,17 +2796,25 @@ value.** `released` already means exactly "left confirmed for a reason other
 than a Venue Staff rejection or a coordinator cancellation" -- a direct
 Venue Staff overwrite fits that same bucket. No migration needed.
 
-**Revert scope is deliberately `("confirmed",)`, not also `"safety_review"`.**
-Two existing precedents disagree with each other: `venue_service.delete_venue`
-(IS-61) reverts both; `booking_service._revert_confirmed_event` (IS-9's
-`cancel_booking`, the closer sibling -- also a single actor pulling one
-booking out from under a possibly-live event) reverts confirmed only. The
-AC's own text ("If the event is confirmed...") matches the narrower
-`cancel_booking` precedent exactly, so that's what this route follows. A
-session left in `safety_review` with its venue overwritten is therefore a
-known, pre-existing gap -- already true of `cancel_booking`, not introduced
-here -- flagged in `docs/open-questions.md` rather than silently fixed with
-a broader scope the AC didn't ask for.
+**Revert scope: `("confirmed", "safety_review")` -- team decision, 2026-11-03,
+superseding this doc's own first cut.** Two existing precedents disagree with
+each other: `venue_service.delete_venue` (IS-61) reverts both; `booking_
+service._revert_confirmed_event` (IS-9's `cancel_booking`, the closer
+sibling -- also a single actor pulling one booking out from under a
+possibly-live event) reverts confirmed only. This was first shipped matching
+`cancel_booking`'s narrower scope, since the AC's own text only says "If the
+event is confirmed..." -- flagged as an open interpretation call rather than
+silently picking the broader one. The team then decided explicitly: don't
+waste a Safety Officer's time reviewing a session whose venue Venue Staff
+just pulled out from under it. The route now matches `delete_venue`'s
+broader scope instead, including withdrawing any pending safety review
+first (`safety_service.withdraw_pending_review`, same call `delete_venue`
+already makes for the identical reason). `cancel_booking` itself is
+UNCHANGED -- still `confirmed` only -- so the two precedents still disagree
+with each other; this is `overwrite`'s own deliberate choice now, not a
+codebase-wide policy. Worth revisiting `cancel_booking`'s own scope in a
+future story if the same "don't waste the Safety Officer's time" reasoning
+is judged to apply there too.
 
 **Authorisation is role + booking-status, not a resource-ownership check.**
 `rule_venue_booking_overwrite`: `venue_staff` only (`DENY_NOT_FOUND`
