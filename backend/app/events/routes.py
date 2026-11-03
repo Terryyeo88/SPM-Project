@@ -287,7 +287,7 @@ def confirm_event(event, event_id):
     expired holds before answering. See docs/design-decisions.md for how
     this gap was found during planning, not assumed safe.
 
-    IS-76: a RE-confirmation tells the session's attendees if a relevant
+    IS-22: a RE-confirmation tells the session's attendees if a relevant
     detail changed since it was last confirmed (see
     notification_service.event_reconfirmed)."""
     if not is_approved(event_id):
@@ -356,7 +356,7 @@ def cancel_event(event, event_id):
     other events. The requesting coordinator sees this on their own event
     page the same way a rejected booking already shows (VenueBookingStatus.vue).
 
-    IS-76 AC8: the session's registered and waitlisted attendees are told
+    IS-22 AC8: the session's registered and waitlisted attendees are told
     it was cancelled (without the reason).
 
     IS-23: the organizer is told too (the reason is on the event page).
@@ -384,7 +384,7 @@ def cancel_event(event, event_id):
 
 
 def _notify_attendees_reconfirmed(event_id: str) -> None:
-    """IS-76 AC5/AC7 (notification_service.event_reconfirmed)."""
+    """IS-22 AC5/AC7 (notification_service.event_reconfirmed)."""
     notification_service.event_reconfirmed(event_id)
 
 
@@ -411,7 +411,7 @@ def _notify_technical_support_cancelled(event_id: str) -> None:
 
 
 def _notify_attendees_cancelled(event_id: str) -> None:
-    """IS-76 AC8 (notification_service.event_cancelled)."""
+    """IS-22 AC8 (notification_service.event_cancelled)."""
     notification_service.event_cancelled(event_id)
 
 

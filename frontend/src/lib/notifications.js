@@ -29,7 +29,7 @@ export const markAllNotificationsRead = () => apiPost('/notifications/read-all',
  *
  *   event           -- the event details page (organiser, coordinator, Lead)
  *   safety_review   -- one safety review (Safety Officer)
- *   attendee_event  -- the attendee's own page for a session (IS-76)
+ *   attendee_event  -- the attendee's own page for a session (IS-22)
  *   equipment_request -- one equipment request (Technical Support Staff, IS-26)
  *   venue_booking   -- one venue booking to review (Venue Staff, IS-25)
  */

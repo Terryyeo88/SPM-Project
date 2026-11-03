@@ -2322,7 +2322,10 @@ brings the code in line. This supersedes "nullable with no backfill" and
   so a user who clears their phone can still untick SMS.
 
 
-## Notification (Attendees) (IS-76, Justin, 2026-11-01)
+## Notification (Attendees) (IS-22, Justin, 2026-11-01)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Built on IS-69's notification table and `notify()`, the same way: one
 `_notify_*` hook per trigger in the story's own module, passing its
@@ -2624,7 +2627,7 @@ Approving and rejecting apply to the whole request (`_decide` moves every
 under-review session together), so the organizer gets one notification for the
 request, linking to the session they opened. Confirming and cancelling are per
 session (each session has its own route call), so those notifications name the
-session by its date, the way IS-76 does for attendees. A request of three
+session by its date, the way IS-22 does for attendees. A request of three
 sessions is therefore one "approved" and, later, up to three "confirmed".
 
 ### Submission is told even though the organizer did it

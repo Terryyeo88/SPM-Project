@@ -61,7 +61,7 @@ To run them:
 | IS-17, IS-19, IS-41, IS-43 Equipment requests and reservations | Sprint 3 equipment sections; Integration tests for the equipment workflow |
 | IS-18 Check equipment availability | Sprint 2 — Check Equipment Availability |
 | IS-21 Request for event change | Request for Event Change, and its follow-ups |
-| IS-23, IS-24, IS-25, IS-26, IS-76 Role notifications | Sprint 4 — Notification sections |
+| IS-23, IS-24, IS-25, IS-26, IS-22 Role notifications | Sprint 4 — Notification sections |
 | IS-27 Role-based frontend | Role-based frontend and session logout |
 | IS-31 Only the coordinator edits once submitted | Phase 4 (event edit rows) |
 | IS-36, IS-38, IS-39 Status transitions | Sprint 2 — status transitions |
@@ -942,13 +942,16 @@ every profile directly through the existing RLS policy
 (`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
 
 
-## Sprint 4 — Notification (Attendees) (IS-76, Justin)
+## Sprint 4 — Notification (Attendees) (IS-22, Justin)
+
+Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
+`feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
 
 Unit: `test_notification_attendees.py` (who, what, when),
 `test_notification_hook_attendees.py` (which actions trigger which hook).
 Integration: `test_notification_attendees_integration.py`.
 Frontend: `lib/notifications.test.js`. Design: `docs/design-decisions.md`
-(IS-76). "Relevant event details" = event name, session date and time,
+(IS-22). "Relevant event details" = event name, session date and time,
 venue.
 
 | Criterion | Test | Implementation |
