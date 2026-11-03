@@ -46,6 +46,7 @@ from app.authz.decorators import require
 from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
 from app.notifications import notification_service
+from app.safety.safety_service import withdraw_pending_review
 from app.shared.errors import ValidationError
 from app.venues.block_service import create_venue_block, list_venue_blocks
 from app.venues.booking_release import release_booking
@@ -127,20 +128,22 @@ def cancel_venue_booking_route(booking, booking_id):
 # Reuses booking_release.release_booking for the actual confirmed ->
 # released write -- same race-guard and audit-log shape as every other
 # release trigger (cancel, hold expiry, block) -- then, unlike any of
-# those, also reverts the EVENT if it had already reached "confirmed"
-# (AC's own literal wording: "If the event is confirmed, the status
-# reverting to planning"). Deliberately scoped to "confirmed" only, NOT
-# also "safety_review" -- matching booking_service._revert_confirmed_event
-# (IS-9's cancel_booking, the closest sibling: a coordinator-or-staff
-# action pulling one booking out from under an event), not
-# venue_service.delete_venue's broader scope (IS-61's venue deletion, a
-# different trigger that also withdraws a pending safety review). A
-# session left in safety_review with an
-# invalidated venue is a known, pre-existing gap shared with cancel_booking
-# -- see docs/open-questions.md -- not something this route invents. Not
-# atomic across the two writes (release, then transition), same
-# non-atomic-by-design stance every other release-plus-status-change in
-# this codebase already takes.
+# those, also reverts the EVENT if it had already reached "confirmed" OR
+# "safety_review". The AC's own literal wording only says "if the event is
+# confirmed", and booking_service._revert_confirmed_event (IS-9's
+# cancel_booking, the closest sibling) only reverts "confirmed" -- but the
+# team decided (2026-11-03) not to waste a Safety Officer's time reviewing
+# a session whose venue Venue Staff just pulled out from under it, so this
+# route follows venue_service.delete_venue's broader scope instead (IS-61's
+# venue deletion, which also withdraws any pending safety review first --
+# its check was for arrangements the session no longer has). See
+# docs/design-decisions.md for the full history of this decision: it
+# started narrower, matching cancel_booking, until the team weighed in.
+# cancel_booking itself still only reverts "confirmed" -- this route
+# diverging from it is a deliberate, now-resolved choice, not an
+# inconsistency to fix later. Not atomic across the writes (release, then
+# withdraw, then transition), same non-atomic-by-design stance every other
+# release-plus-status-change in this codebase already takes.
 # Static path -- must come before GET /venues/<venue_id> below.
 @venues_bp.route("/bookings/<booking_id>/overwrite", methods=["POST"])
 @require(VENUE_BOOKING_OVERWRITE, loader=lambda booking_id: load_booking_with_event(booking_id))
@@ -154,14 +157,18 @@ def overwrite_venue_booking_route(booking, booking_id):
     overwritten = release_booking(booking_id, vars(booking), reason, changed_by=current_user().id)
 
     reverted = False
-    if getattr(booking, "event_status", None) == "confirmed":
+    event_status = getattr(booking, "event_status", None)
+    if event_status in _OVERWRITE_REVERTS_FROM:
+        if event_status == "safety_review":
+            # Its pending check was for arrangements it no longer has.
+            withdraw_pending_review(booking.event_id, current_user().id, reason)
         try:
             transition(
                 booking.event_id,
                 "planning",
                 current_user().id,
                 reason=f"Venue booking overwritten by Venue Staff: {reason}",
-                expected_from="confirmed",
+                expected_from=event_status,
             )
             reverted = True
         except TransitionConflictError:
@@ -169,6 +176,12 @@ def overwrite_venue_booking_route(booking, booking_id):
 
     _notify_booking_overwritten(overwritten, reason)
     return jsonify({**overwritten, "event_reverted_to_planning": reverted}), 200
+
+
+# Same scope as venue_service's own revert-to-planning set (IS-61's
+# delete_venue) -- see the route's own docstring above for why this route
+# matches that one, not cancel_booking's narrower "confirmed" only.
+_OVERWRITE_REVERTS_FROM = ("confirmed", "safety_review")
 
 
 def _notify_booking_overwritten(overwritten_booking: dict, reason: str) -> None:
