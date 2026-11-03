@@ -30,7 +30,7 @@ Decisions (docs/design-decisions.md, "Attendee Registration"):
     List) frees the place for the first waitlisted attendee, who is moved up
     in the same database call (public.withdraw_registration).
 
-Notification (Attendees) (IS-76): registering and withdrawing tell the
+Notification (Attendees) (IS-22): registering and withdrawing tell the
 attendee (and, on a withdrawal that moves someone up, that person) through
 _notify_registered / _notify_withdrawn -- what they say and who gets them
 is app.notifications.notification_service's. Both run after the database
@@ -194,12 +194,12 @@ def withdraw(event_id: str, attendee_id: str) -> dict:
 
 
 def _notify_registered(registration: dict) -> None:
-    """IS-76 AC1/AC2 (notification_service.registration_recorded)."""
+    """IS-22 AC1/AC2 (notification_service.registration_recorded)."""
     notification_service.registration_recorded(registration)
 
 
 def _notify_withdrawn(event_id: str, attendee_id: str, promoted_registration_id: str | None) -> None:
-    """IS-76 AC3/AC4 (notification_service.registration_withdrawn)."""
+    """IS-22 AC3/AC4 (notification_service.registration_withdrawn)."""
     notification_service.registration_withdrawn(event_id, attendee_id, promoted_registration_id)
 
 

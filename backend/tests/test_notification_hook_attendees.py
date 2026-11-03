@@ -1,5 +1,5 @@
 """
-Notification (Attendees) (IS-76): WHEN each attendee notification is
+Notification (Attendees) (IS-22): WHEN each attendee notification is
 triggered -- registering, withdrawing, confirming and cancelling call
 their hook only once their own change has succeeded, and each hook hands
 its arguments, untouched, to notification_service. What the notification

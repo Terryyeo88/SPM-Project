@@ -1,10 +1,10 @@
 """
-Notification (Attendees) (IS-76): who each attendee notification goes to,
+Notification (Attendees) (IS-22): who each attendee notification goes to,
 what it says and links to, and -- for details changes -- when one is sent
 at all. In-memory fake, no database. The wiring (which story calls these,
 and when) is test_notification_hook_attendees.py's job.
 
-AC numbers are the story's (docs/traceability.md, IS-76).
+AC numbers are the story's (docs/traceability.md, IS-22).
 """
 
 from __future__ import annotations
