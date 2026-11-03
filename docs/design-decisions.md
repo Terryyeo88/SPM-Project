@@ -2691,3 +2691,86 @@ live; telling for any edit; dropping the released bookings on cancel; counting
 any released booking instead of this cancellation's; and each of the booking,
 update, approve and cancel hooks, plus the booking and cancel hooks firing
 before their change.
+
+## Overwrite Venue Booking (Josiah, 2026-11-03)
+
+Source: Jira story "As a Venue Staff, I want to overwrite the previously
+approved venue booking, so that the event will not have an unsuitable venue",
+found mis-marked "Done" on the board with none of its ACs actually built --
+confirmed by re-checking the then-current `main` with nothing named
+"overwrite" or any per-booking status-override route anywhere in the codebase.
+
+**AC2 ("set status of a venue to under maintenance, with dates/timings and a
+reason") needed no new code.** It describes exactly the venue-blocking
+mechanism (Week 7 #2, already shipped): a `venue_blocks` row with
+`reason='maintenance'`, `block_start`/`block_end`. The literal phrase "set
+status... to under maintenance" describes what a block means, not a demand to
+flip `venues.status` -- the team's own prior reasoning for choosing a
+time-windowed table over the `status` flag
+(`docs/open-questions.md`, "Blocked periods got a new table") applies here
+unchanged. Nothing new was added for this AC.
+
+**AC1 and AC4 were the real gap.** AC1 ("overwrite an approved [i.e.
+CONFIRMED] booking with a different status") is a direct, one-off,
+venue-staff-initiated invalidation of ONE booking -- distinct from blocking
+(targets a VENUE for a time window and releases whatever it overlaps) and
+from the coordinator's own `cancel_booking` (IS-9: no reason requirement on
+the venue-staff side, and only reverts a *confirmed* event, which turned out
+to matter -- see below). AC4 ("if the event is confirmed, the status
+reverting to planning") is the part no other release trigger in this
+codebase does: cancel/expire/block all deliberately leave the EVENT alone
+(see the Venue Becomes Unavailable story's own "must NOT automatically be
+cancelled" AC); this story is the one case where Venue Staff pulling a
+booking must also unwind the event, because unlike those three triggers,
+this one can legitimately invalidate an event Venue Staff themselves just
+decided is unsuitable.
+
+**Reuses `booking_release.release_booking` for the write, not a new status
+value.** `released` already means exactly "left confirmed for a reason other
+than a Venue Staff rejection or a coordinator cancellation" -- a direct
+Venue Staff overwrite fits that same bucket. No migration needed.
+
+**Revert scope is deliberately `("confirmed",)`, not also `"safety_review"`.**
+Two existing precedents disagree with each other: `venue_service.delete_venue`
+(IS-61) reverts both; `booking_service._revert_confirmed_event` (IS-9's
+`cancel_booking`, the closer sibling -- also a single actor pulling one
+booking out from under a possibly-live event) reverts confirmed only. The
+AC's own text ("If the event is confirmed...") matches the narrower
+`cancel_booking` precedent exactly, so that's what this route follows. A
+session left in `safety_review` with its venue overwritten is therefore a
+known, pre-existing gap -- already true of `cancel_booking`, not introduced
+here -- flagged in `docs/open-questions.md` rather than silently fixed with
+a broader scope the AC didn't ask for.
+
+**Authorisation is role + booking-status, not a resource-ownership check.**
+`rule_venue_booking_overwrite`: `venue_staff` only (`DENY_NOT_FOUND`
+otherwise, same as approve/reject -- a booking's existence isn't a stranger's
+to know), and only a `confirmed` booking (`DENY_FORBIDDEN` otherwise) -- a
+pending request is still Venue Staff's own ordinary review-time call
+(reject it), and a rejected/released/cancelled booking is already over.
+
+**The route does its own orchestration, not a new service function.**
+Mirrors `events/routes.py::cancel_event`'s own established shape (release +
+conditional transition + notify, all directly in the route) rather than
+inventing a deeper `booking_service.overwrite_booking`: `release_booking`
+already lives in `booking_release.py`, and `booking_service.py` cannot
+import `safety_service`/`transitions` without a real risk of circularity
+(`safety_service` already imports `with_venue_names` from
+`booking_service`) -- though in the end this route needs neither
+`safety_service` nor `venue_service`'s broader revert scope, so the
+circularity never actually came up, just the reason the orchestration
+lives in the route either way.
+
+**Notifications (AC3).** `notification_service.venue_booking_overwritten`,
+same "tell the session's current coordinator" shape as `venue_booking_blocked`
+(IS-24), with the reason text included since this is a one-off Venue Staff
+judgement call, not a scheduled maintenance window a block's own reason enum
+already names generically.
+
+**Mutation-tested by hand:** the mandatory-reason check (frontend and
+backend); the authz rule's `status == "confirmed"` gate (all four other
+statuses); and the route's own `event_status == "confirmed"` revert guard,
+isolated with a `transition` spy specifically because removing it is
+otherwise silently masked by `transition()`'s own `expected_from` race-guard
+producing the same observable outcome -- genuine defense-in-depth, not a
+single point of correctness.

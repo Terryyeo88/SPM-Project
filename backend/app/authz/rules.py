@@ -701,6 +701,25 @@ def explain_venue_booking_cancel_denial(user: Any, booking: Any) -> str:
     return f"This booking is already {booking.status}, so it can't be cancelled."
 
 
+# -- venue_booking.overwrite (Overwrite Venue Booking) -----------------------
+# Source: see VENUE_BOOKING_OVERWRITE in actions.py. Venue Staff only, same
+# DENY_NOT_FOUND-for-the-wrong-role shape as approve/reject above (a
+# booking's existence is not a non-venue-staff caller's to know). Only a
+# CONFIRMED booking can be overwritten -- unlike approve/reject (which act
+# on "pending"), this is Venue Staff correcting something already decided,
+# not deciding it the first time. A pending request is still Venue Staff's
+# own call at ordinary review time (reject it); a rejected/released/
+# cancelled booking is already over.
+
+
+def rule_venue_booking_overwrite(user: Any, booking: Any) -> Decision:
+    if not _has_role(user, "venue_staff"):
+        return Decision.DENY_NOT_FOUND
+    if not _booking_status_in(booking, "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 # -- equipment.* / equipment_request.* (Nawaz, Sprint 2: IS-18) -------------
 # Source: Check Equipment Availability -- "As a Technical Support Staff,
 # I want to check whether sufficient equipment is available...". Equipment

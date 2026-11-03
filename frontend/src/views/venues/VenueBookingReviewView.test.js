@@ -79,6 +79,72 @@ describe('VenueBookingReviewView (Venue Staff)', () => {
   })
 })
 
+describe('VenueBookingReviewView -- Overwrite Booking (Venue Staff)', () => {
+  const confirmed = { ...booking, status: 'confirmed', confirmed_at: '2026-11-01T08:00:00+00:00', hold_minutes: 1440 }
+
+  function confirmedBooking(overrides = {}) {
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(path.startsWith('/venues/bookings/') ? { ...confirmed, ...overrides } : venue),
+    )
+  }
+
+  it('offers Overwrite for a confirmed booking, not Approve/Reject', async () => {
+    confirmedBooking()
+    const wrapper = await render()
+
+    const buttonText = wrapper.findAll('button').map((b) => b.text())
+    expect(buttonText).toContain('Overwrite Booking')
+    expect(buttonText).not.toContain('Approve Booking')
+    expect(buttonText).not.toContain('Reject Booking')
+  })
+
+  it('does not offer Overwrite for a pending booking', async () => {
+    const wrapper = await render()
+    expect(wrapper.findAll('button').map((b) => b.text())).not.toContain('Overwrite Booking')
+  })
+
+  it('requires a reason before submitting', async () => {
+    confirmedBooking()
+    const wrapper = await render()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Overwrite Booking').trigger('click')
+    await wrapper.find('form').trigger('submit')
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Please give a reason for overwriting this booking.')
+  })
+
+  it('overwrites the booking and shows the event reverted to planning', async () => {
+    confirmedBooking()
+    apiPost.mockResolvedValueOnce({ ...confirmed, status: 'released', event_reverted_to_planning: true })
+    const wrapper = await render()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Overwrite Booking').trigger('click')
+    await wrapper.find('textarea').setValue('Burst pipe in the ceiling.')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/venues/bookings/booking-1/overwrite', {
+      reason: 'Burst pipe in the ceiling.',
+    })
+    expect(wrapper.text()).toContain('gone back to planning')
+  })
+
+  it('shows a different message when the event was not confirmed', async () => {
+    confirmedBooking()
+    apiPost.mockResolvedValueOnce({ ...confirmed, status: 'released', event_reverted_to_planning: false })
+    const wrapper = await render()
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Overwrite Booking').trigger('click')
+    await wrapper.find('textarea').setValue('Unsuitable.')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('book another venue')
+    expect(wrapper.text()).not.toContain('gone back to planning')
+  })
+})
+
 describe('VenueBookingReviewView -- IS-61: a permanently deleted venue', () => {
   it("shows the venue's kept name and doesn't try to load the venue", async () => {
     const gone = { ...booking, venue_id: null, venue_name: 'Old Hall', status: 'confirmed' }

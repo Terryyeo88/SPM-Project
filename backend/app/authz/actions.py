@@ -152,6 +152,15 @@ VENUE_BOOKING_REJECT = "venue_booking.reject"
 # venue_booking.cancel (IS-9): the event's assigned coordinator cancels one
 # pending or confirmed booking; the session's other bookings stay as they are.
 VENUE_BOOKING_CANCEL = "venue_booking.cancel"
+# venue_booking.overwrite (Overwrite Venue Booking): Venue Staff directly
+# invalidate a CONFIRMED booking with a mandatory reason -- "the event will
+# not have an unsuitable venue". Distinct from venue_booking.cancel (the
+# coordinator's own action, no reason requirement, no event-status
+# consequence) and from venue.block (targets a VENUE for a time window):
+# this is Venue Staff unilaterally pulling ONE booking out from under a
+# possibly-already-confirmed event, so it also reverts the event -- see
+# venues/routes.py::overwrite_venue_booking_route.
+VENUE_BOOKING_OVERWRITE = "venue_booking.overwrite"
 
 # -- equipment (Nawaz, Sprint 2: IS-18 Check Equipment Availability) --------
 # Source: "As a Technical Support Staff, I want to check whether sufficient

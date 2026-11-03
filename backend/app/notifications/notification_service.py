@@ -24,6 +24,11 @@ Two halves:
     block_service._notify_coordinator_venue_blocked  -> venue_booking_blocked
     change_request_service._notify_change_requested  -> event_change_requested
 
+  Overwrite Venue Booking -- Venue Staff directly invalidate a confirmed
+  booking:
+
+    venues.routes._notify_booking_overwritten        -> venue_booking_overwritten
+
   IS-23 (Notification (Event Organizer)) -- the "Event Organizer" section:
 
     event_service._notify_organizer                  -> organizer_event_news
@@ -154,6 +159,9 @@ _LIVE_VENUE_BOOKING_STATUSES = ("pending", "confirmed")
 # IS-24 (Notification (Event Coordinator)).
 EVENT_CHANGE_REQUESTED = "event_change_requested"
 VENUE_BOOKING_BLOCKED = "venue_booking_blocked"
+# Overwrite Venue Booking: Venue Staff directly invalidated a confirmed
+# booking (distinct from VENUE_BOOKING_BLOCKED, which is venue-block-driven).
+VENUE_BOOKING_OVERWRITTEN = "venue_booking_overwritten"
 
 # IS-23 (Notification (Event Organizer)).
 EVENT_REQUEST_SUBMITTED = "event_request_submitted"
@@ -285,6 +293,23 @@ def venue_booking_blocked(released_booking: dict) -> None:
             event,
             VENUE_BOOKING_BLOCKED,
             f'The venue for "{event["name"]}" was blocked, so its booking was released. Book another venue.',
+        )
+
+
+@_best_effort
+def venue_booking_overwritten(overwritten_booking: dict, reason: str) -> None:
+    """Overwrite Venue Booking AC3 ("trigger stakeholder notifications"):
+    Venue Staff directly invalidated a confirmed booking. The session's
+    coordinator is told why, and to book another venue -- same shape as
+    venue_booking_blocked, with the reason text included since this is a
+    one-off Venue Staff decision, not a scheduled maintenance window a
+    block's own reason enum already names generically."""
+    event = _event(overwritten_booking.get("event_id"))
+    if event:
+        _notify_coordinator_of(
+            event,
+            VENUE_BOOKING_OVERWRITTEN,
+            f'Venue Staff overwrote the venue booking for "{event["name"]}": {reason}. Book another venue.',
         )
 
 
