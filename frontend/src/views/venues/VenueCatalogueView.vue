@@ -82,7 +82,7 @@ onMounted(loadVenues)
                 <span class="row-name">{{ venue.name }}</span>
                 <span class="row-meta">{{ venue.location }} &middot; capacity {{ venue.capacity }}</span>
               </div>
-              <span class="status" :class="`status-${venue.status}`">{{ venue.status }}</span>
+              <span class="status cs-pill" :class="`status-${venue.status} cs-status-${venue.status}`">{{ venue.status }}</span>
             </router-link>
           </template>
         </div>
@@ -92,58 +92,46 @@ onMounted(loadVenues)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 20px; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-5); }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); flex-wrap: wrap; }
 .add-btn {
-  min-height: 36px; padding: 0 16px; border-radius: 4px; background: #2568e8; color: #fff;
-  font-size: 13px; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center;
+  min-height: 36px; padding: 0 var(--cs-space-4); border-radius: var(--cs-radius-sm); background: var(--cs-signal); color: #fff;
+  font-size: var(--cs-text-sm); font-weight: 700; text-decoration: none; display: inline-flex; align-items: center;
 }
-.deleted-message { margin: 0; padding: 10px 14px; background: #eaf5ec; color: #2f6b3f; border-radius: 4px; font-size: 14px; }
-.tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.add-btn:hover { background: var(--cs-signal-strong); }
+.deleted-message { margin: 0; padding: var(--cs-space-2) var(--cs-space-3); background: var(--cs-available-tint); color: var(--cs-available); border-radius: var(--cs-radius-sm); font-size: var(--cs-text-base); }
+.tabs { display: flex; align-items: center; gap: var(--cs-space-2); flex-wrap: wrap; }
 .tab {
-  border: 1px solid #b0b0b0;
-  background: #ffffff;
-  color: #555555;
-  font-size: 13px;
+  border: 1px solid var(--cs-line);
+  background: var(--cs-surface);
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
   font-weight: 600;
-  padding: 7px 16px;
-  border-radius: 20px;
+  padding: 7px var(--cs-space-4);
+  border-radius: var(--cs-radius-full);
   cursor: pointer;
   text-transform: capitalize;
 }
-.tab.active { border-color: #444444; background: #444444; color: #ffffff; }
-.list { background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 4px 18px; box-sizing: border-box; }
-.message { margin: 0; padding: 16px 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
+.tab.active { border-color: var(--cs-ink); background: var(--cs-ink); color: #ffffff; }
+.list { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: 4px 18px; box-sizing: border-box; }
+.message { margin: 0; padding: var(--cs-space-4) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 0;
-  border-bottom: 1px dashed #e2e2e2;
+  gap: var(--cs-space-3);
+  padding: var(--cs-space-4) 0;
+  border-bottom: 1px solid var(--cs-line);
   text-decoration: none;
   color: inherit;
 }
 .row:last-child { border-bottom: none; }
 .row:hover .row-name { text-decoration: underline; }
 .row-main { display: flex; flex-direction: column; gap: 3px; }
-.row-name { font-size: 14px; font-weight: 600; color: #2a2a2a; }
-.row-meta { font-size: 12px; color: #8a8a8a; }
-.status {
-  font-size: 11px;
-  font-weight: 600;
-  color: #6a6a6a;
-  background: #f0f0f0;
-  border-radius: 10px;
-  padding: 3px 10px;
-  text-transform: capitalize;
-  white-space: nowrap;
-}
-.status-available { background: #d1fae5; color: #067647; }
-.status-occupied { background: #fee2e2; color: #b42318; }
-.status-maintenance { background: #fef3c7; color: #92400e; }
+.row-name { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.row-meta { font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
 </style>

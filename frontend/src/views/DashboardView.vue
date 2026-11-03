@@ -33,12 +33,13 @@ const isSafetyOfficer = computed(() => hasAnyRole(auth.roles, [ROLES.SAFETY_OFFI
 </script>
 
 <template>
-  <div class="page">
+  <div class="cs-page">
     <AppNavBar />
 
-    <main class="content">
-      <div class="container">
+    <main class="cs-content">
+      <div class="cs-container">
         <section v-if="auth.profile" class="welcome">
+          <span class="cs-eyebrow">Dashboard</span>
           <span class="title">Welcome, {{ auth.profile.name }}</span>
         </section>
         <!-- Distinct from the "nothing built for your role" case below: this
@@ -78,72 +79,56 @@ const isSafetyOfficer = computed(() => hasAnyRole(auth.roles, [ROLES.SAFETY_OFFI
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: #eeeeee;
-}
-.content {
-  flex: 1 1 auto;
-  padding: 32px 16px;
-  display: flex;
-  justify-content: center;
-}
-.container {
-  width: 100%;
-  max-width: 880px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
 .welcome {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--cs-space-2);
 }
 .title {
-  font-size: 20px;
+  font-family: var(--cs-font-display);
+  font-size: var(--cs-text-xl);
   font-weight: 700;
-  color: #1f1f1f;
-}
-.subtitle {
-  font-size: 13px;
-  color: #8a8a8a;
+  color: var(--cs-ink);
 }
 .sections {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  gap: var(--cs-space-3);
 }
 .section-card {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #ffffff;
-  border: 1px dashed #9a9a9a;
-  border-radius: 6px;
-  padding: 20px 18px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-md);
+  padding: var(--cs-space-5) var(--cs-space-4);
   text-decoration: none;
-  color: #2a2a2a;
-  font-size: 14px;
+  color: var(--cs-ink);
+  font-size: var(--cs-text-base);
   font-weight: 600;
+  transition: border-color 120ms ease;
 }
 .section-card:hover {
-  border-style: solid;
-  border-color: #444444;
+  border-color: var(--cs-signal);
+}
+.section-card:hover .section-arrow {
+  color: var(--cs-signal);
 }
 .section-arrow {
-  color: #9a9a9a;
+  color: var(--cs-line-strong);
+  font-family: var(--cs-font-display);
+  transition: color 120ms ease;
 }
 .no-sections {
   margin: 0;
-  color: #666666;
-  font-size: 13px;
+  color: var(--cs-ink-soft);
+  font-size: var(--cs-text-sm);
 }
 .load-error {
   margin: 0;
-  color: #c0392b;
-  font-size: 13px;
+  color: var(--cs-occupied);
+  font-size: var(--cs-text-sm);
 }
 </style>

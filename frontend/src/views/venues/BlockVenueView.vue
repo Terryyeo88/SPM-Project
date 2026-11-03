@@ -166,5 +166,5 @@ onMounted(load)
 
 <style scoped src="../../styles/event-form.css"></style>
 <style scoped>
-.released-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
+.released-list { display: flex; flex-direction: column; gap: var(--cs-space-2); margin: var(--cs-space-3) 0; padding: 0; list-style: none; }
 </style>

@@ -122,28 +122,28 @@ function entryLabel(entry) {
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 16px; }
-.back-link { align-self: flex-start; font-size: 13px; color: #666666; text-decoration: underline; }
-.header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.view-tabs { display: flex; gap: 6px; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-4); }
+.back-link { align-self: flex-start; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); text-decoration: underline; }
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); flex-wrap: wrap; }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.view-tabs { display: flex; gap: var(--cs-space-2); }
 .tab {
-  border: 1px solid #b0b0b0; background: #ffffff; color: #555555; font-size: 12px; font-weight: 600;
-  padding: 6px 14px; border-radius: 16px; cursor: pointer; text-transform: capitalize;
+  border: 1px solid var(--cs-line); background: var(--cs-surface); color: var(--cs-ink-soft); font-size: var(--cs-text-xs); font-weight: 600;
+  padding: 6px var(--cs-space-4); border-radius: var(--cs-radius-full); cursor: pointer; text-transform: capitalize;
 }
-.tab.active { border-color: #444444; background: #444444; color: #ffffff; }
-.nav-row { display: flex; align-items: center; gap: 12px; }
+.tab.active { border-color: var(--cs-ink); background: var(--cs-ink); color: #ffffff; }
+.nav-row { display: flex; align-items: center; gap: var(--cs-space-3); }
 .nav-btn, .today-btn {
-  height: 30px; border: 1px solid #d8d8d8; border-radius: 4px; background: #ffffff; color: #555555; cursor: pointer;
-  font-size: 13px;
+  height: 30px; border: 1px solid var(--cs-line); border-radius: var(--cs-radius-sm); background: var(--cs-surface); color: var(--cs-ink-soft); cursor: pointer;
+  font-size: var(--cs-text-sm);
 }
 .nav-btn { width: 30px; }
-.today-btn { padding: 0 12px; margin-left: auto; font-weight: 600; }
-.range-label { font-size: 14px; font-weight: 700; color: #222222; }
-.hours-note { margin: 0; font-size: 12px; color: #8a8a8a; }
-.message { margin: 0; padding: 16px 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
+.today-btn { padding: 0 var(--cs-space-3); margin-left: auto; font-weight: 600; }
+.range-label { font-size: var(--cs-text-base); font-weight: 700; color: var(--cs-ink); }
+.hours-note { margin: 0; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+.message { margin: 0; padding: var(--cs-space-4) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
 
 </style>

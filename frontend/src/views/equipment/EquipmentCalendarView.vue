@@ -53,7 +53,7 @@ onMounted(load)
 // The venue calendar's "confirmed" colours: a reservation is a confirmed
 // allocation of this unit.
 const STATES = {
-  reserved: { label: 'Reserved', color: '#2f6b3f', background: '#eaf5ec' },
+  reserved: { label: 'Reserved', color: 'var(--cs-available)', background: 'var(--cs-available-tint)' },
 }
 
 function entryLabel(entry) {
@@ -77,7 +77,7 @@ function entryLabel(entry) {
               <h1 class="title">{{ unit.asset_tag }}</h1>
               <p class="subtitle">{{ unit.type }}</p>
             </div>
-            <span class="status" :class="`status-${unit.status}`">{{ unitStatusLabel(unit.status) }}</span>
+            <span class="status cs-pill" :class="`status-${unit.status} cs-status-${unit.status}`">{{ unitStatusLabel(unit.status) }}</span>
           </div>
 
           <section class="card" aria-labelledby="profile-heading">
@@ -116,38 +116,32 @@ function entryLabel(entry) {
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 16px; }
-.back-link { align-self: flex-start; font-size: 13px; color: #1f5fae; text-decoration: none; }
-.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
-.subtitle { margin: 2px 0 0; font-size: 13px; color: #6a6a6a; text-transform: capitalize; }
-.message { margin: 0; padding: 8px 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-4); }
+.back-link { align-self: flex-start; font-size: var(--cs-text-sm); color: var(--cs-signal); text-decoration: none; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-3); }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.subtitle { margin: 2px 0 0; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); text-transform: capitalize; }
+.message { margin: 0; padding: var(--cs-space-2) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
 .capitalize { text-transform: capitalize; }
 
 .card {
-  background: #ffffff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 16px 18px; box-sizing: border-box;
-  display: flex; flex-direction: column; gap: 12px;
+  background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4) var(--cs-space-5); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: var(--cs-space-3);
 }
-.card-title { margin: 0; font-size: 14px; font-weight: 700; color: #1f1f1f; }
-.details { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; }
-.details dt { color: #8a8a8a; }
-.details dd { margin: 0; color: #2a2a2a; }
+.card-title { margin: 0; font-size: var(--cs-text-sm); font-weight: 700; color: var(--cs-ink); }
+.details { display: grid; grid-template-columns: 90px 1fr; gap: 6px var(--cs-space-3); margin: 0; font-size: var(--cs-text-sm); }
+.details dt { color: var(--cs-ink-soft); }
+.details dd { margin: 0; color: var(--cs-ink); }
 
-.nav-row { display: flex; align-items: center; gap: 12px; }
+.nav-row { display: flex; align-items: center; gap: var(--cs-space-3); }
 .nav-btn, .today-btn {
-  height: 30px; border: 1px solid #d8d8d8; border-radius: 4px; background: #ffffff; color: #555555; cursor: pointer;
-  font-size: 13px;
+  height: 30px; border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); background: var(--cs-surface); color: var(--cs-ink-soft); cursor: pointer;
+  font-size: var(--cs-text-sm);
 }
 .nav-btn { width: 30px; }
-.today-btn { padding: 0 12px; margin-left: auto; font-weight: 600; }
-.range-label { font-size: 14px; font-weight: 700; color: #222222; }
-
-/* Same pill as EquipmentDetailView.vue. */
-.status { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 3px 10px; white-space: nowrap; }
-.status-available { color: #0f6e6a; background: #ddf3f1; }
-.status-maintenance { color: #8a6d00; background: #fff4c2; }
-.status-retired { color: #6a6a6a; background: #f0f0f0; }
+.today-btn { padding: 0 var(--cs-space-3); margin-left: auto; font-weight: 600; }
+.range-label { font-size: var(--cs-text-base); font-weight: 700; color: var(--cs-ink); }
 </style>

@@ -127,10 +127,10 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page">
+  <div class="page cs-page">
     <AppNavBar />
-    <main class="content">
-      <div class="container">
+    <main class="content cs-content">
+      <div class="container cs-container cs-container--narrow">
         <router-link :to="cancelLink()" class="back-link">&larr; {{ isEdit ? 'Back to venue' : 'Venues' }}</router-link>
         <h1 class="title">{{ isEdit ? 'Edit venue' : 'Add a venue' }}</h1>
 
@@ -263,45 +263,44 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
-.back-link { font-size: 13px; color: #2568e8; text-decoration: none; }
-.title { margin: 0; font-size: 20px; font-weight: 700; color: #1f1f1f; }
+.container { max-width: 720px; }
+.back-link { font-size: var(--cs-text-sm); color: var(--cs-signal); text-decoration: none; }
+.title { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); }
 .card {
-  background: #fff; border: 1px solid #d6d6d6; border-radius: 6px; padding: 20px;
-  display: flex; flex-direction: column; gap: 20px;
+  background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-5);
+  display: flex; flex-direction: column; gap: var(--cs-space-5);
 }
 /* Sections: the bold headings are what the eye lands on. */
-.section { display: flex; flex-direction: column; gap: 14px; }
-.section + .section { padding-top: 20px; border-top: 1px solid #ececec; }
-.section-title { margin: 0; font-size: 15px; font-weight: 700; color: #222; }
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.section { display: flex; flex-direction: column; gap: var(--cs-space-3); }
+.section + .section { padding-top: var(--cs-space-5); border-top: 1px solid var(--cs-line); }
+.section-title { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--cs-space-3); }
 .field { display: flex; flex-direction: column; gap: 6px; border: none; padding: 0; margin: 0; min-width: 0; }
 /* Field labels and group names: regular weight, normal case. */
-.field > label, legend { font-size: 13px; font-weight: 400; color: #444; padding: 0; }
-.required { color: #b42318; }
+.field > label, legend { font-size: var(--cs-text-sm); font-weight: 400; color: var(--cs-ink-soft); padding: 0; }
+.required { color: var(--cs-occupied); }
 input[type="text"], input[type="number"] {
-  box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid #b8b8b8; border-radius: 4px;
-  font: inherit; font-size: 14px; background: #fff;
+  box-sizing: border-box; width: 100%; padding: var(--cs-space-2) var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
+  font: inherit; font-size: var(--cs-text-base); background: var(--cs-surface);
 }
-.options { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 16px; }
+.options { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--cs-space-2) var(--cs-space-4); }
 .check {
-  display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 400; color: #2a2a2a;
+  display: flex; align-items: center; gap: var(--cs-space-2); font-size: var(--cs-text-base); font-weight: 400; color: var(--cs-ink);
   text-transform: capitalize; cursor: pointer;
 }
-.hint { margin: 0; font-size: 12px; color: #7a7a7a; }
-.field-error { margin: 0; font-size: 12px; color: #b42318; }
-input[aria-invalid="true"] { border-color: #b42318; }
-.message { margin: 0; font-size: 14px; color: #8a8a8a; }
-.error { color: #b42318; }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.hint { margin: 0; font-size: var(--cs-text-xs); color: var(--cs-ink-soft); }
+.field-error { margin: 0; font-size: var(--cs-text-xs); color: var(--cs-occupied); }
+input[aria-invalid="true"] { border-color: var(--cs-occupied); }
+.message { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error { color: var(--cs-occupied); }
+.actions { display: flex; gap: var(--cs-space-3); flex-wrap: wrap; }
 .btn {
-  min-height: 38px; padding: 0 16px; border-radius: 4px; font: inherit; font-size: 13px; font-weight: 700;
+  min-height: 38px; padding: 0 var(--cs-space-4); border-radius: var(--cs-radius-sm); font: inherit; font-size: var(--cs-text-sm); font-weight: 700;
   cursor: pointer; display: inline-flex; align-items: center; text-decoration: none;
 }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
-.primary { border: none; background: #2568e8; color: #fff; }
-.neutral { border: 1px solid #b8b8b8; background: #fff; color: #444; font-weight: 400; }
+.primary { border: none; background: var(--cs-signal); color: #fff; }
+.primary:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.neutral { border: 1px solid var(--cs-line-strong); background: var(--cs-surface); color: var(--cs-ink); font-weight: 400; }
 @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
 </style>

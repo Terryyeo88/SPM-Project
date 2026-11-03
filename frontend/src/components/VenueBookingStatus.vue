@@ -141,7 +141,7 @@ watch(() => props.event.id, () => {
       <ul v-else class="bookings">
         <li v-for="booking in bookings" :key="booking.id" class="booking" :data-booking="booking.id">
           <div class="latest">
-            <span class="status" :class="`status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
+            <span class="status cs-pill" :class="`status-${booking.status} cs-status-${booking.status}`">{{ statusLabel(booking.status) }}</span>
             <span v-if="venueName(booking)" class="venue-name">{{ venueName(booking) }}</span>
             <router-link :to="{ name: 'venue-booking-review', params: { bookingId: booking.id } }" class="link">
               View booking
@@ -204,50 +204,44 @@ watch(() => props.event.id, () => {
 </template>
 
 <style scoped>
-.venue-booking { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid #dcdcdc; }
-h2 { margin: 0; font-size: 15px; color: #222; }
-.muted { color: #6b6b6b; }
-.small { font-size: 13px; margin: 0; }
-.error { color: #a33f3f; margin: 0; }
-.success { color: #2f6b3f; margin: 0; font-size: 13px; }
-.bookings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.booking { display: flex; flex-direction: column; gap: 6px; }
-.latest { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.venue-name { font-size: 13px; font-weight: 600; color: #2a2a2a; }
-.link { font-size: 13px; color: #2568e8; text-decoration: underline; }
-.rejection-reason { margin: 0; font-size: 13px; color: #a33f3f; }
-.released { color: #7a4a06; }
-
-.status { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 4px 12px; background: #eee; color: #5a5a5a; }
-.status-pending { background: #f7efe1; color: #8a5a12; }
-.status-confirmed { background: #eaf5ec; color: #2f6b3f; }
-.status-rejected { background: #f5e6e6; color: #a33f3f; }
-.status-released { background: #eeeeee; color: #6a6a6a; }
-.status-cancelled { background: #fcebdd; color: #a3521b; }
+.venue-booking { display: flex; flex-direction: column; gap: var(--cs-space-3); padding-top: var(--cs-space-4); border-top: 1px solid var(--cs-line); }
+h2 { margin: 0; font-size: var(--cs-text-md); font-family: var(--cs-font-display); color: var(--cs-ink); }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-sm); margin: 0; }
+.error { color: var(--cs-occupied); margin: 0; }
+.success { color: var(--cs-available); margin: 0; font-size: var(--cs-text-sm); }
+.bookings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--cs-space-3); }
+.booking { display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.latest { display: flex; align-items: center; gap: var(--cs-space-3); flex-wrap: wrap; }
+.venue-name { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
+.link { font-size: var(--cs-text-sm); color: var(--cs-signal); text-decoration: underline; }
+.rejection-reason { margin: 0; font-size: var(--cs-text-sm); color: var(--cs-occupied); }
+.released { color: var(--cs-neutral); }
 
 .panel {
-  display: flex; flex-direction: column; gap: 8px;
-  background: #fbf1f1; border: 1px solid #d9a3a3; border-radius: 6px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: var(--cs-space-2);
+  background: var(--cs-occupied-tint); border: 1px solid var(--cs-occupied); border-radius: var(--cs-radius-md); padding: var(--cs-space-3) var(--cs-space-4);
 }
-.panel label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6a6a6a; }
+.panel label { font-size: var(--cs-text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-ink-soft); }
 .panel textarea {
-  box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid #b8b8b8; border-radius: 4px;
-  background: #fff; font: inherit; font-size: 14px; resize: vertical;
+  box-sizing: border-box; width: 100%; padding: var(--cs-space-2) var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface); font: inherit; font-size: var(--cs-text-base); resize: vertical;
 }
-.panel-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.panel-actions { display: flex; gap: var(--cs-space-3); flex-wrap: wrap; }
 
 .btn {
-  min-height: 34px; padding: 0 14px; border-radius: 4px; font: inherit; font-size: 13px; font-weight: 700;
-  cursor: pointer; background: #fff;
+  min-height: 34px; padding: 0 var(--cs-space-4); border-radius: var(--cs-radius-sm); font: inherit; font-size: var(--cs-text-sm); font-weight: 700;
+  cursor: pointer; background: var(--cs-surface);
 }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
-.reject { border: 1px solid #a33f3f; color: #a33f3f; }
-.reject-solid { border: none; background: #a33f3f; color: #fff; }
-.neutral { border: 1px solid #b8b8b8; color: #444; }
+.reject { border: 1px solid var(--cs-occupied); color: var(--cs-occupied); }
+.reject-solid { border: none; background: var(--cs-occupied); color: #fff; }
+.neutral { border: 1px solid var(--cs-line-strong); color: var(--cs-ink); }
 
 .btn.small.primary {
-  align-self: flex-start; min-height: 38px; padding: 0 16px; border: none; border-radius: 4px;
-  background: #2568e8; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  align-self: flex-start; min-height: 38px; padding: 0 var(--cs-space-4); border: none; border-radius: var(--cs-radius-sm);
+  background: var(--cs-signal); color: #fff; font: inherit; font-size: var(--cs-text-sm); font-weight: 700;
   text-decoration: none; display: inline-flex; align-items: center;
 }
+.btn.small.primary:hover { background: var(--cs-signal-strong); }
 </style>

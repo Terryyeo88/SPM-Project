@@ -38,7 +38,7 @@ onMounted(() => {
   <header class="navbar">
     <div class="navbar-inner">
       <router-link :to="{ name: 'dashboard' }" class="brand">
-        <span class="logo">LOGO</span>
+        <span class="logo" aria-hidden="true">CS</span>
         <span class="brand-name">ConnectSphere</span>
       </router-link>
 
@@ -90,102 +90,109 @@ onMounted(() => {
 
 <style scoped>
 .navbar {
-  background: #ffffff;
-  border-bottom: 1px dashed #9a9a9a;
+  background: var(--cs-surface);
+  border-bottom: 1px solid var(--cs-line);
 }
 .navbar-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 var(--cs-space-4);
   min-height: 64px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: var(--cs-space-6);
   flex-wrap: wrap;
   box-sizing: border-box;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--cs-space-2);
   text-decoration: none;
 }
+/* The corner-tick registration mark, same device as .cs-card, used here
+   at the mark's own natural scale -- a small square instead of a card --
+   so the brand itself carries the same "floor-plan sheet" motif that
+   recurs through every bounded panel in the app. */
 .logo {
-  width: 32px;
-  height: 32px;
-  border: 1px dashed #9a9a9a;
-  border-radius: 4px;
-  background: #f5f5f5;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-ink);
+  color: var(--cs-paper);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 8px;
-  color: #9a9a9a;
-  letter-spacing: 0.05em;
+  font-family: var(--cs-font-display);
+  font-weight: 700;
+  font-size: 14px;
 }
 .brand-name {
-  font-size: 16px;
+  font-family: var(--cs-font-display);
+  font-size: 18px;
   font-weight: 700;
-  color: #222222;
+  color: var(--cs-ink);
+  letter-spacing: -0.01em;
 }
 .links {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--cs-space-1);
   flex-wrap: wrap;
 }
 .link {
-  font-size: 13px;
+  font-size: var(--cs-text-sm);
   font-weight: 600;
-  color: #666666;
+  color: var(--cs-ink-soft);
   text-decoration: none;
   padding: 7px 12px;
-  border-radius: 4px;
+  border-radius: var(--cs-radius-sm);
 }
 .link:hover {
-  background: #f0f0f0;
-  color: #222222;
+  background: var(--cs-paper);
+  color: var(--cs-ink);
 }
 .link.active {
-  background: #444444;
-  color: #ffffff;
+  background: var(--cs-ink);
+  color: var(--cs-paper);
 }
 .account {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--cs-space-3);
   margin-left: auto;
 }
 .role-badge {
+  font-family: var(--cs-font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #6a6a6a;
-  border: 1px solid #d8d8d8;
-  border-radius: 12px;
+  color: var(--cs-ink-soft);
+  border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-full);
   padding: 4px 10px;
-  background: #f7f7f7;
+  background: var(--cs-paper);
 }
 .avatar {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid #9a9a9a;
-  background: #f5f5f5;
-  color: #6a6a6a;
+  border: 1px solid var(--cs-line);
+  background: var(--cs-paper);
+  color: var(--cs-ink-soft);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .avatar:hover,
 .avatar.router-link-active {
-  border-color: #2568e8;
-  color: #2568e8;
+  border-color: var(--cs-signal);
+  color: var(--cs-signal);
 }
 .avatar:focus-visible {
-  outline: 2px solid #2568e8;
+  outline: 2px solid var(--cs-signal);
   outline-offset: 2px;
 }
 .bell {
@@ -193,18 +200,18 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  color: #6a6a6a;
+  color: var(--cs-ink-soft);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .bell:hover,
 .bell.router-link-active {
-  background: #f0f0f0;
-  color: #2568e8;
+  background: var(--cs-paper);
+  color: var(--cs-signal);
 }
 .bell:focus-visible {
-  outline: 2px solid #2568e8;
+  outline: 2px solid var(--cs-signal);
   outline-offset: 2px;
 }
 .bell-count {
@@ -215,8 +222,8 @@ onMounted(() => {
   height: 18px;
   box-sizing: border-box;
   padding: 0 5px;
-  border-radius: 9px;
-  background: #c0362c;
+  border-radius: var(--cs-radius-full);
+  background: var(--cs-occupied);
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;

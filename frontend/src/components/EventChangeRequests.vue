@@ -302,7 +302,7 @@ watch(() => props.event.id, () => {
             <template v-if="allSessions.length > 1">Session {{ sessionNumber(change.event_id) || '?' }} · </template>
             Requested {{ when(change.created_at) }}
           </span>
-          <span class="badge" :class="`badge-${change.status}`">{{ CHANGE_STATUS_LABELS[change.status] ?? change.status }}</span>
+          <span class="badge cs-pill" :class="`badge-${change.status} cs-status-${change.status}`">{{ CHANGE_STATUS_LABELS[change.status] ?? change.status }}</span>
         </div>
 
         <table class="diff">
@@ -372,39 +372,35 @@ watch(() => props.event.id, () => {
 <style scoped src="../styles/event-form.css"></style>
 <style scoped>
 .card-header { align-items: flex-start; }
-.muted { color: #6b6b6b; }
-.small { font-size: 13px; margin: 4px 0 0; }
-.notice { margin: 0; padding: 10px 14px; border-radius: 4px; background: #f7efe1; color: #8a5a12; font-size: 13px; }
-.request-form, .reject-form { display: flex; flex-direction: column; gap: 14px; }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-sm); margin: 4px 0 0; }
+.notice { margin: 0; padding: var(--cs-space-3) var(--cs-space-4); border-radius: var(--cs-radius-sm); background: var(--cs-pending-tint); color: var(--cs-pending); font-size: var(--cs-text-sm); }
+.request-form, .reject-form { display: flex; flex-direction: column; gap: var(--cs-space-4); }
 /* Inside the .review button row: take the whole row, so the reason box is as
    wide as the change table and impact list above it. */
 .reject-form { flex: 1 1 100%; }
-.actions, .review { display: flex; flex-wrap: wrap; gap: 10px; }
-.message { margin: 0; font-size: 14px; }
-.error { color: #b42318; }
-.success { color: #2f6b3f; }
+.actions, .review { display: flex; flex-wrap: wrap; gap: var(--cs-space-3); }
+.message { margin: 0; font-size: var(--cs-text-base); }
+.error { color: var(--cs-occupied); }
+.success { color: var(--cs-available); }
 
-.change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.change { border: 1px solid #d0d0d0; border-radius: 6px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-.change-pending { border-color: #d9b779; }
-.change-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.change-title { font-size: 13px; font-weight: 600; color: #333; }
-.badge { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 3px 10px; background: #eee; color: #5a5a5a; }
-.badge-pending { background: #f7efe1; color: #8a5a12; }
-.badge-approved { background: #eaf5ec; color: #2f6b3f; }
-.badge-rejected { background: #f5e6e6; color: #a33f3f; }
+.change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--cs-space-4); }
+.change { border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-4); display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.change-pending { border-color: var(--cs-pending); }
+.change-header { display: flex; justify-content: space-between; align-items: center; gap: var(--cs-space-3); flex-wrap: wrap; }
+.change-title { font-size: var(--cs-text-sm); font-weight: 600; color: var(--cs-ink); }
 
-.impact { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-left: 3px solid #b7791f; border-radius: 4px; background: #fdf6e9; font-size: 13px; }
-.impact-title { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #8a5a12; }
+.impact { display: flex; flex-direction: column; gap: var(--cs-space-2); padding: var(--cs-space-3) var(--cs-space-4); border-left: 3px solid var(--cs-pending); border-radius: var(--cs-radius-sm); background: var(--cs-pending-tint); font-size: var(--cs-text-sm); }
+.impact-title { font-size: var(--cs-text-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-pending); }
 .impact ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .impact > ul { padding-left: 0; list-style: none; }
-.impact-kind { margin-left: 8px; font-size: 11px; font-weight: 600; border-radius: 8px; padding: 1px 8px; background: #eee; color: #5a5a5a; }
-.impact-conflict .impact-kind { background: #f5e6e6; color: #a33f3f; }
-.diff { width: 100%; border-collapse: collapse; font-size: 13px; }
-.diff th, .diff td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ececec; vertical-align: top; overflow-wrap: anywhere; }
-.diff thead th { font-size: 12px; color: #6a6a6a; font-weight: 600; }
-.diff tbody th { font-weight: 600; color: #444; width: 30%; }
-.diff .to { font-weight: 600; color: #1f1f1f; }
+.impact-kind { margin-left: var(--cs-space-2); font-size: var(--cs-text-xs); font-weight: 600; border-radius: var(--cs-radius-full); padding: 1px 8px; background: var(--cs-neutral-tint); color: var(--cs-neutral); }
+.impact-conflict .impact-kind { background: var(--cs-occupied-tint); color: var(--cs-occupied); }
+.diff { width: 100%; border-collapse: collapse; font-size: var(--cs-text-sm); }
+.diff th, .diff td { text-align: left; padding: 6px var(--cs-space-2); border-bottom: 1px solid var(--cs-line); vertical-align: top; overflow-wrap: anywhere; }
+.diff thead th { font-size: var(--cs-text-xs); color: var(--cs-ink-soft); font-weight: 600; }
+.diff tbody th { font-weight: 600; color: var(--cs-ink); width: 30%; }
+.diff .to { font-weight: 600; color: var(--cs-ink); }
 
 @media (max-width: 640px) {
   .card-header { flex-direction: column; }

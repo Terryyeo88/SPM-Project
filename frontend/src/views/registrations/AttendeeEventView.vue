@@ -154,10 +154,10 @@ onMounted(load)
             <p v-if="message" class="success" role="status">{{ message }}</p>
 
             <template v-if="mine && mine.status === 'confirmed'">
-              <div class="state state-confirmed">&#10003; You're registered</div>
+              <div class="state state-confirmed cs-pill cs-pill--available">&#10003; You're registered</div>
             </template>
             <template v-else-if="mine && mine.status === 'waitlisted'">
-              <div class="state state-waitlisted">
+              <div class="state state-waitlisted cs-pill cs-pill--pending">
                 You're on the waiting list<template v-if="mine.waitlist_position"> — position #{{ mine.waitlist_position }}</template>
               </div>
             </template>
@@ -215,55 +215,57 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page { min-height: 100vh; display: flex; flex-direction: column; background: #eeeeee; }
-.content { flex: 1 1 auto; padding: 32px 16px; display: flex; justify-content: center; }
-.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 20px; }
-.back-link { align-self: flex-start; font-size: 13px; color: #666; }
-.message { margin: 0; font-size: 14px; color: #8a8a8a; }
-.error, .field-error { color: #a33f3f; }
-.field-error { margin: 0; font-size: 12px; }
-.success { margin: 0; font-size: 13px; color: #2f6b3f; }
-.muted { color: #6b6b6b; }
-.small { font-size: 12px; margin: 0; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.content { flex: 1 1 auto; padding: var(--cs-space-6) var(--cs-space-4) var(--cs-space-8); display: flex; justify-content: center; }
+.container { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--cs-space-5); }
+.back-link { align-self: flex-start; font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
+.message { margin: 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
+.error, .field-error { color: var(--cs-occupied); }
+.field-error { margin: 0; font-size: var(--cs-text-xs); }
+.success { margin: 0; font-size: var(--cs-text-sm); color: var(--cs-available); }
+.muted { color: var(--cs-ink-soft); }
+.small { font-size: var(--cs-text-xs); margin: 0; }
 .center { text-align: center; }
 
-.layout { display: flex; align-items: flex-start; gap: 28px; }
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-h1 { margin: 0; font-size: 24px; font-weight: 800; color: #1f1f1f; line-height: 1.3; }
-.meta { display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; color: #666; }
+.layout { display: flex; align-items: flex-start; gap: var(--cs-space-6); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--cs-space-4); }
+h1 { margin: 0; font-size: var(--cs-text-xl); font-family: var(--cs-font-display); color: var(--cs-ink); line-height: 1.3; }
+.meta { display: flex; flex-wrap: wrap; gap: var(--cs-space-4); font-size: var(--cs-text-sm); color: var(--cs-ink-soft); }
 .meta-item { display: flex; align-items: center; gap: 6px; }
-hr { border: none; height: 1px; background: #e2e2e2; margin: 0; }
-.about { display: flex; flex-direction: column; gap: 8px; }
-.about p { margin: 0; font-size: 14px; line-height: 1.65; color: #3a3a3a; }
-.label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8a8a8a; }
+hr { border: none; height: 1px; background: var(--cs-line); margin: 0; }
+.about { display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.about p { margin: 0; font-size: var(--cs-text-base); line-height: 1.65; color: var(--cs-ink); }
+.label { font-size: var(--cs-text-xs); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--cs-ink-soft); }
 
 .card {
-  flex: 0 0 260px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px;
-  background: #fff; border: 1px dashed #9a9a9a; border-radius: 6px; padding: 20px;
+  flex: 0 0 260px; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--cs-space-3);
+  background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-5);
 }
 .spots { display: flex; flex-direction: column; gap: 4px; }
-.spots-count { font-size: 14px; font-weight: 600; color: #2a2a2a; }
-.bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 4px; }
-.bar-fill { height: 100%; background: #2568e8; }
+.spots-count { font-size: var(--cs-text-base); font-weight: 600; color: var(--cs-ink); }
+.bar { height: 6px; background: var(--cs-neutral-tint); border-radius: var(--cs-radius-full); overflow: hidden; margin-top: 4px; }
+.bar-fill { height: 100%; background: var(--cs-signal); }
 
-.state { border-radius: 4px; padding: 10px 12px; font-size: 13px; font-weight: 600; }
-.state-confirmed { background: #eaf5ec; border: 1px dashed #2f6b3f; color: #2f6b3f; }
-.state-waitlisted { background: #f7efe1; border: 1px dashed #8a5a12; color: #8a5a12; }
-.state-none { background: #eef3fb; border: 1px dashed #2a4f8f; color: #2a4f8f; text-align: center; }
-.requirement { font-weight: 600; color: #2a4f8f; }
-.venues { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.65; color: #3a3a3a; }
+.state-none {
+  border-radius: var(--cs-radius-sm); padding: var(--cs-space-3) var(--cs-space-3);
+  background: var(--cs-neutral-tint); border: 1px solid var(--cs-line); color: var(--cs-neutral);
+  font-size: var(--cs-text-sm); font-weight: 600; text-align: center;
+}
+.requirement { font-weight: 600; color: var(--cs-ink-soft); }
+.venues { margin: 0; padding-left: 18px; font-size: var(--cs-text-base); line-height: 1.65; color: var(--cs-ink); }
 
-.btn { height: 46px; border-radius: 4px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.btn { height: 46px; border-radius: var(--cs-radius-sm); font: inherit; font-size: var(--cs-text-base); font-weight: 700; cursor: pointer; }
 .btn:disabled { opacity: 0.55; cursor: default; }
-.btn.primary { border: none; background: #2568e8; color: #fff; }
-.btn.danger { border: 1px solid #a33f3f; background: #fff; color: #a33f3f; }
-.btn.danger.amber { border-color: #8a5a12; color: #8a5a12; }
-.btn.danger.solid { background: #a33f3f; color: #fff; }
-.btn.neutral { border: 1px solid #b0b0b0; background: #fff; color: #444; font-weight: 600; }
-.btn:focus-visible, .back-link:focus-visible { outline: 2px solid #2568e8; outline-offset: 2px; }
-.confirm { display: flex; flex-direction: column; gap: 10px; }
-.confirm-actions { display: flex; gap: 8px; }
-.confirm-actions .btn { flex: 1; height: 40px; font-size: 13px; }
+.btn.primary { border: none; background: var(--cs-signal); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--cs-signal-strong); }
+.btn.danger { border: 1px solid var(--cs-occupied); background: var(--cs-surface); color: var(--cs-occupied); }
+.btn.danger.amber { border-color: var(--cs-pending); color: var(--cs-pending); }
+.btn.danger.solid { background: var(--cs-occupied); color: #fff; border-color: var(--cs-occupied); }
+.btn.neutral { border: 1px solid var(--cs-line-strong); background: var(--cs-surface); color: var(--cs-ink); font-weight: 600; }
+.btn:focus-visible, .back-link:focus-visible { outline: 2px solid var(--cs-signal); outline-offset: 2px; }
+.confirm { display: flex; flex-direction: column; gap: var(--cs-space-2); }
+.confirm-actions { display: flex; gap: var(--cs-space-2); }
+.confirm-actions .btn { flex: 1; height: 40px; font-size: var(--cs-text-sm); }
 
 @media (max-width: 700px) {
   .layout { flex-direction: column; }
