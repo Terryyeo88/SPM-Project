@@ -29,6 +29,7 @@ from postgrest.exceptions import APIError
 from app.equipment.equipment_service import (
     _compute_availability,
     _notify_request_decision,
+    _notify_technical_support,
     _one,
     get_request,
 )
@@ -136,6 +137,7 @@ def create_change_request(request_id: str, item_id, quantity, requested_by: str)
         if exc.code == "23505":
             raise ValidationError("This item already has a change waiting for Technical Support.") from exc
         raise
+    _notify_technical_support(request_id, "change requested", requested_by)
     return _flatten_change(_get_change_row(inserted[0]["id"]))
 
 

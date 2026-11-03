@@ -10,11 +10,17 @@
  * the allocated units then change) or reject it with a reason, which is
  * shown here.
  *
- * Data: GET/POST /equipment/requests/<id>/change-requests
+ * It also holds the coordinator's Cancel button for the request (pending or
+ * confirmed): cancelling frees its equipment so they can ask again for a
+ * different date and time. Two clicks, so a mis-click cannot release
+ * reserved units.
+ *
+ * Data: GET/POST /equipment/requests/<id>/change-requests,
+ * POST /equipment/requests/<id>/cancel
  */
 import { computed, onMounted, ref } from 'vue'
 import { apiGet, apiPost } from '../lib/api'
-import { describeChange, validateChangeQuantity } from '../lib/equipment'
+import { describeChange, formatPeriod, summariseItems, validateChangeQuantity } from '../lib/equipment'
 
 const props = defineProps({
   request: { type: Object, required: true },
@@ -26,6 +32,11 @@ const drafts = ref({})
 const errors = ref({})
 const submitting = ref('')
 const loadError = ref('')
+const confirmingCancel = ref(false)
+const cancelling = ref(false)
+const cancelError = ref('')
+
+const isConfirmed = computed(() => props.request.status === 'confirmed')
 
 const pendingByItem = computed(() => {
   const map = new Map()
@@ -38,6 +49,8 @@ const decided = computed(() => changes.value.filter((change) => change.status !=
 
 async function load() {
   loadError.value = ''
+  // A pending request has no reservations, so nothing can be changed on it.
+  if (!isConfirmed.value) return
   try {
     const result = await apiGet(`/equipment/requests/${props.request.id}/change-requests`)
     changes.value = Array.isArray(result) ? result : []
@@ -68,15 +81,34 @@ async function submit(item) {
   }
 }
 
+const emit = defineEmits(['cancelled'])
+
+async function cancelRequest() {
+  cancelError.value = ''
+  cancelling.value = true
+  try {
+    await apiPost(`/equipment/requests/${props.request.id}/cancel`, {})
+    confirmingCancel.value = false
+    emit('cancelled')
+  } catch (requestError) {
+    cancelError.value = requestError.message
+  } finally {
+    cancelling.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
 <template>
   <div class="changes">
+    <h4 class="manage-title">
+      {{ summariseItems(request.items) }} &middot; {{ formatPeriod(request.needed_start, request.needed_end) }}
+    </h4>
     <p v-if="loadError" class="error" role="alert">Couldn't load quantity changes: {{ loadError }}</p>
 
-    <div v-if="canChange" class="change-forms">
-      <h4>Change a quantity</h4>
+    <div v-if="canChange && isConfirmed" class="change-forms">
+      <span class="change-label">Change a quantity</span>
       <div v-for="item in request.items" :key="item.id" class="change-row">
         <span class="change-item">{{ item.type }} × {{ item.quantity }}</span>
         <p v-if="pendingByItem.get(item.id)" class="change-pending">
@@ -102,6 +134,26 @@ onMounted(load)
       </div>
     </div>
 
+    <div v-if="canChange" class="cancel-box">
+      <button v-if="!confirmingCancel" type="button" class="btn small btn-cancel" @click="confirmingCancel = true">
+        Cancel this booking
+      </button>
+      <div v-else class="cancel-confirm" role="group" aria-label="Confirm cancelling this booking">
+        <p class="cancel-warning">
+          Cancel this booking?
+          <template v-if="isConfirmed">Its reserved equipment is released and any waiting change is dropped.</template>
+          You can then request equipment again for a different date and time.
+        </p>
+        <button type="button" class="btn small btn-cancel-confirm" :disabled="cancelling" @click="cancelRequest">
+          {{ cancelling ? 'Cancelling...' : 'Yes, cancel booking' }}
+        </button>
+        <button type="button" class="btn small" :disabled="cancelling" @click="confirmingCancel = false">
+          Keep it
+        </button>
+      </div>
+      <p v-if="cancelError" class="error" role="alert">{{ cancelError }}</p>
+    </div>
+
     <ul v-if="decided.length" class="change-history" aria-label="Past quantity changes">
       <li v-for="change in decided" :key="change.id" :class="`change-${change.status}`">
         <strong>{{ change.status === 'accepted' ? 'Accepted' : 'Rejected' }}:</strong>
@@ -117,6 +169,12 @@ onMounted(load)
 <style scoped>
 .changes { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 h4 { margin: 0; font-size: 13px; color: #222; }
+.manage-title { font-size: 14px; }
+.change-label { font-size: 12px; font-weight: 700; color: #555; }
+.cancel-box { display: flex; flex-direction: column; gap: 6px; }
+.cancel-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cancel-warning { margin: 0; flex-basis: 100%; font-size: 13px; color: #8a5a12; }
+.btn-cancel-confirm { background: #b42318; color: #fff; border: none; }
 .change-forms { display: flex; flex-direction: column; gap: 8px; }
 .change-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; }
 .change-item { min-width: 140px; text-transform: capitalize; }

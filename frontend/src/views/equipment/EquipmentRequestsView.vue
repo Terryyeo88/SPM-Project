@@ -71,6 +71,7 @@ const EMPTY_MESSAGES = {
   pending: 'No equipment requests waiting to be checked.',
   confirmed: 'No confirmed equipment requests yet.',
   rejected: 'No rejected equipment requests.',
+  cancelled: 'No cancelled equipment requests.',
 }
 
 onMounted(loadRequests)
@@ -184,6 +185,7 @@ onMounted(loadRequests)
 .status-pending { color: #8a6d00; background: #fff4c2; }
 .status-confirmed { color: #0f6e6a; background: #ddf3f1; }
 .status-rejected { color: #b42318; background: #fde8e6; }
+.status-cancelled { color: #6a6a6a; background: #eeeeee; }
 
 @media (max-width: 600px) {
   .row { flex-direction: column; align-items: flex-start; }

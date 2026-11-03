@@ -48,7 +48,7 @@ from app.events.change_impact import (
     assess_change_impact,
     check_acknowledged,
 )
-from app.events.event_log import comparable, group_id, record_event_change, record_requested_change
+from app.events.event_log import comparable, group_id, record_event_change, record_requested_change, significance
 from app.events.event_service import (
     EVENT_FIELDS,
     SHARED_FIELDS,
@@ -57,8 +57,14 @@ from app.events.event_service import (
     _to_database_payload,
     validate_event_payload,
 )
-from app.events.event_update import apply_shared_details, revert_to_planning
+from app.events.event_update import (
+    apply_shared_details,
+    notify_technical_support_of_change,
+    notify_venue_staff_of_change,
+    revert_to_planning,
+)
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import AppError, NotFoundError, ValidationError
 
 TABLE = "event_change_requests"
@@ -154,7 +160,16 @@ def request_event_change(event: SimpleNamespace, requested_by: str, payload) -> 
     change = _first_row(supabase.table(TABLE).insert(row).select("*").execute())
     # The request's timeline: "Change requested by <organiser>".
     record_requested_change(event, requested, row["previous_values"], requested_by)
+    if significance(requested) == "significant":
+        _notify_change_requested(event.id)
     return change
+
+
+def _notify_change_requested(event_id: str) -> None:
+    """The assigned coordinator is told of a SIGNIFICANT change request (IS-24,
+    notification_service.event_change_requested). An ordinary one waits in
+    their review queue without a notification."""
+    notification_service.event_change_requested(event_id)
 
 
 def list_change_requests(event: SimpleNamespace, user) -> list[dict]:
@@ -259,6 +274,8 @@ def approve_change_request(
     shared_changes = {field: validated[field] for field in SHARED_FIELDS if field in change["requested_changes"]}
     apply_shared_details(event, shared_changes, reviewed_by)
     updated = revert_to_planning(event.id, event.status, change["requested_changes"], reviewed_by) or updated
+    notify_technical_support_of_change(event.id, change["requested_changes"], reviewed_by)
+    notify_venue_staff_of_change(event.id, change["requested_changes"], reviewed_by)
     return {"change_request": claimed, "event": updated}
 
 

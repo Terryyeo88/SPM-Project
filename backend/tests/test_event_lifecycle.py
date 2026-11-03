@@ -127,11 +127,22 @@ class _Store:
     def __init__(self, status):
         self.status, self.history = status, []
         self.released = []  # event ids release_event_equipment was called for
+        self.released_venue_bookings = []  # event ids release_bookings_for_event was called for
         self.approved = True  # what safety_service.is_approved reports (confirm's gate)
+        # what booking_service.has_live_confirmed_booking reports -- the
+        # Tentative Hold gate (Sprint 3). True by default so every
+        # existing confirm test (written before this gate existed) keeps
+        # passing unchanged; tests that specifically exercise the gate
+        # set this to False.
+        self.has_confirmed_booking = True
 
     def release_equipment(self, event_id):
         self.released.append(event_id)
         return 3
+
+    def release_venue_bookings(self, event_id, reason, changed_by=None):
+        self.released_venue_bookings.append(event_id)
+        return [{"id": "booking-1"}]
 
     def current_status(self, event_id):
         return self.status
@@ -163,7 +174,9 @@ def world(monkeypatch):
         monkeypatch.setattr(transitions, "_db_insert_history", store.insert_history)
         monkeypatch.setattr(transitions, "_db_list_history", store.list_history)
         monkeypatch.setattr(routes_module, "release_event_equipment", store.release_equipment)
+        monkeypatch.setattr(routes_module, "release_bookings_for_event", store.release_venue_bookings)
         monkeypatch.setattr(routes_module, "is_approved", lambda event_id: store.approved)
+        monkeypatch.setattr(routes_module, "has_live_confirmed_booking", lambda event_id: store.has_confirmed_booking)
         monkeypatch.setattr(
             routes_module,
             "load_event",
@@ -215,6 +228,29 @@ def test_confirm_refused_until_the_safety_officer_approves(client, signing_key, 
     assert "Safety Officer" in response.get_json()["error"]["message"]
     assert store.status == "safety_review"
     assert store.history == []
+
+
+def test_confirm_refused_once_the_tentative_hold_has_expired(client, signing_key, world):
+    """Sprint 3: approved by the Safety Officer is not enough on its own
+    -- the venue booking must still genuinely be held. Without this gate
+    an event could reach "confirmed" with an expired (unheld) venue."""
+    store = world(["event_coordinator"], "safety_review")
+    store.has_confirmed_booking = False
+    response = client.post("/events/event-1/confirm", headers=_auth(signing_key), json={})
+
+    assert response.status_code == 400
+    assert "tentative hold expired" in response.get_json()["error"]["message"]
+    assert store.status == "safety_review"
+    assert store.history == []
+
+
+def test_confirm_succeeds_when_the_venue_booking_is_still_held(client, signing_key, world):
+    store = world(["event_coordinator"], "safety_review")
+    store.has_confirmed_booking = True
+    response = client.post("/events/event-1/confirm", headers=_auth(signing_key), json={})
+
+    assert response.status_code == 200
+    assert store.status == "confirmed"
 
 
 def test_confirm_from_planning_is_refused(client, signing_key, world):
@@ -331,6 +367,7 @@ def test_a_cancel_refused_for_no_reason_releases_nothing(client, signing_key, wo
 
     assert response.status_code == 400
     assert store.released == []
+    assert store.released_venue_bookings == []
 
 
 def test_a_cancel_refused_by_status_releases_nothing(client, signing_key, world):
@@ -339,6 +376,21 @@ def test_a_cancel_refused_by_status_releases_nothing(client, signing_key, world)
 
     assert response.status_code == 403
     assert store.released == []
+    assert store.released_venue_bookings == []
+
+
+# -- Release venue bookings on cancel (Josiah, Sprint 3) -----------------------
+# The release itself (plural-safety, which bookings qualify) is tested in
+# test_booking_release.py; these check WHEN the route calls it.
+
+
+def test_cancelling_releases_the_events_venue_bookings(client, signing_key, world):
+    store = world(["event_coordinator"], "planning")
+    response = client.post("/events/event-1/cancel", headers=_auth(signing_key), json={"reason": "Venue unavailable"})
+
+    assert response.status_code == 200
+    assert store.released_venue_bookings == ["event-1"]
+    assert response.get_json()["released_venue_bookings"] == 1
 
 
 def test_a_cancel_that_lost_a_race_releases_nothing(client, signing_key, world):
@@ -358,3 +410,4 @@ def test_other_lifecycle_moves_do_not_release_equipment(client, signing_key, wor
 
     assert response.status_code == 200
     assert store.released == []
+    assert store.released_venue_bookings == []

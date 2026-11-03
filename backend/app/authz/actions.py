@@ -17,7 +17,8 @@ Deliberately NOT here: anything about equipment REQUEST CREATION or
 RESERVATION (the "Record Equipment Request" and "Accept an equipment
 request" stories are not built -- whoever builds them should add their
 own actions the same way, sourced the same way), and no profile.view_*
-(GET /me needs no policy check at all; see app/me/routes.py).
+(GET /me needs no policy check at all; see app/me/routes.py). Editing
+your own profile does have one: PROFILE_EDIT_OWN (IS-68), below.
 """
 
 from __future__ import annotations
@@ -119,6 +120,21 @@ VENUE_DELETE = "venue.delete"
 
 VENUE_CALENDAR_VIEW = "venue.calendar_view"
 
+# -- venue.block (Josiah, Sprint 3) ---------------------------------------
+# Source: "Venue Becomes Unavailable After Booking" (Week 7 #2) -- Venue
+# Staff create/list blocks on a venue. Not folded into VENUE_EDIT (IS-61):
+# venues and venue_blocks are different resource types, same reasoning
+# ROOM_LAYOUT_LIST/ROOM_LAYOUT_MANAGE's own split from VENUE_VIEW/
+# VENUE_LIST already established for a similar audience.
+#
+# tentative_hold_minutes (Week 7 #1, "Request Venue Booking with Setup
+# and Turnaround Time") is edited through VENUE_EDIT above, alongside
+# setup_minutes/turnaround_minutes -- IS-61 landed on main as the venue
+# catalogue's one write path while this was in progress, so there is no
+# separate VENUE_MANAGE action here; see docs/design-decisions.md.
+
+VENUE_BLOCK = "venue.block"
+
 # -- venue bookings (Josiah, Sprint 2: Venue Booking Request / Approval) --
 # Source: "As an Event Coordinator, I want to submit a request to book a
 # venue for an event" (create) and "As a Venue Staff member, I want to
@@ -136,6 +152,15 @@ VENUE_BOOKING_REJECT = "venue_booking.reject"
 # venue_booking.cancel (IS-9): the event's assigned coordinator cancels one
 # pending or confirmed booking; the session's other bookings stay as they are.
 VENUE_BOOKING_CANCEL = "venue_booking.cancel"
+# venue_booking.overwrite (Overwrite Venue Booking): Venue Staff directly
+# invalidate a CONFIRMED booking with a mandatory reason -- "the event will
+# not have an unsuitable venue". Distinct from venue_booking.cancel (the
+# coordinator's own action, no reason requirement, no event-status
+# consequence) and from venue.block (targets a VENUE for a time window):
+# this is Venue Staff unilaterally pulling ONE booking out from under a
+# possibly-already-confirmed event, so it also reverts the event -- see
+# venues/routes.py::overwrite_venue_booking_route.
+VENUE_BOOKING_OVERWRITE = "venue_booking.overwrite"
 
 # -- equipment (Nawaz, Sprint 2: IS-18 Check Equipment Availability) --------
 # Source: "As a Technical Support Staff, I want to check whether sufficient
@@ -171,6 +196,10 @@ EQUIPMENT_REQUEST_ACCEPT = "equipment_request.accept"
 # equipment_request.reject (IS-41): Technical Support Staff reject a pending
 # request with an explanation the coordinator can read.
 EQUIPMENT_REQUEST_REJECT = "equipment_request.reject"
+# equipment_request.cancel: the coordinator who raised a request withdraws it
+# (pending) or gives its units back (confirmed), e.g. to ask again for a
+# different date and time.
+EQUIPMENT_REQUEST_CANCEL = "equipment_request.cancel"
 # equipment_change.* (IS-43): the coordinator asks to change the quantity on
 # an already-confirmed request line; Technical Support accept or reject it.
 EQUIPMENT_CHANGE_CREATE = "equipment_change.create"
@@ -225,3 +254,28 @@ SAFETY_REVIEW_VIEW = "safety_review.view"
 SAFETY_REVIEW_APPROVE = "safety_review.approve"
 SAFETY_REVIEW_REJECT = "safety_review.reject"
 SAFETY_REVIEW_REQUEST_CHANGES = "safety_review.request_changes"
+
+# -- notifications (IS-69: Notification System) -------------------------------
+# Source: the stories that say a person "is notified" (IS-14 "An approved
+# booking should notify the Coordinator", IS-41 "an explanation that's sent
+# to the Event Coordinator", Week 7 change #5 "Relevant users should be
+# notified when assignments or reassignments occur", ...) -- IS-69 builds
+# where those notifications land. Every authenticated role can receive one,
+# so none of these is role-gated.
+#
+#   notification.list          -- your own notifications and unread count
+#       (role-free; the query is scoped to the caller -- see the rule).
+#   notification.mark_read     -- one notification, recipient only.
+#   notification.mark_all_read -- every one of your own (no resource).
+NOTIFICATION_LIST = "notification.list"
+NOTIFICATION_MARK_READ = "notification.mark_read"
+NOTIFICATION_MARK_ALL_READ = "notification.mark_all_read"
+
+# -- profile (IS-68: User contact and preferences) -----------------------------
+# Source: IS-68, the Edit Profile wireframe's Phone Number, Organisation and
+# Communication Preferences -- a user keeps their own contact details.
+#
+#   profile.edit_own -- PATCH /me/profile, the caller's own profile. Role-free
+#       and resource-free: the route takes no id, so there is no other
+#       profile it could be pointed at (see rule_profile_edit_own).
+PROFILE_EDIT_OWN = "profile.edit_own"

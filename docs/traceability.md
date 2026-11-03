@@ -468,6 +468,70 @@ Not built, so not tested: notifications for submissions and decisions, and
 resetting a check when a session is edited during it (see
 `docs/open-questions.md`, "Safety Officer").
 
+## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, Sprint 3, 2026-10-19)
+
+Source: Week 7 Customer Changes #1, #2, #4; Aaralyn's agreed tentative-hold
+flow (unchanged, already implemented by IS-11/IS-16 -- see
+`docs/design-decisions.md`). Unit tests: `test_booking_release.py`,
+`test_venue_service.py`, `test_block_service.py`, plus the edited sections of
+`test_booking_service.py`, `test_calendar_service.py`, `test_event_update.py`,
+`test_safety_service.py`, `test_event_lifecycle.py`, `test_authz_venues.py`,
+`test_venues_routes.py`. Integration:
+`test_venue_settings_blocking_hold_integration.py` (local Supabase).
+Frontend: `lib/venues.test.js`, `lib/venueBookings.test.js`,
+`router/index.test.js`, `lib/roles.test.js`. Guards marked (guard) were
+mutation-tested by hand (broken, caught, restored).
+
+### IS-58: Request Venue Booking with Setup and Turnaround Time
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can set/update a venue's setup and turnaround time (the auto-apply-at-booking-time half already shipped in IS-14) | `test_venue_service.py::test_update_venue_settings_updates_only_the_fields_given`, `::test_update_venue_settings_can_update_all_three_fields_at_once`, `test_venues_routes.py::test_update_settings_route_succeeds_for_venue_staff`, `test_authz_venues.py::test_venue_staff_allowed_manage_and_block[*]` | `POST /venues/<id>/settings`, `venue_service.update_venue_settings` / `_settings_from`, `VenueDetailView.vue` (inline edit form, venue_staff-gated) |
+| Only Venue Staff may edit; everyone else is refused | `test_authz_venues.py::test_every_other_role_denied_manage_and_block[*]`, `::test_multi_role_union_grants_venue_manage`, `test_venues_routes.py::test_update_settings_route_denies_event_coordinator`, `::test_update_settings_route_rejects_unauthenticated` | `rules.py::rule_venue_manage` (role-only, `DENY_FORBIDDEN`) |
+| Unknown field or non-positive value is refused (400), not silently ignored | `test_venue_service.py::test_update_venue_settings_rejects_a_non_object_body`, `::test_update_venue_settings_rejects_an_unknown_field`, `::test_update_venue_settings_rejects_an_empty_body`, `::test_update_venue_settings_rejects_a_non_positive_int[*]` (includes a `True` case, since `isinstance(True, int)` is true in Python), `::test_update_venue_settings_raises_not_found_for_an_unknown_venue`, `::test_update_venue_settings_translates_a_check_violation`, `::test_update_venue_settings_reraises_an_unrelated_database_error` | `venue_service._settings_from` / `update_venue_settings` |
+| Existing bookings never change when a venue's settings are edited later ("existing bookings that become problematic ... identified, not silently removed" -- satisfied by construction, see design-decisions.md) | `test_venue_settings_blocking_hold_integration.py::test_editing_venue_settings_does_not_change_existing_booking`, `::test_update_venue_settings_rejects_a_non_positive_value_for_real` | `booking_service.create_booking_request` / `confirm_booking` read venue settings once, at creation/confirm time only; `venue_bookings.setup_minutes`/`turnaround_minutes`/`hold_minutes` are snapshots |
+
+### Venue Becomes Unavailable After Booking
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can mark a venue blocked, with a mandatory reason, even with future bookings in place | `test_block_service.py::test_create_venue_block_inserts_the_block`, `::test_create_venue_block_rejects_an_invalid_reason`, `::test_create_venue_block_rejects_a_missing_or_non_string_timestamp[*]`, `test_venues_routes.py::test_create_block_route_succeeds_for_venue_staff`, `test_authz_venues.py::test_venue_staff_allowed_manage_and_block[*]` | `POST /venues/<id>/blocks`, `block_service.create_venue_block` / `_block_fields_from`, `BlockVenueView.vue` |
+| The existing event does NOT auto-cancel | `test_block_service.py::test_create_venue_block_does_not_cancel_the_event` | `release_bookings_overlapping_block` only writes `venue_bookings`/`venue_booking_status_log`, never `events.status` |
+| Affected bookings are identified and the coordinator is informed | `test_block_service.py::test_create_venue_block_releases_overlapping_confirmed_bookings_and_reports_them` | `create_venue_block` returns `released_bookings`; `_notify_coordinator_venue_blocked` print-stub (not itself asserted -- same stub convention as every other `_notify_*`); `BlockVenueView.vue` shows released events with links |
+| The coordinator can search for a replacement venue while the original event info stays intact | `venueBookings.test.js` ("puts each status in the tab of the same name" -- `released` tab), `VenueBookingStatus.vue`'s `canRequestAgain` computed now includes `'released'` (manual check -- no component tests for this file, per the frontend convention) | `canRequestAgain` computed; nothing in the release path touches `events` rows |
+| Only already-confirmed bookings are released at block-creation time; a pending request is Venue Staff's own call at review time | `test_block_service.py::test_create_venue_block_does_not_touch_an_overlapping_pending_booking`, `::test_create_venue_block_does_not_touch_a_non_overlapping_confirmed_booking` | `release_bookings_overlapping_block` queries `status='confirmed'` only |
+| A pending request can never be confirmed into an already-blocked period | `test_booking_service.py::test_confirm_booking_blocked_by_an_overlapping_venue_block` (guard), `::test_confirm_booking_not_blocked_by_a_non_overlapping_venue_block`, `test_venue_settings_blocking_hold_integration.py::test_confirm_booking_refused_against_a_real_venue_block` | `booking_service._blocked_period_exists`, checked in `confirm_booking` |
+| The blocked period is surfaced to Venue Staff reviewing a booking | `VenueBookingReviewView.vue` ("Venue blocked" suitability row, manual check -- no component tests for this file) | `get_booking` sets `booking["blocked"]` |
+
+### Venue Availability Calendar Tentative Hold
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can set/update the hold duration | `test_venue_service.py::test_update_venue_settings_can_update_all_three_fields_at_once` | `tentative_hold_minutes` added to `EDITABLE_VENUE_FIELDS`; same settings form as setup/turnaround |
+| A tentatively-held venue has an expiry date/time | `test_booking_service.py::test_confirm_booking_snapshots_hold_minutes_and_confirmed_at` | `confirm_booking` snapshots `hold_minutes` + `confirmed_at` onto the booking |
+| If the coordinator doesn't act before expiry, the hold expires and the venue becomes available | `test_booking_release.py::test_release_expired_hold_releases_an_expired_booking_whose_event_is_not_yet_confirmed`, `::test_release_expired_hold_leaves_a_not_yet_expired_booking_alone`, `test_venue_settings_blocking_hold_integration.py::test_has_live_confirmed_booking_is_false_once_the_hold_expires`, `::test_releasing_an_expired_hold_frees_the_exclusion_constraint_for_another_booking` | `booking_release.release_expired_hold` / `touch_expired_holds`, wired into every call site in the table below |
+| An expired hold is never treated as a confirmed booking | `test_booking_service.py::test_has_live_confirmed_booking_false_once_the_hold_has_expired`, `test_event_lifecycle.py::test_confirm_refused_once_the_tentative_hold_has_expired` (guard) | `has_live_confirmed_booking`, the gate on `confirm_event` |
+| A long-confirmed event's venue booking is never incorrectly re-expired | `test_booking_release.py::test_release_expired_hold_never_revisits_a_graduated_event[*]` (guard), `test_booking_service.py::test_has_live_confirmed_booking_true_for_a_graduated_event_however_old`, `test_calendar_service.py::test_a_long_confirmed_event_s_booking_is_never_re_expired` (guard), `test_event_update.py::test_a_long_confirmed_event_s_booking_is_never_re_expired_in_impacts` (guard), `test_venue_settings_blocking_hold_integration.py::test_has_live_confirmed_booking_is_true_for_an_already_confirmed_event_however_old` | `release_expired_hold`'s `_HOLD_GRADUATED_EVENT_STATUSES` guard |
+| Existing bookings that become problematic under the new setup/turnaround rule are identified, not silently removed | same as IS-58's snapshot-immutability row above | same |
+
+### Expiry wired into every call site that trusts `confirmed == genuinely holding the venue`
+
+| Location | Test |
+|---|---|
+| `booking_service._confirmed_overlap_exists` | `test_booking_service.py` (`confirm_booking` tests exercise this path; `test_venue_settings_blocking_hold_integration.py::test_releasing_an_expired_hold_frees_the_exclusion_constraint_for_another_booking` proves it end-to-end) |
+| `booking_service.get_booking` / `list_bookings` / `list_bookings_for_event` / `has_live_confirmed_booking` | `test_booking_service.py::test_has_live_confirmed_booking_false_with_no_booking_at_all`, `::test_has_live_confirmed_booking_true_within_the_hold_window` |
+| `calendar_service.get_venue_calendar` | `test_calendar_service.py::test_expired_hold_on_an_unconfirmed_event_emits_no_entry`, `::test_a_long_confirmed_event_s_booking_is_never_re_expired` |
+| `change_impact._venue_impacts` (Aaralyn's file -- additive only, flagged for her sign-off) | `test_event_update.py::test_an_expired_booking_produces_no_impact_and_is_released`, `::test_a_long_confirmed_event_s_booking_is_never_re_expired_in_impacts` |
+| `safety_service.arrangement_problems` / `review_detail` (Justin's file -- additive only, flagged for his sign-off) | `test_safety_service.py::test_an_expired_tentative_hold_is_not_a_confirmed_arrangement`, `::test_review_detail_excludes_an_expired_tentative_hold` |
+| `events/routes.py::confirm_event` (new gate, the critical fix found during planning) | `test_event_lifecycle.py::test_confirm_refused_once_the_tentative_hold_has_expired`, `::test_confirm_succeeds_when_the_venue_booking_is_still_held` |
+| `events/routes.py::cancel_event` (releases every confirmed booking for the event) | `test_event_lifecycle.py::test_cancelling_releases_the_events_venue_bookings` |
+
+Not built, so not tested: a real notification system (print-stub only, same
+converged pattern as every other `_notify_*`); editing or removing a venue
+block once created; resolving the soft edge where a pending request is
+eventually confirmed against a venue's now-stale settings (see
+`docs/open-questions.md`).
+
 ## Sprint 3 — Record Equipment Request for Event (IS-17, Nawaz)
 
 Source: IS-17's AC, plus Aaralyn's IS-9 note that equipment requests need
@@ -574,3 +638,280 @@ Story: "As a Venue staff, I want to add, edit and delete venues so that I can ea
 | Only the backend can delete or change a venue: a signed-in user (even Venue Staff) calling the database directly can't run `delete_venue()` or write `venues` | `test_venue_catalogue_crud_integration.py::test_a_signed_in_user_cannot_call_delete_venue_directly`, `::test_a_signed_in_user_cannot_change_a_venue_directly` | migration's `revoke`/`grant` on `delete_venue()` (service role only), `venues` RLS (read policy only, `20260923000000_venues.sql`) |
 
 Each guard above was mutation-tested by hand once (broken, confirmed caught, restored): the `delete_venue()` grant, the deleted-venue trigger, `delete_venue()`'s event-status and booking-status filters, `venues_buffers_non_negative`, the not-deleted condition on edits, the pending condition on withdrawing a safety review, `expected_from` on the revert to planning, the catalogue's deleted filter, the backend's deleted-venue check on booking requests, and the alert's "newer booking" check.
+
+## Sprint 4 — Notification System (IS-69)
+
+The ticket's acceptance criteria aren't in the repo; the criteria below are
+our working reading, flagged in `docs/open-questions.md`.
+Unit: `test_notification_service.py`, `test_notifications_routes.py`,
+`test_authz_notifications.py`, `test_notification_hook_*.py` (one per hook). Integration:
+`test_notifications_integration.py`. Frontend: `lib/notifications.test.js`,
+`views/NotificationsView.test.js`, `lib/roles.test.js` and `router/index.test.js`
+(the notifications route). Design: `docs/design-decisions.md` (IS-69).
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A notification is stored for the person who needs to act, at each point a story said someone "is notified" | `test_notification_service.py::test_coordinator_assigned_*`, `::test_a_venue_booking_decision_*`, `::test_a_released_booking_*`, `::test_an_equipment_decision_*`, `::test_a_submission_or_withdrawal_*`, `::test_a_safety_decision_*`, `test_notification_hook_*.py` (all), `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_notifies_the_sessions_current_coordinator`, `::test_a_safety_submission_reaches_every_safety_officer` | `notification_service.py` (`coordinator_assigned`, `venue_booking_decided`, `venue_booking_released`, `equipment_request_decided`, `safety_review_changed`, `notify`), the five `_notify_*` hooks, migration `20261027000000_notifications.sql` |
+| (design) The session's current coordinator is told, not the requester; nobody is told about their own action; no coordinator means nobody | `test_notification_service.py::test_a_venue_booking_decision_goes_to_the_sessions_current_coordinator`, `::test_cancelling_a_booking_notifies_nobody`, `::test_a_session_with_no_coordinator_notifies_nobody`, `test_notification_hook_equipment.py::test_rejecting_an_equipment_request_*` | `notification_service.py::_event`, `_notify_coordinator_of` |
+| Every authenticated role has notifications | `test_authz_notifications.py::test_every_authenticated_user_may_list_and_mark_all_their_own`, `test_notifications_routes.py::test_list_returns_the_callers_notifications_and_unread_count[*]` | `rules.py::rule_notification_list` / `rule_notification_mark_all_read` |
+| A user sees their own notifications, newest first, with an unread count | `test_notification_service.py::test_list_is_only_the_callers_own_newest_first`, `::test_list_can_be_unread_only`, `::test_list_is_capped`, `::test_unread_count_counts_only_the_callers_unread`, `test_notifications_routes.py::test_list_*`, `::test_unread_count`, `test_notifications_integration.py::test_list_is_newest_first` | `GET /notifications`, `GET /notifications/unread-count`, `notification_service.py::list_notifications` / `unread_count`, index `idx_notifications_recipient_created` / `idx_notifications_recipient_unread` |
+| A user can mark one notification read (again is a no-op that keeps the first read time) | `test_notification_service.py::test_mark_read_sets_read_at_and_drops_the_count`, `::test_marking_an_already_read_one_keeps_its_first_read_time`, `test_notifications_routes.py::test_mark_read_own`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/<id>/read`, `notification_service.py::mark_read` (conditioned on `read_at IS NULL`) |
+| A user can mark all their notifications read | `test_notification_service.py::test_mark_all_read_marks_only_the_callers_unread`, `test_notifications_routes.py::test_mark_all_read`, `test_notifications_integration.py::test_mark_read_keeps_the_first_read_time_and_mark_all_is_scoped` | `POST /notifications/read-all`, `notification_service.py::mark_all_read` |
+| A user can never see or change anyone else's notifications: through Flask (404) or directly against the database (RLS) | `test_authz_notifications.py::test_anyone_elses_notification_is_a_404_whatever_their_role`, `test_notifications_routes.py::test_mark_read_someone_elses_is_404_and_writes_nothing`, `::test_mark_read_missing_is_404`, `::test_every_route_needs_a_login`, `test_notification_service.py::test_mark_read_is_scoped_to_the_caller`, `::test_get_notification_missing_or_malformed_is_not_found`, `test_notifications_integration.py::test_a_signed_in_user_reads_only_their_own_notifications_directly`, `::test_a_signed_in_user_cannot_write_notifications_directly` | `rules.py::rule_notification_mark_read`, recipient scope in every `notification_service.py` query, policy `recipient reads own notifications` (no write policy) |
+| (design) A failure to notify never fails or undoes the action; the unit-test DB guard still fails loudly | `test_notification_service.py::test_a_failed_write_is_logged_and_swallowed`, `::test_a_base_exception_is_not_swallowed` | `notification_service.py::_best_effort` |
+| (design) A link is both halves or neither | `test_notifications_integration.py::test_a_link_is_both_halves_or_neither` | constraint `notifications_entity_complete` |
+| A user sees their notifications in the web app: newest first, unread marked out, an empty state | `NotificationsView.test.js` ("lists the notifications ...", "shows an empty state ...") | `views/NotificationsView.vue`, `/notifications` route |
+| Clicking one marks it read; "Mark all as read" marks the rest; the count comes from the response, not a refetch | `NotificationsView.test.js` ("clicking an unread one ...", "\"Mark all as read\" ...", "following a link ...", "keeps the item unread ... when marking it read fails") | `NotificationsView.vue`, `stores/notifications.js`, `lib/notifications.js` |
+| (design) A notification links to what it's about only where that page already exists and the caller can reach it; otherwise plain text | `lib/notifications.test.js` (`notificationLink`), `NotificationsView.test.js` ("... no page is plain text, not a dead link", "no link when the caller cannot reach the page") | `lib/notifications.js::ENTITY_ROUTES` / `notificationLink` |
+| Every authenticated role reaches the notifications page | `lib/roles.test.js` ("notifications route (IS-69)"), `router/index.test.js` ("/notifications ...", drift guard) | `lib/roles.js` `ROUTE_ACCESS` entry `notifications` |
+| A bell in the nav shows the unread count to every signed-in role and opens the page | `components/AppNavBar.test.js` ("AppNavBar notifications bell (IS-69)") | `AppNavBar.vue` bell (GET `/notifications/unread-count`), `stores/notifications.js` |
+
+Each guard above was mutation-tested by hand once (broken, confirmed caught,
+restored):
+
+- **The RLS read policy.** Loosened to `auth.role() = 'authenticated'`:
+  `test_a_signed_in_user_reads_only_their_own_notifications_directly` failed.
+- **`mark_read`'s `read_at IS NULL` condition.** Removed: one unit test and
+  one integration test failed.
+- **`list_notifications`' recipient scope.** Removed: three unit tests and
+  two integration tests failed.
+
+Not covered, because not built: email/SMS, reminders, and the
+notifications no hook existed for (see `docs/open-questions.md`).
+
+
+## Sprint 4 — User contact and preferences (IS-68)
+
+Criteria from the ticket: phone number, organisation (optional) and
+communication preferences (email, SMS), per the Edit Profile wireframe; a
+user may read and write only their own profile. Unit:
+`test_profile_service.py`, `test_profile_routes.py`, `test_authz_profile.py`,
+`test_me_route.py`. Integration: `test_profile_contact_integration.py`.
+Frontend: `lib/profile.test.js`, `components/RegistrationForm.profileDefaults.test.js`, `views/ProfileView.test.js`.
+Design: `docs/design-decisions.md` (IS-68). The new columns are nullable with
+no backfill, so existing profiles are unaffected.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A user can save their phone, organisation and email/SMS preferences | `test_profile_service.py::test_saving_all_three`, `test_profile_routes.py::test_every_role_saves_all_three_to_their_own_profile[*]`, `test_profile_contact_integration.py::test_saving_all_three_and_reading_them_back`, `lib/profile.test.js` "sends all three once given" | `PATCH /me/profile`, `profile_service.py::update_own_profile`, migration `20261030000000_profile_contact_preferences.sql` |
+| Optional means optional: saving with them blank works and stores NULL | `test_profile_service.py::test_saving_with_the_optional_ones_blank_stores_null_not_empty_text`, `::test_saving_with_organisation_left_out_entirely`, `test_profile_routes.py::test_saving_with_the_optional_ones_blank`, `test_profile_contact_integration.py::test_saving_with_the_optional_ones_blank_stores_null`, `::test_the_database_refuses_blank_or_oversized_text[*]`, `lib/profile.test.js` "sends blank optional fields as null" | `profile_service.py::validate_profile_update` / `_optional_text`, constraints `profiles_phone_present` / `profiles_organisation_present` |
+| The saved values are read back through GET /me | `test_profile_service.py::test_reads_back_the_callers_own_saved_values`, `test_profile_routes.py::test_get_me_reads_back_what_was_saved`, `::test_get_me_returns_the_four_fields_as_null_when_never_given`, `test_me_route.py::test_me_returns_id_email_name_roles_for_authenticated_user` | `GET /me`, `profile_service.py::get_contact` |
+| A user cannot read another user's profile | `test_profile_service.py::test_the_read_is_scoped_to_the_callers_id`, `::test_reading_returns_only_the_four_fields_and_never_another_users`, `test_profile_routes.py::test_get_me_never_shows_another_users_contact_details` | `.eq("id", caller)` in `get_contact`; the id comes from the token |
+| A user cannot write another user's profile: no id in the URL; `id` / `email` in the body are a 400, not ignored | `test_profile_service.py::test_the_update_is_scoped_to_the_callers_id`, `::test_one_user_saving_never_writes_another_users_profile`, `::test_a_payload_naming_id_or_email_is_refused_and_nothing_is_written[*]`, `test_profile_routes.py::test_a_body_naming_id_or_email_is_a_400_and_writes_nothing[*]`, `::test_there_is_no_route_that_takes_another_users_id[*]`, `::test_two_users_each_write_only_their_own`, `test_profile_contact_integration.py::test_the_update_touches_only_the_callers_row`, `::test_a_signed_in_user_cannot_write_any_profile_directly` | `.eq("id", caller)` in `update_own_profile`, `FORBIDDEN_FIELDS`, `rules.py::rule_profile_edit_own`, no write RLS policy |
+| Every authenticated role may edit their own profile | `test_authz_profile.py::test_every_authenticated_user_may_edit_their_own_profile[*]`, `::test_profile_edit_own_is_wired_into_the_policy`, `test_profile_routes.py::test_patch_without_a_token_is_a_401` | `actions.PROFILE_EDIT_OWN`, `_RULES` |
+| Existing profiles, with NULL in the new columns, still load and still save | `test_profile_contact_integration.py::test_the_new_columns_exist_nullable_on_every_seeded_profile`, `::test_an_existing_profile_with_nulls_still_loads`, `::test_an_existing_profile_with_nulls_still_saves` | nullable columns, no default, no backfill |
+| (design) With nothing saved, Justin's register form is exactly as before; once saved, it prefills | `components/RegistrationForm.profileDefaults.test.js` (all), `test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing` | `lib/registrations.js::prefillFromProfile`, `registration_service.py::_db_profile_organisation` (both unchanged) |
+| The three fields on the profile page, per the wireframe; blank optional fields save | `views/ProfileView.test.js` (all, incl. "saves with the optional ones blank", "clearing saved values sends them as null") | `views/ProfileView.vue` (Justin's; `[PENDING JUSTIN'S SIGN-OFF]` commit) |
+| (design) Unset preferences stay NULL until the user changes one | `lib/profile.test.js` "leaves never-chosen preferences out", "sends both preferences as soon as one is changed" | `lib/profile.js::profilePayload` |
+| (design) Field validation: phone pattern when given, organisation length, preferences true/false/null, unknown fields refused | `test_profile_service.py::test_invalid_updates_are_400s[*]`, `::test_a_body_that_is_not_an_object_is_a_400[*]`, `test_profile_routes.py::test_an_invalid_phone_is_a_400`, `lib/profile.test.js` "field errors" | `profile_service.py::validate_profile_update`, `lib/profile.js::profilePhoneError` / `organisationError` |
+
+Each part of the own-profile guard was mutation-tested by hand once (broken,
+confirmed caught, restored), against a freshly reset local database:
+
+- **`.eq("id", caller)` on the update, deleted:** 19 failed.
+- **The refusal of `id`, removed:** 5 failed. The refusal of `email`,
+  removed: 4 failed. Either field was still a 400 through the unknown-field
+  check; the tests caught it by its code and message.
+- **`id` let past both checks:** 5 failed whether it was ignored or
+  written.
+
+Pinned as an open question, not a guarantee: any signed-in user can read
+every profile directly through the existing RLS policy
+(`::test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`).
+
+
+## Sprint 4 — Notification (Attendees) (IS-76, Justin)
+
+Unit: `test_notification_attendees.py` (who, what, when),
+`test_notification_hook_attendees.py` (which actions trigger which hook).
+Integration: `test_notification_attendees_integration.py`.
+Frontend: `lib/notifications.test.js`. Design: `docs/design-decisions.md`
+(IS-76). "Relevant event details" = event name, session date and time,
+venue.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| AC1 Registered with a place: a confirmation notice | `test_notification_attendees.py::test_ac1_a_confirmed_registration_is_confirmed_to_the_attendee_with_a_link`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[confirmed]`, `::test_a_refused_registration_triggers_nothing[*]` | `notification_service.py::registration_recorded`, `registration_service.py::register` / `_notify_registered` |
+| AC2 Session full: a waiting-list notice with their position | `test_notification_attendees.py::test_ac2_a_waitlisted_registration_says_so_with_the_place_in_the_queue`, `::test_ac2_without_a_known_place_the_waitlist_notice_still_goes`, `test_notification_hook_attendees.py::test_a_successful_registration_triggers_the_hook_with_the_new_row[waitlisted]` | `notification_service.py::registration_recorded` / `_waitlist_position` |
+| AC3 Moved up from the waiting list: told they're now confirmed | `test_notification_attendees.py::test_ac3_ac4_the_withdrawer_and_the_attendee_moved_up_are_both_told`, `::test_ac3_a_promoted_registration_that_no_longer_exists_tells_only_the_withdrawer`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[r2]` | `notification_service.py::registration_withdrawn`, `registration_service.py::withdraw` (passes `promoted_registration_id` on) |
+| AC4 Own withdrawal confirmed | `test_notification_attendees.py::test_ac3_ac4_*`, `::test_ac4_with_nobody_moved_up_only_the_withdrawer_is_told`, `test_notification_hook_attendees.py::test_a_withdrawal_triggers_the_hook_with_whoever_moved_up[*]`, `::test_a_refused_withdrawal_triggers_nothing[*]` | `notification_service.py::registration_withdrawn` |
+| AC5 Relevant details changed: one notice, with a link, once confirmed again | `test_notification_attendees.py::test_ac5_a_date_or_time_change_is_told_once_reconfirmed[*]`, `::test_ac5_a_name_change_counts_for_every_session_wherever_it_was_logged`, `::test_ac5_a_new_venue_is_a_relevant_change`, `::test_ac5_dropping_one_of_several_venues_is_a_relevant_change`, `::test_a_deleted_venue_is_still_told_apart_by_its_kept_name`, `test_notification_hook_attendees.py::test_confirming_triggers_the_reconfirmed_hook`, `::test_a_refused_confirmation_triggers_nothing` | `notification_service.py::event_reconfirmed` / `_details_changed_since` / `_venue_changed_since`, `routes.py::confirm_event` / `_notify_attendees_reconfirmed` |
+| AC6 Changed then cancelled: only the cancellation | `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]` | `routes.py::cancel_event` (the details notice only ever comes from `confirm_event`) |
+| AC7 Nothing relevant changed: no notice | `test_notification_attendees.py::test_the_first_confirmation_tells_nobody`, `::test_ac7_no_relevant_change_means_no_notice[*]`, `::test_ac7_a_change_from_before_the_last_confirmation_is_old_news`, `::test_ac7_a_change_the_organiser_only_asked_for_changed_nothing`, `::test_ac7_rebooking_the_same_venue_is_no_change`, `::test_an_organiser_who_is_also_the_coordinator_makes_changes_that_count` | `notification_service.py::_details_changed_since` / `_venue_changed_since` |
+| AC8 Cancelled: registered and waitlisted attendees told | `test_notification_attendees.py::test_ac8_ac9_ac10_cancelling_tells_only_that_sessions_attendees`, `::test_ac8_the_cancellation_has_no_link_and_no_reason`, `test_notification_hook_attendees.py::test_ac6_cancelling_triggers_only_the_cancelled_hook[*]`, `::test_a_refused_cancellation_triggers_nothing` | `notification_service.py::event_cancelled`, `routes.py::cancel_event` / `_notify_attendees_cancelled` |
+| AC9 Only that session's attendees | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_ac9_another_sessions_date_change_is_not_this_sessions_change` | `_attendee_ids` scoped to one `event_id`; per-session date check |
+| AC10 Not registered or waitlisted: nothing | `test_notification_attendees.py::test_ac8_ac9_ac10_*`, `::test_cancelling_a_session_nobody_registered_for_writes_nothing` | `_attendee_ids` (status `confirmed` / `waitlisted` only) |
+| AC11 Names the event and session; in-app; links to the attendee's page | `test_notification_attendees.py::test_the_session_is_named_by_the_event_and_its_start[*]`, `::test_a_session_without_a_name_still_reads`, `lib/notifications.test.js` ("links an attendee's session notification ...", "is null when the caller cannot reach that page ...", "only ever points at routes ...") | `notification_service.py::session_label`, `ENTITY_ATTENDEE_EVENT`, `lib/notifications.js::ENTITY_ROUTES.attendee_event` |
+| (design) A failed notification never fails the action | `test_notification_attendees.py::test_a_failed_attendee_notification_is_logged_and_swallowed[*]` | `_best_effort` |
+| (design) Completing an event tells attendees nothing | `test_notification_hook_attendees.py::test_completing_tells_attendees_nothing` | `routes.py::complete_event` (no hook) |
+
+Integration (`test_notification_attendees_integration.py`, local stack):
+the real register/withdraw functions notify confirmed, waitlisted (with
+place) and moved-up attendees; cancellation reaches only that session's
+current attendees, with no link; a time change is told on reconfirmation
+through real `transition()` history; an irrelevant change or an organiser's
+request tells nobody; a venue swap is told and rebooking the same venue is
+not, against real `venue_bookings` / `venue_booking_status_log`.
+
+## Sprint 4 — Withdrawal of Equipment Booking (IS-66, Nawaz)
+
+Source: IS-66's one acceptance criterion ("Allow for deletion of equipment
+booking request when it is pending and once it has been accepted"), plus a
+teammate's request that the coordinator can then ask again for a different date
+and time. Unit tests: `test_equipment_cancel.py` (service), `test_authz_equipment_cancel.py`
+(rule), `test_equipment_cancel_routes.py` (route). Frontend:
+`EquipmentChangeRequests.test.js` ("cancelling the booking"),
+`EquipmentBookingStatus.test.js`, `equipment.test.js`,
+`EquipmentRequestDetailView.test.js`. Needs migration
+`20261102000000_equipment_request_cancel.sql`. Not tested against a real
+database.
+
+| Requirement | Test | Implementation |
+|---|---|---|
+| IS-66: "Allow for deletion of equipment booking request when it is pending ..." | `test_equipment_cancel.py::test_cancelling_a_pending_request_just_marks_it_cancelled`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[pending]`, `EquipmentBookingStatus.test.js::offers only Cancel (no quantity form, no history call) for a request that is still pending`, `EquipmentChangeRequests.test.js::works for a pending request, without loading quantity changes or offering the form` | `cancel_request`: the request moves to `cancelled` (see open-questions: "deletion" read as withdrawal) |
+| IS-66: "... and once it has been accepted" | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `test_authz_equipment_cancel.py::test_the_coordinator_who_raised_a_live_request_can_cancel_it[confirmed]`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | a confirmed request's reservation rows are deleted, which frees its units |
+| The coordinator can cancel an equipment booking | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses`, `::test_cancelling_a_pending_request_just_marks_it_cancelled`, `EquipmentChangeRequests.test.js::cancels on the second click and tells the page` | `POST /equipment/requests/<id>/cancel`, `equipment_service.cancel_request`, "Cancel this booking" under each pending/confirmed request |
+| ...so a new request can be made for a different date and time | `test_equipment_cancel.py::test_cancelling_a_confirmed_request_frees_its_units_and_keeps_everyone_elses` (units freed), `EquipmentBookingStatus.test.js` (the list reloads) | reservation rows deleted; "Request more equipment" still shown |
+| Only the coordinator who raised it, only while the event is live | `test_authz_equipment_cancel.py` (all), `test_equipment_cancel_routes.py` | `rule_equipment_request_cancel` |
+| Not for a request already decided against or cancelled | `test_authz_equipment_cancel.py::test_a_request_that_is_already_over_cannot_be_cancelled`, `test_equipment_cancel.py::test_a_request_that_is_already_over_is_refused` | status check in the rule and the service |
+| (design) A racing accept/reject wins; nothing freed | `test_equipment_cancel.py::test_the_status_update_is_conditional_so_a_racing_decision_wins` (hand-mutated: removing the condition fails it) | update conditioned on the status read |
+| (design) A failure freeing the units leaves the request as it was | `test_equipment_cancel.py::test_a_failure_freeing_the_units_puts_the_status_back` (hand-mutated: removing the restore fails it) | status restored in `cancel_request` |
+| (design) A waiting quantity change is dropped, and cannot be accepted | `test_equipment_cancel.py::test_a_waiting_quantity_change_is_rejected_with_a_reason_and_others_are_untouched`, `test_authz_equipment_cancel.py::test_a_change_on_a_cancelled_request_cannot_be_accepted_but_can_be_rejected` | change requests rejected in `cancel_request`; `rule_equipment_change_accept` checks `request_status` |
+| (design) Two clicks, so a mis-click cannot release units | `EquipmentChangeRequests.test.js::asks for a second click before cancelling, and Keep it backs out` | inline confirmation in `EquipmentChangeRequests.vue` |
+| Cancelled requests are visible, not hidden | `equipment.test.js` (Cancelled tab), `EquipmentBookingStatus.test.js::offers no Cancel for a rejected or already cancelled request` | `REQUEST_TABS`, `.status-cancelled` |
+
+## Sprint 4 — Receive Technical Support Notifications (IS-26, Nawaz)
+
+Source: IS-26 "Receive Technical Support Notifications" (the Sprint 1 user
+stories document): "As Technical Support Staff, I want to receive
+notifications about equipment and technical-support requirements or changes,
+so that I can prepare the necessary resources and support for events."
+Unit tests: `test_notification_technical_support.py` (who is told what),
+`test_notification_hook_technical_support.py` (when), plus the edit hooks in
+`test_event_update.py` and `test_event_change_requests.py`. Frontend:
+`notifications.test.js`. Integration (real Supabase, 4 tests):
+`test_notification_technical_support_integration.py`. No migration
+(`notifications.type` is free text).
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| A requirement is submitted for review: the relevant Technical Support Staff are notified | `test_notification_technical_support.py::test_a_submitted_request_tells_every_technical_support_member_and_nobody_else`, `test_notification_hook_technical_support.py::test_submitting_a_request_triggers_the_hook_with_the_new_request` | `create_request` -> `technical_support_request_news("submitted")` |
+| Requirements changed, affecting existing arrangements: notified | `test_a_quantity_change_tells_technical_support`, `test_a_withdrawn_request_tells_technical_support`, `test_asking_for_a_quantity_change_triggers_the_hook`, `test_withdrawing_a_request_triggers_the_hook` | `create_change_request` (IS-43), `cancel_request` (IS-66) |
+| ...and when the event's equipment or room layout is edited | `test_a_new_equipment_list_or_room_layout_tells_technical_support`, `test_is26_an_update_tells_technical_support_which_fields_changed_and_who_changed_them`, `test_is26_approving_a_change_tells_technical_support_which_fields_changed` | `update_event`, `approve_change_request` -> `technical_support_event_news("changed")` |
+| Rescheduled, when the new date or time affects the arrangements: notified | `test_a_new_date_or_time_tells_technical_support_the_session_was_rescheduled`, `test_a_session_with_no_equipment_request_is_not_news` | same; only if a request is `pending` or `confirmed` |
+| Cancelled: notified | `test_a_cancelled_session_with_a_live_request_tells_technical_support`, `test_cancelling_a_session_triggers_the_hook` | `cancel_event` -> `technical_support_event_news("cancelled")` |
+| Equipment becomes unavailable: notified | none | **not built**: nothing in the app changes a unit's status (open-questions) |
+| Only for matters relevant to their responsibilities | `test_a_session_whose_requests_are_over_is_not_news`, `test_a_change_to_something_technical_support_does_not_arrange_around_is_not_news`, `test_other_request_news_is_not_technical_supports_to_hear` | live-request filter and the field list in `notification_service` |
+| (design) Nobody is told about their own action | `test_the_person_who_acted_is_not_told_about_their_own_action`, `test_the_person_who_changed_the_session_is_not_told` (hand-mutated) | actor excluded in `_technical_support_ids` |
+| (design) A refused action tells nobody | `test_a_refused_request_triggers_nothing`, `test_a_refused_withdrawal_triggers_nothing`, `test_a_refused_cancellation_triggers_nothing`, `test_is26_an_update_refused_for_unacknowledged_impacts_tells_nobody` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+| (design) The notification opens the request | `notifications.test.js::links an equipment request notification ...` | `ENTITY_ROUTES.equipment_request` |
+
+## Integration tests for the equipment workflow (IS-17, IS-19, IS-41, IS-43, IS-66, Nawaz)
+
+`backend/tests/test_equipment_workflow_integration.py` (20 tests, `@pytest.mark.integration`,
+local Supabase only). They prove what the unit tests' fake database cannot. **Written but
+not yet run** (see open-questions): they need a local Supabase stack.
+
+| Story | What the real database must prove | Test |
+|---|---|---|
+| IS-17 | the session's window is stored as the right instants; a request that cannot be saved leaves nothing behind; a zero quantity is refused by the CHECK | `test_a_request_stores_its_lines_and_the_sessions_window_as_the_right_instants`, `test_a_request_naming_an_unknown_type_leaves_no_request_behind`, `test_the_database_refuses_a_zero_quantity_line` |
+| IS-19 | accepting reserves the lowest tags and confirms; stock held by another event refuses it; the exclusion constraint refuses overlapping periods and allows back-to-back ones | `test_accepting_reserves_the_lowest_asset_tags_and_confirms_the_request`, `test_accepting_when_another_event_holds_the_stock_is_refused_and_reserves_nothing`, `test_the_exclusion_constraint_refuses_one_unit_reserved_for_two_overlapping_periods`, `test_a_unit_returned_when_the_next_period_starts_can_be_reserved_again` |
+| IS-41 | reason, who and when are stored; the CHECK keeps reason and status in step; a rejection cannot overwrite an accepted request | `test_rejecting_stores_the_reason_and_who_decided`, `test_the_database_keeps_a_rejection_reason_and_the_status_in_step`, `test_a_request_accepted_first_cannot_then_be_rejected` |
+| IS-43 | an increase adds a unit and a decrease releases the highest tags; a change the stock cannot cover changes nothing; a rejection keeps the reservation; one pending change per item; no change to the same quantity | `test_an_accepted_increase_reserves_the_extra_unit_and_updates_the_quantity`, `test_an_accepted_decrease_releases_the_highest_tags`, `test_an_increase_the_stock_cannot_cover_is_refused_and_changes_nothing`, `test_a_rejected_change_stores_its_reason_and_leaves_the_reservation_alone`, `test_the_database_allows_only_one_pending_change_per_item`, `test_the_database_refuses_a_change_to_the_same_quantity` |
+| IS-66 | `cancelled` is a real enum value; cancelling frees units so another request can be accepted; a waiting change is rejected; a cancelled request cannot be cancelled again | `test_cancelling_a_confirmed_request_frees_its_units_for_another_request`, `test_cancelling_a_pending_request_marks_it_cancelled`, `test_cancelling_rejects_a_change_still_waiting_on_the_request`, `test_a_request_that_is_already_cancelled_cannot_be_cancelled_again` |
+
+## Sprint 4 — Notification (Event Organizer) (IS-23, Nawaz)
+
+Source: IS-23 "Notification (Event Organizer)" (the Sprint 1 user stories
+document): "As an Event Organizer, I want to receive notifications about
+important updates to my event request, so that I can keep track of its
+progress and respond when action is required." Unit tests:
+`test_notification_organizer.py` (who is told what),
+`test_notification_hook_organizer.py` (when). Integration (real Supabase, 2
+tests): `test_notification_organizer_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| The request is submitted: the organizer receives a submission notification | `test_notification_organizer.py::test_the_organizer_is_told_each_milestone_of_their_request[submitted]`, `test_the_organizer_is_told_of_their_own_submission`, `test_notification_hook_organizer.py::test_submitting_triggers_one_notification_with_the_organizer_as_the_actor` | `_submit_sessions` -> `organizer_event_news("submitted")` |
+| The coordinator requests clarification or amendment: notified | none | **not built**: no such request exists (open-questions) |
+| The coordinator approves or rejects: the organizer is notified of the decision | `[approved]`, `[rejected]` in `test_the_organizer_is_told_each_milestone_of_their_request`, `test_approving_triggers_one_notification_for_the_whole_request`, `test_rejecting_triggers_one_notification_for_the_whole_request` | `_decide` -> `organizer_event_news("approved" / "rejected")` |
+| The event becomes confirmed: a confirmation notification | `[confirmed]`, `test_confirming_a_session_triggers_the_hook` | `confirm_event` route |
+| The event is cancelled: a cancellation notification | `[cancelled]`, `test_cancelling_a_session_triggers_the_hook` | `cancel_event` route |
+| (design) Nobody is told about their own decision | `test_the_organizer_is_not_told_of_anything_else_they_did_themselves` (hand-mutated) | actor check in `organizer_event_news` |
+| (design) A refused or lost-race action tells nobody | `test_a_refused_decision_triggers_nothing`, `test_a_submission_that_lost_a_race_triggers_nothing`, `test_a_confirmation_that_loses_a_race_triggers_nothing`, `test_a_cancellation_that_loses_a_race_triggers_nothing` (hand-mutated) | hooks run after the status move |
+| (design) Planning is not news | `test_starting_planning_is_not_news_to_the_organizer` | `_decide` only notifies approved / rejected |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+
+## Sprint 4 — Notification (Event Coordinator) (IS-24, Nawaz)
+
+Source: IS-24 "Notification (Event Coordinator)" (the Sprint 1 user stories
+document): "As an Event Coordinator, I want to receive notifications about
+important updates to events assigned to me, so that I can coordinate the
+required arrangements and respond to issues promptly." Unit tests:
+`test_notification_event_coordinator.py` (who is told what),
+`test_notification_hook_event_coordinator.py` (when), plus the IS-69 tests it
+builds on (`test_notification_service.py`, `test_notification_hook_*.py`).
+Integration (real Supabase, 2 tests):
+`test_notification_event_coordinator_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Only for events assigned to them | `test_the_coordinator_told_is_the_current_one_not_the_organizer`, `test_only_the_coordinator_assigned_to_that_session_is_told`, `test_a_session_with_no_coordinator_yet_tells_nobody` | `_notify_coordinator_of` uses `events.coordinator_id` |
+| Auto-assigned: told | IS-69: `test_notification_hook_coordinator.py` | `coordinator_assigned` |
+| The organizer submits a significant change request: told | `test_a_significant_change_request_tells_the_assigned_coordinator_and_names_the_session`, `test_a_significant_change_request_triggers_the_hook`, `test_an_ordinary_change_request_triggers_nothing` (hand-mutated) | `request_event_change` -> `event_change_requested` |
+| Venue Staff approve or reject: told | IS-69: `test_notification_hook_booking.py` | `venue_booking_decided` |
+| Venue Staff change the booking: told | `test_a_blocked_venue_tells_the_sessions_coordinator_to_book_again`, `test_a_block_triggers_the_hook_once_for_each_booking_it_released` (hand-mutated) | `create_venue_block` -> `venue_booking_blocked` |
+| Equipment confirmed or unavailable: told | IS-69: `test_notification_hook_equipment.py` | `equipment_request_decided` |
+| Incomplete arrangements need attention: told | none | **not built**: needs a scheduler and a definition (open-questions) |
+| (design) A refused action tells nobody | `test_a_refused_change_request_triggers_nothing`, `test_a_refused_block_triggers_nothing`, `test_a_block_that_releases_nothing_triggers_nothing` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+
+## Sprint 4 — Notification (Venue Staff) (IS-25, Nawaz)
+
+Source: IS-25 "Notification (Venue Staff)" (the Sprint 1 user stories
+document): "As Venue Staff, I want to receive notifications about
+venue-related requests and changes, so that I can review and maintain the
+appropriate venue arrangements for events." Unit tests:
+`test_notification_venue_staff.py` (who is told what),
+`test_notification_hook_venue_staff.py` (when), plus the edit hooks in
+`test_event_update.py` and `test_event_change_requests.py`. Frontend:
+`notifications.test.js`. Integration (real Supabase, 4 tests):
+`test_notification_venue_staff_integration.py`. No migration.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| A coordinator submits a booking request that needs review: Venue Staff are notified | `test_a_booking_request_tells_every_venue_staff_member_and_nobody_else`, `test_requesting_a_venue_triggers_the_hook_with_the_new_booking` | `create_booking_request` -> `venue_staff_booking_requested` |
+| An event with a venue arrangement is changed in a way that affects the venue: notified | `test_a_change_to_attendance_layout_or_accessibility_tells_venue_staff`, `test_is25_an_update_tells_venue_staff_which_fields_changed_and_who_changed_them`, `test_is25_approving_a_change_tells_venue_staff_which_fields_changed` | `update_event`, `approve_change_request` -> `venue_staff_event_news("changed")` |
+| The event is rescheduled, the new date or time affecting the booking: notified | `test_a_new_date_or_time_tells_venue_staff_the_session_was_rescheduled`, `test_a_change_to_a_session_with_no_live_booking_is_not_news` | same; only if a booking is pending or confirmed |
+| The event is cancelled: notified | `test_a_cancelled_session_with_a_live_booking_tells_venue_staff`, `test_a_booking_the_cancellation_just_released_still_counts`, `test_cancelling_a_session_triggers_the_hook_with_the_bookings_it_released` | `cancel_event` -> `venue_staff_event_news("cancelled", released_booking_ids)` |
+| Only for venue matters relevant to them | `test_a_change_the_venue_does_not_depend_on_is_not_news`, `test_a_session_whose_bookings_are_over_is_not_news`, `test_an_old_release_from_before_the_cancellation_does_not_count` (hand-mutated) | live-booking filter and the field list in `notification_service` |
+| (design) Nobody is told about their own action | `test_the_person_who_requested_is_not_told_even_when_they_are_venue_staff`, `test_the_person_who_changed_the_session_is_not_told` (hand-mutated) | actor excluded in `_venue_staff_ids` |
+| (design) A refused action tells nobody | `test_a_refused_booking_request_triggers_nothing`, `test_a_refused_cancellation_triggers_nothing` (hand-mutated) | hooks run after the write |
+| (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
+| (design) The notification opens the booking | `notifications.test.js::links a venue booking notification ...` | `ENTITY_ROUTES.venue_booking` |
+
+## Overwrite Venue Booking (Josiah, 2026-11-03)
+
+Source: "As a Venue Staff, I want to overwrite the previously approved venue
+booking, so that the event will not have an unsuitable venue." Found marked
+"Done" on the board with nothing built; reasoning for every interpretation
+call in `docs/design-decisions.md` and `docs/open-questions.md`. Unit tests:
+`test_venue_booking_overwrite.py` (service + authz + route),
+`test_notification_event_coordinator.py` (the new notification),
+`VenueBookingReviewView.test.js` (the UI). Guards marked (guard) were
+mutation-tested by hand.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can overwrite an approved (confirmed) booking with a different status | `test_overwriting_releases_the_booking_and_leaves_every_other_booking_untouched`, `test_the_route_overwrites_the_booking`, `VenueBookingReviewView.test.js::overwrites the booking and shows the event reverted to planning` | `POST /venues/bookings/<id>/overwrite` (`venues/routes.py::overwrite_venue_booking_route`), `booking_release.release_booking` (confirmed -> released) |
+| A reason is required | `test_the_route_needs_a_reason` (guard), `test_the_route_refuses_a_blank_reason[*]` (guard), `VenueBookingReviewView.test.js::requires a reason before submitting` (guard, frontend) | route's own `isinstance`/`.strip()` check; `overwrite()` in the view |
+| Only Venue Staff may overwrite; everyone else is refused | `test_venue_staff_may_overwrite_a_confirmed_booking`, `test_nobody_but_venue_staff_may_overwrite_a_booking[*]`, `test_the_route_refuses_a_non_venue_staff_caller_with_a_404` | `rules.py::rule_venue_booking_overwrite` (`DENY_NOT_FOUND` for the wrong role) |
+| Only a confirmed booking can be overwritten (not pending/rejected/released/cancelled) | `test_only_a_confirmed_booking_can_be_overwritten[*]` (guard), `test_the_route_refuses_a_pending_booking` (guard) | `rule_venue_booking_overwrite`'s `_booking_status_in(booking, "confirmed")` check |
+| Set status of a venue to under maintenance, with dates/timings and a reason | satisfied by the existing venue-blocking mechanism -- see "Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry" above | `block_service.create_venue_block` (unchanged, not new for this story) |
+| If venue booking is overwritten, trigger stakeholder notifications | `test_the_route_notifies_the_coordinator`, `test_a_refused_overwrite_notifies_nobody`, `test_an_overwritten_booking_tells_the_sessions_coordinator_and_the_reason`, `test_the_coordinator_told_of_an_overwrite_is_the_current_one`, `test_an_overwritten_booking_of_an_unknown_session_tells_nobody`, `test_an_overwritten_booking_of_a_session_with_no_coordinator_tells_nobody` | `notification_service.venue_booking_overwritten`, called via `venues/routes.py::_notify_booking_overwritten` |
+| If the event is confirmed, the status reverts to planning | `test_the_route_reverts_a_confirmed_event_to_planning`, `test_an_event_that_is_not_confirmed_keeps_its_status[*]` (guard), `test_transition_is_never_attempted_for_a_non_confirmed_event[*]` (guard, isolates the route's own guard from `transition()`'s redundant `expected_from` check), `test_the_overwrite_stands_if_the_event_moved_on_since_it_was_loaded` | `overwrite_venue_booking_route`'s `event_status == "confirmed"` check + `transition(..., expected_from="confirmed")` |
+
+Not built, so not tested: reverting an event still in `safety_review` (see
+`docs/open-questions.md`); any per-venue-staff ownership/assignment
+restriction (none exists anywhere in this codebase).

@@ -53,6 +53,8 @@ by default — every route is protected unless explicitly decorated `@public`.
 | `SAFETY_REVIEW_LIST` | safety officer | role only (every officer sees every review) |
 | `SAFETY_REVIEW_VIEW` | safety officer | role only; anyone else 404 |
 | `SAFETY_REVIEW_APPROVE` / `SAFETY_REVIEW_REJECT` / `SAFETY_REVIEW_REQUEST_CHANGES` | safety officer | review must be `pending`; anyone else 404 |
+| `NOTIFICATION_LIST` / `NOTIFICATION_MARK_ALL_READ` | every authenticated user, any role or none | none; **the service scopes every query to the caller** (same warning as `EVENT_LIST`) (IS-69) |
+| `NOTIFICATION_MARK_READ` | the notification's recipient | anyone else 404 (IS-69) |
 
 All of it is in `app/authz/actions.py` (the strings) and `app/authz/rules.py`
 (the logic, with the source story quoted for every precondition).

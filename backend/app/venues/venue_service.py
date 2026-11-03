@@ -2,6 +2,29 @@
 Nawaz, Sprint 1) and Venue Staff adding, editing and deleting venues
 (IS-61 CRUD in Venue Catalogue).
 
+tentative_hold_minutes (Sprint 3, Josiah, "Venue Availability Calendar
+Tentative Hold") is edited through the same update_venue path as
+setup_minutes/turnaround_minutes, not a separate endpoint -- IS-61 landed
+on main as the venue catalogue's one write path while this was in
+progress, so there is no longer a case for a second, narrower one just for
+Venue Staff's three timing fields. See docs/design-decisions.md for why
+this merged that way instead of keeping two.
+
+INVARIANT, worth stating plainly because it is the whole reason "existing
+bookings become problematic" needs no new detection code for IS-58/the
+tentative hold story: editing setup_minutes/turnaround_minutes/
+tentative_hold_minutes NEVER retroactively changes an existing
+venue_bookings row. All three are snapshotted onto a booking once --
+setup_minutes/turnaround_minutes at request time (create_booking_request),
+tentative_hold_minutes at confirm time (confirm_booking) -- and never
+re-read from `venues` afterward. Proven by
+test_venue_settings_blocking_hold_integration.py::test_editing_venue_settings_does_not_change_existing_booking.
+See docs/design-decisions.md for the full reasoning, including the one
+soft edge this invariant does NOT cover (a still-PENDING request reviewed
+against a venue's now-changed settings, logged in docs/open-questions.md,
+not fixed -- fixing it would mean re-reading the venue later, which is
+exactly the thing this invariant depends on never happening).
+
 Deleting is a soft delete (venues.deleted_at) -- see
 supabase/migrations/20261023100000_venue_catalogue_crud.sql for why. A
 deleted venue:
@@ -26,6 +49,7 @@ from postgrest.exceptions import APIError
 from app.events.event_service import ACCESSIBILITY_NEEDS, EQUIPMENT
 from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.room_layouts.room_layout_service import list_room_layouts
 from app.safety.safety_service import withdraw_pending_review
 from app.shared.errors import AppError, NotFoundError, ValidationError
@@ -44,6 +68,12 @@ DEFAULT_BUFFER_MINUTES = 30
 # Setup and turnaround buffers are at least this long: every booking needs
 # some time to prepare and reset the room.
 MIN_BUFFER_MINUTES = 5
+# A tentative hold's default duration (24h) -- same guessed-default posture
+# as DEFAULT_BUFFER_MINUTES, flagged in docs/open-questions.md. Matches
+# venues.tentative_hold_minutes' own DB default
+# (20261019010000_venue_settings_and_hold.sql).
+DEFAULT_HOLD_MINUTES = 1440
+MIN_HOLD_MINUTES = 1
 
 _REQUIRED_ON_CREATE = ("name", "location", "capacity")
 EDITABLE_FIELDS = frozenset(
@@ -57,6 +87,7 @@ EDITABLE_FIELDS = frozenset(
         "status",
         "setup_minutes",
         "turnaround_minutes",
+        "tentative_hold_minutes",
     }
 )
 # Not editable here: operating_hours_start/end (IS-11). Nothing but the
@@ -191,6 +222,9 @@ def _validated(record: dict, kept_layouts=()) -> dict:
         "turnaround_minutes": _whole_number(
             record, "turnaround_minutes", "Turnaround time", MIN_BUFFER_MINUTES, " minutes"
         ),
+        "tentative_hold_minutes": _whole_number(
+            record, "tentative_hold_minutes", "Tentative hold duration", MIN_HOLD_MINUTES, " minutes"
+        ),
     }
 
 
@@ -228,7 +262,8 @@ def _write(query) -> dict | None:
 def create_venue(body) -> dict:
     """IS-61 AC1: Venue Staff add a venue. Name, location and capacity are
     required; everything else defaults (no facilities, available, 30-minute
-    setup and turnaround, no operating-hours restriction)."""
+    setup and turnaround, a 24h tentative hold, no operating-hours
+    restriction)."""
     body = _body(body)
     missing = [field for field in _REQUIRED_ON_CREATE if body.get(field) in (None, "")]
     if missing:
@@ -237,6 +272,7 @@ def create_venue(body) -> dict:
         "status": "available",
         "setup_minutes": DEFAULT_BUFFER_MINUTES,
         "turnaround_minutes": DEFAULT_BUFFER_MINUTES,
+        "tentative_hold_minutes": DEFAULT_HOLD_MINUTES,
         **body,
     }
     row = _write(supabase.table("venues").insert(_validated(record)))
@@ -246,14 +282,16 @@ def create_venue(body) -> dict:
 
 
 def update_venue(venue_id: str, body) -> dict:
-    """IS-61 AC2: Venue Staff edit a venue's details. Only the fields sent
-    change, but the whole record is re-checked, so the result is always a
-    valid venue.
+    """IS-61 AC2: Venue Staff edit a venue's details, including (Sprint 3)
+    its tentative hold duration. Only the fields sent change, but the whole
+    record is re-checked, so the result is always a valid venue.
 
     Existing bookings aren't touched: each booking snapshotted the venue's
     setup/turnaround minutes when it was made (see
-    20261005100000_venue_bookings.sql), so a changed buffer applies to new
-    bookings only."""
+    20261005100000_venue_bookings.sql) and its tentative_hold_minutes at
+    confirm time (app.venues.booking_service.confirm_booking), so a changed
+    value applies to new bookings/confirmations only -- see this module's
+    own docstring for the invariant this depends on."""
     body = _body(body)
     if not body:
         raise ValidationError("Nothing to update.")
@@ -319,11 +357,11 @@ def delete_venue(venue_id: str, deleted_by: str) -> dict:
 
 
 def _notify_venue_deleted(released_booking: dict, venue: dict) -> None:
-    """Hook for the Notification System story, same no-op shape as
-    booking_service._notify_booking_decision. The coordinator's alert itself
-    is on the event details page (VenueRemovedAlert.vue), read from the
-    booking's released_by_venue_deletion flag."""
-    print(f"[notify] venue booking {released_booking['booking_id']} released: venue {venue['id']} deleted")
+    """The session's coordinator gets an in-app notification (IS-69,
+    notification_service.venue_booking_released). The alert on the event
+    details page (VenueRemovedAlert.vue), read from the booking's
+    released_by_venue_deletion flag, is unchanged."""
+    notification_service.venue_booking_released(released_booking, venue)
 
 
 def permanently_delete_venue(venue_id: str) -> None:

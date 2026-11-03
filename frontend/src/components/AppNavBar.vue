@@ -1,9 +1,11 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useNotificationStore } from '../stores/notifications'
 import { NAV_LINKS, hasAnyRole, navRoles, roleLabel } from '../lib/roles'
 
 const auth = useAuthStore()
+const notifications = useNotificationStore()
 
 // Same role-filtered NAV_LINKS the dashboard has always used -- see
 // roles.js's ROUTE_ACCESS for why the nav and the router guard both read
@@ -19,6 +21,17 @@ const roleText = computed(() => auth.roles.map(roleLabel).join(' · '))
 
 // Sign out now lives on the profile page (per the wireframe, the header
 // just shows the role and a profile icon).
+
+// Notifications bell (IS-69): every signed-in role has one. The count is
+// fetched each time a page mounts the nav bar (GET /notifications/unread-
+// count); the notifications page updates the same store from its own
+// responses. A failed fetch just leaves the bell without a count.
+const unreadCount = computed(() => notifications.unreadCount ?? 0)
+const unreadBadge = computed(() => (unreadCount.value > 99 ? '99+' : String(unreadCount.value)))
+
+onMounted(() => {
+  if (auth.isLoggedIn) notifications.refreshUnreadCount().catch(() => {})
+})
 </script>
 
 <template>
@@ -44,6 +57,20 @@ const roleText = computed(() => auth.roles.map(roleLabel).join(' · '))
 
       <div class="account">
         <span v-if="roleText" class="role-badge">{{ roleText }}</span>
+        <router-link
+          v-if="auth.isLoggedIn"
+          :to="{ name: 'notifications' }"
+          class="bell"
+          data-test="notification-bell"
+          :aria-label="unreadCount ? `Notifications (${unreadCount} unread)` : 'Notifications'"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+          </svg>
+          <span v-if="unreadCount" class="bell-count" data-test="unread-count">{{ unreadBadge }}</span>
+        </router-link>
         <router-link
           :to="{ name: 'profile' }"
           class="avatar"
@@ -160,5 +187,40 @@ const roleText = computed(() => auth.roles.map(roleLabel).join(' · '))
 .avatar:focus-visible {
   outline: 2px solid #2568e8;
   outline-offset: 2px;
+}
+.bell {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #6a6a6a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bell:hover,
+.bell.router-link-active {
+  background: #f0f0f0;
+  color: #2568e8;
+}
+.bell:focus-visible {
+  outline: 2px solid #2568e8;
+  outline-offset: 2px;
+}
+.bell-count {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #c0362c;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
 }
 </style>

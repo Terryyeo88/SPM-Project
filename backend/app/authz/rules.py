@@ -578,6 +578,19 @@ def rule_venue_calendar_view(user: Any, venue: Any = None) -> Decision:
     return rule_venue_list(user, venue)
 
 
+# -- venue.block (Josiah, Sprint 3) -----------------------------------------
+# Source: see VENUE_BLOCK in actions.py. Role-only, exact shape of
+# rule_room_layout_manage below -- a venue, like a room layout, has no
+# owner relationship to check, so "does this role get to do this at all"
+# is the whole question.
+
+
+def rule_venue_block(user: Any, resource: Any = None) -> Decision:
+    if _has_role(user, "venue_staff"):
+        return Decision.ALLOW
+    return Decision.DENY_FORBIDDEN
+
+
 # -- venue_booking.create -------------------------------------------------
 # Source: Venue Booking Request story -- the assigned Event Coordinator
 # submits a request against an event they're coordinating. The resource
@@ -688,6 +701,25 @@ def explain_venue_booking_cancel_denial(user: Any, booking: Any) -> str:
     return f"This booking is already {booking.status}, so it can't be cancelled."
 
 
+# -- venue_booking.overwrite (Overwrite Venue Booking) -----------------------
+# Source: see VENUE_BOOKING_OVERWRITE in actions.py. Venue Staff only, same
+# DENY_NOT_FOUND-for-the-wrong-role shape as approve/reject above (a
+# booking's existence is not a non-venue-staff caller's to know). Only a
+# CONFIRMED booking can be overwritten -- unlike approve/reject (which act
+# on "pending"), this is Venue Staff correcting something already decided,
+# not deciding it the first time. A pending request is still Venue Staff's
+# own call at ordinary review time (reject it); a rejected/released/
+# cancelled booking is already over.
+
+
+def rule_venue_booking_overwrite(user: Any, booking: Any) -> Decision:
+    if not _has_role(user, "venue_staff"):
+        return Decision.DENY_NOT_FOUND
+    if not _booking_status_in(booking, "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 # -- equipment.* / equipment_request.* (Nawaz, Sprint 2: IS-18) -------------
 # Source: Check Equipment Availability -- "As a Technical Support Staff,
 # I want to check whether sufficient equipment is available...". Equipment
@@ -776,6 +808,22 @@ def rule_equipment_request_reject(user: Any, request: Any) -> Decision:
 CHANGEABLE_EVENT_STATUSES = ("planning", "safety_review", "confirmed")
 
 
+def rule_equipment_request_cancel(user: Any, request: Any) -> Decision:
+    """The coordinator who raised the request cancels it. 404 for anyone
+    else (same as viewing it). Only a pending or confirmed request can be
+    cancelled -- rejected and cancelled ones are already over -- and only
+    while the event is live: once the event itself is cancelled its
+    equipment is released by that story, and a completed or rejected
+    event's equipment is not this coordinator's to give back."""
+    if not (_has_role(user, "event_coordinator") and request.requested_by == user.id):
+        return Decision.DENY_NOT_FOUND
+    if request.status not in ("pending", "confirmed"):
+        return Decision.DENY_FORBIDDEN
+    if getattr(request, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
 def rule_equipment_change_create(user: Any, request: Any) -> Decision:
     """The coordinator who raised the request asks to change a line's
     quantity. Only a CONFIRMED request has reservations to change (a
@@ -802,6 +850,9 @@ def rule_equipment_change_accept(user: Any, change: Any) -> Decision:
     if not _has_role(user, "technical_support_staff"):
         return Decision.DENY_NOT_FOUND
     if change.status != "pending":
+        return Decision.DENY_FORBIDDEN
+    # A cancelled request has given its units back; there is nothing left to change.
+    if getattr(change, "request_status", "confirmed") != "confirmed":
         return Decision.DENY_FORBIDDEN
     if getattr(change, "event_status", None) not in CHANGEABLE_EVENT_STATUSES:
         return Decision.DENY_FORBIDDEN
@@ -1023,3 +1074,53 @@ def rule_safety_review_reject(user: Any, review: Any) -> Decision:
 
 def rule_safety_review_request_changes(user: Any, review: Any) -> Decision:
     return rule_safety_review_approve(user, review)
+
+
+# -- notification.* (IS-69: Notification System) ------------------------------
+# A notification has exactly one relationship: its recipient. No role is
+# involved -- an attendee, an organiser and a Safety Officer all get them.
+#
+#   list           ALLOW for any authenticated caller. Same *** WARNING ***
+#                  as EVENT_LIST: this says "you may list notifications", not
+#                  "every notification". list_notifications / unread_count
+#                  filter to recipient_id = the caller themselves.
+#   mark_read      the recipient only; anyone else 404 (they have no
+#                  relationship to it, and a 403 would confirm another
+#                  person's notification id exists). Already read is not a
+#                  denial: marking it again is a no-op.
+#   mark_all_read  ALLOW for any authenticated caller; the update is scoped
+#                  to the caller's own rows, like list.
+
+
+def rule_notification_list(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW
+
+
+def rule_notification_mark_read(user: Any, notification: Any) -> Decision:
+    if notification.recipient_id != user.id:
+        return Decision.DENY_NOT_FOUND
+    return Decision.ALLOW
+
+
+def rule_notification_mark_all_read(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW
+
+
+# -- profile.* (IS-68: User contact and preferences) --------------------------
+#   edit_own  ALLOW for any authenticated caller, whatever their role: every
+#             user has a profile and may keep their own contact details.
+#
+# NO 404-vs-403 QUESTION HERE, and that is the design, not an omission.
+# PATCH /me/profile has no id in its URL and refuses an "id" in its body
+# (400), so the only profile it can name is the caller's own, taken from
+# their token. Another user's profile is not hidden behind a 404 or refused
+# with a 403 -- it is not reachable through this route at all. So there is
+# no resource to load and nothing for this rule to compare; the guard that
+# makes "own" true is app/me/profile_service.update_own_profile's
+# .eq("id", caller) and its refusal of "id" / "email". Same *** WARNING ***
+# as EVENT_LIST: ALLOW means "you may edit A profile -- yours", and the
+# service is what keeps it to yours. Mutation-tested (docs/traceability.md).
+
+
+def rule_profile_edit_own(user: Any, resource: Any = None) -> Decision:
+    return Decision.ALLOW

@@ -552,6 +552,11 @@ passes it, so a NULL row means a caller outside that path. So in practice there
 are no NULL rows. If one ever appears, it is either a deliberate
 system transition or a bug. The schema is left exactly as Justin wrote it.
 
+*Realized 2026-10-19: `booking_release.py`'s lazy-expiry and block-triggered
+releases are exactly the system-initiated case this paragraph anticipated --
+see "Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry" below.
+`venue_booking_status_log.changed_by` follows the same NULL convention.*
+
 ## Attendee Registration: one database call decides confirmed or waitlisted
 
 Registering is "count the session's confirmed registrations, then insert as
@@ -1438,6 +1443,174 @@ restrictions aren't recorded, so they're listed as the officer's own checks.
 the IS-9 / IS-21 impact checks now include it: it sits between planning and
 confirmed, with arrangements already made.
 
+## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, Sprint 3, 2026-10-19)
+
+Three stories, one shared mechanism underneath. Source: Week 7 Customer
+Changes #1 ("Request Venue Booking with Setup and Turnaround Time" --
+IS-58), #2 ("Venue Becomes Unavailable After Booking"), #4 ("Tentative
+Venue Holds Expire"). Aaralyn's tentative-hold flow (coordinator requests
+-> venue staff approves -> tentatively held -> coordinator confirms the
+event) was treated as settled team truth, not re-derived: it is exactly
+what `calendar_service.py` and `booking_service.confirm_booking` already
+implemented in IS-11/IS-16, so nothing about the flow itself changed --
+only what happens when the coordinator does NOT confirm in time, or the
+venue becomes unavailable underneath the hold.
+
+**One new `venue_booking_status` value, `released`, not reused `rejected`.**
+`rejected` means specifically "Venue Staff declined this request" and
+every existing reader (`_attach_rejection_reasons`, the frontend's
+rejection-reason line) assumes that. A booking that is released because the
+event was cancelled, the hold expired, or the venue was blocked was never
+declined by anyone -- conflating the two would make "Venue Staff rejected
+this" an untrue statement for the other three cases. `released` gets its
+own `venue_booking_status_log` reason text and its own API field
+(`booking["release"]`, not overloaded onto `rejection`) and its own frontend
+tab/pill, mirroring how `rejected` is surfaced rather than inventing a new
+shape.
+
+**One shared release mechanism, `app/venues/booking_release.py`, for all
+three triggers** (cancel, expire, block) -- not three ad-hoc patches. Same
+precedent as `app.equipment.reservation_release`'s own module (a release
+side-effect gets its own home once it has more than one caller), except
+this one has three call sites instead of equipment's one, which made a
+shared module a stronger case, not a weaker one. Unlike equipment's
+release (which deletes the reservation row -- equipment's own domain
+choice), a released venue booking is NOT deleted: `venue_bookings` is also
+the record a coordinator and Venue Staff read back later ("why is this
+booking released?"), so the row and its history must persist.
+
+**Every release function is plural-safe**: "every confirmed booking for
+this event/venue", never "the" one. No story this sprint needs it (one
+event still has one venue), but the unassigned "Multiple Venues for One
+Event" story (Week 7 #3, confirmed out of scope this sprint -- no Jira
+card exists for it) would silently break a singular implementation later,
+and writing it plural-safe now costs nothing extra.
+
+**`release_booking` is idempotent and silent on a lost race, deliberately
+different from `_decide_booking`'s strict-and-loud pattern.** `_decide_booking`
+guards a human decision -- a double-submitted approve/reject must be
+surfaced as a conflict, because the second click is a real user action that
+didn't do what the user expected. `release_booking` guards a SYSTEM repair:
+two different readers (say, `get_booking` and `list_bookings_for_event` in
+the same request) may race to lazily expire the same stale row, and both
+must succeed quietly -- there is no "user" whose second click needs
+surfacing. `changed_by=None` for every system-initiated release, the same
+NULL convention `event_status_log.changed_by` already established (see
+above).
+
+**IS-58's "existing bookings become problematic" AC is satisfied by
+construction, not by new detection code.** Every reader of
+`venues.setup_minutes` / `turnaround_minutes` / (new) `tentative_hold_minutes`
+was traced: only `create_booking_request` (setup/turnaround, once, at
+request time) and `confirm_booking` (hold, once, at confirm time) ever read
+them from the venue row. Neither is ever re-read afterward -- a booking
+snapshots the venue's settings at the moment it needed them
+(`venue_bookings.hold_minutes`, mirroring the existing
+`setup_minutes`/`turnaround_minutes` columns IS-14 already added to
+`venue_bookings`). Editing a venue's settings therefore cannot retroactively
+invalidate an existing booking, because nothing about an existing booking
+is ever recomputed from the venue's current settings. This is proven, not
+just asserted: `test_venue_settings_blocking_hold_integration.py` edits a
+venue's settings after a booking exists and asserts the booking's own
+snapshotted values are unchanged. "Identified rather than silently removed"
+is therefore trivially true -- there is nothing that could silently remove
+it.
+
+**Venue blocking releases only already-CONFIRMED bookings at
+block-creation time; a PENDING request overlapping a new block is left
+alone.** Deciding a pending request that now overlaps a block is Venue
+Staff's own call when they get to reviewing it (they'll see the block
+either way, since `_blocked_period_exists` is also checked at confirm
+time) -- auto-releasing a request nobody has looked at yet would be a
+second, silent decision layered on top of the one Venue Staff is about to
+make. The confirm-time guard is the backstop: a pending request can never
+be confirmed INTO an already-blocked period, regardless of when the block
+was created relative to the request.
+
+**Hold expiry is lazy (read-triggered), not a background job.** No
+scheduler/cron infrastructure exists anywhere in this codebase or its
+deployment (no APScheduler/Celery, no pg_cron, no scheduled GitHub Actions
+workflow -- confirmed by reading every workflow file and every
+`requirements.txt`; Flask's dev server is the only thing that runs this
+app). Introducing one for a single feature would be a new category of
+infrastructure the team has no other use for yet. Instead, every call site
+that currently trusts `venue_bookings.status == "confirmed"` as "this is
+genuinely holding the venue" now runs the booking through
+`release_expired_hold` / `touch_expired_holds` first (full list: the
+confirm-time overlap check, `get_booking`, `list_bookings` /
+`list_bookings_for_event`, the venue calendar, `change_impact._venue_impacts`,
+`safety_service.arrangement_problems` / `review_detail`, and the new
+`confirm_event` gate below). This is an explicit, documented trade-off:
+the system is eventually-consistent on hold expiry (a venue only actually
+frees up the next time someone reads it), not point-in-time consistent (a
+hold does not expire itself the instant its clock runs out, the way a
+cron job polling every minute might). Nothing in any of the four customer
+stories asked for second-granularity expiry, and the codebase's own
+`docs/design-decisions.md` (see `event_status_log.changed_by`, above) had
+already anticipated exactly this shape of problem.
+
+**The expiry predicate is "elapsed AND the event has not already reached
+`confirmed`/`completed`", not just elapsed time.** A booking whose event
+reached `confirmed` long ago (Aaralyn's flow's own happy path) must never
+be re-expired just because `touch_expired_holds` runs again later -- the
+hold graduated into a real booking the moment the event confirmed, and the
+clock on "coordinator didn't act in time" stopped meaningfully applying.
+Without this guard, a long-confirmed event's venue booking would
+incorrectly flip to `released` the next time anything touched it, which
+would be a severe regression, not a fix. This was mutation-tested by hand
+(the guard removed, caught independently by three tests across three call
+sites) specifically because it is easy to get backwards.
+
+**Critical gap closed: `confirm_event` never checked venue-booking state
+at all before this sprint.** `events/routes.py::confirm_event` previously
+checked only that the Safety Officer approved (Week 7 #6) before moving
+the event to `confirmed`. Nothing stopped an event from reaching
+`confirmed` with a `released` (expired or blocked-away) venue booking,
+directly violating "an expired hold should not be treated as a confirmed
+booking" -- the story's own central AC. `has_live_confirmed_booking(event_id)`
+closes this: it touches the event's confirmed bookings for expiry and
+refuses the confirm (400) if none genuinely remain. This is the single
+most load-bearing fix in this sprint's work, found during planning rather
+than already known, and was mutation-tested by hand.
+
+**Venue blocking vs. a confirm racing at the same instant is an app-level
+check only, not a database-level guard.** IS-16's exclusion constraint
+guards two routine, customer-facing confirms colliding -- a common,
+expected race. A block-creation racing a confirm is two different staff
+actions (Venue Staff blocking a venue, Venue Staff confirming a booking)
+landing at the same instant -- much rarer, and closing it at the database
+level would need its own SQLSTATE plus a Flask-side translation, a pattern
+this codebase uses for exactly one other case (IS-16's own `23P01`/`40P01`
+handling). We chose not to add a second one for a narrower race, and
+documented this as an accepted trade-off rather than a settled non-issue:
+a Venue Staff member confirming a booking in the exact instant another
+Venue Staff member blocks the same venue could, in principle, still let
+both writes land. `_blocked_period_exists` is checked at confirm time, so
+the window is the single query-to-write gap in `confirm_booking`, not
+anything wider.
+
+**`confirmed_at` is backfilled for existing confirmed rows from
+`venue_booking_status_log`'s latest `to_status='confirmed'` entry --
+genuinely recoverable, so it is.** Rows that predate this migration have no
+historical `hold_minutes`, since no such setting existed when they were
+confirmed; those get the migration's transient default (then the column's
+default is dropped, so every booking confirmed from now on must supply its
+own snapshot explicitly). This is a one-time migration exception, not a
+precedent for leaving `hold_minutes` sometimes-optional going forward.
+
+**`ALTER TYPE ... ADD VALUE` for `released` is its own migration file.**
+Postgres does not allow a new enum value to be read in the same
+transaction that added it; isolating it in
+`20261019020000_venue_booking_released_status.sql` avoids "unsafe use of
+new value of enum type" on `supabase db reset`, where every migration runs
+in sequence.
+
+**Cross-file edits, narrow and additive, flagged for sign-off before
+merge.** `change_impact.py` (Aaralyn's) and `safety_service.py` (Justin's)
+each gained only a `touch_expired_holds` / `release_expired_hold` call
+ahead of their own existing logic -- no changes to either teammate's own
+decisions. Flagged in the PR for their explicit sign-off, same discipline
+already used for Terry's cross-file commit earlier this sprint.
 
 ## Venue Categories (IS-60, Sprint 3, 2026-10-23)
 
@@ -1746,3 +1919,858 @@ including whether a venue may close after midnight.
 everyone else (venues are shared inventory every coordinator can list, so
 there's nothing to hide with a 404). Edit is `POST /venues/<id>`, not PATCH,
 matching `POST /room-layouts/<id>`.
+
+## Notification System (IS-69, Sprint 4, 2026-10-27)
+
+IS-69 builds where notifications land. Until now every story that said
+someone "is notified" called a `print()` placeholder. Built: table
+`public.notifications` (migration `20261027000000_notifications.sql`),
+`app/notifications/notification_service.py`, routes in
+`app/notifications/routes.py`, actions `notification.list` /
+`notification.mark_read` / `notification.mark_all_read`, and the web app's
+notifications page (see "The notifications page" below). The ticket's acceptance
+criteria weren't in the repo, so the working criteria in
+`docs/traceability.md` are our reading. They and the calls below are flagged
+in docs/open-questions.md.
+
+### The five hooks now write notifications, with their signatures unchanged
+
+The five `_notify_*` hooks keep their names and arguments. Each body is now
+one call handing those arguments to `notification_service`. Working out who
+to tell, and every query that needs, lives in `notification_service`, so the
+stories' own modules gain no notification queries:
+
+| Hook (owner) | Calls | Who is told |
+|---|---|---|
+| `coordinator_service._notify_coordinator_assigned` (Justin) | `coordinator_assigned` | the coordinator assigned or reassigned |
+| `booking_service._notify_booking_decision` (Josiah) | `venue_booking_decided` | the session's coordinator, for confirmed / rejected |
+| `equipment_service._notify_request_decision` (Nawaz; also `change_service`) | `equipment_request_decided` | the session's coordinator, for confirmed / rejected / change accepted / change rejected |
+| `safety_service._notify_safety_review` (Justin) | `safety_review_changed` | every Safety Officer for submitted / withdrawn; the session's coordinator for a decision |
+| `venue_service._notify_venue_deleted` (Aaralyn) | `venue_booking_released` | the session's coordinator |
+
+Four existing test files monkeypatch hooks (`test_coordinator_assignment.py`,
+`test_coordinator_assignment_status.py`, `test_equipment_change.py`,
+`test_equipment_reject.py`). They pass untouched, which is the evidence the
+calling code didn't move. One `test_notification_hook_<name>.py` per hook
+checks it passes its arguments through unchanged. Each hook's rewiring and
+its test are their own commit, pending its owner's sign-off, so any of them
+can be dropped and the suite stays green.
+
+### Who is told: the session's current coordinator
+
+A decision on a venue booking or equipment request goes to
+`events.coordinator_id`, not to the booking's or request's `requested_by`.
+Since reassignment (Week 7 #5), they can differ, and the coordinator running
+the session now is the one who has to act on a decision. Nobody is told
+about their own action: a coordinator cancelling their own booking gets
+nothing, so the hook ignores `cancelled`. A session with no coordinator
+notifies nobody.
+
+A safety submission goes to every Safety Officer, since any of them may pick
+it up (there's no assignment step). One row per officer, so each person's
+read state is their own.
+
+### In-app only
+
+The container diagram already gives the API "in-app notifications" and the
+SPA the job of showing them. Email and SMS are deferred. No mail or SMS
+provider is set up, which means credentials, sender verification and a
+delivery and bounce story nobody has scoped. Registrations' `notify_email` /
+`notify_sms` preferences are stored, but nothing reads them yet.
+
+### Writing is best effort: a failure is logged, not raised
+
+Every hook runs after its story's own change is written. If writing the
+notification then failed and raised, the caller would get a 500 for an
+action that already happened (the booking IS confirmed), and might retry
+it. So each writing function catches `Exception`, logs it with the
+traceback (`logger.exception`), and returns. The trade-off: a notification
+can be lost silently, as far as the user can tell. The log is the only
+record, and there is no retry or outbox. That's acceptable while a
+notification only says something the user can also see on the relevant
+page. It would not be once a notification is the only way someone learns
+something.
+
+`BaseException` is not caught. The unit-test guard
+(`UnitTestDatabaseAccessError`) is one on purpose, so a unit test that
+reaches the real database still fails loudly. With the new conftest fixture
+`_notifications_go_to_a_fake` disabled, 26 existing unit tests fail that
+way; with it, they pass.
+
+### The entity link has no foreign key
+
+`entity_type` / `entity_id` say what a notification is about (`event` or
+`safety_review` so far), so the frontend can link to it. One column can't
+reference several tables, so there is no foreign key. Deleting the entity
+leaves the notification pointing at nothing (an orphan). The table only
+checks that a link has both halves or neither. Deletes are rare
+(permanently deleted venues, drafts), and a link that leads nowhere should
+be shown as plain text by the frontend. The alternative (one nullable
+foreign-key column per entity type) needs a migration per new type, for a
+cost that doesn't exist yet. `type` is text for the same reason, not an
+enum: an enum value can never be removed.
+
+### RLS: the recipient reads their own, nobody writes
+
+Flask uses the service-role key and does the real check in `app/authz`. RLS
+is still scoped to the recipient (`recipient_id = auth.uid()`), not the
+"any authenticated user" placeholder on older tables, because a
+notification names events and people. A signed-in caller going around Flask
+must not read anyone else's. There is no insert, update or delete policy,
+so only the backend writes. Proven by
+`test_notifications_integration.py`. Mutation-tested by hand once: loosening
+the live policy to `auth.role() = 'authenticated'` made
+`test_a_signed_in_user_reads_only_their_own_notifications_directly` fail
+(Alice's direct read returned Bob's notification). With it restored, all
+pass.
+
+### Reading and marking read
+
+- `GET /notifications` gives the caller's own, newest first, capped at 50
+  (`?unread=true` for unread only), plus `unread_count`.
+- `GET /notifications/unread-count` is the bell's cheap poll.
+- `POST /notifications/<id>/read` marks one read.
+- `POST /notifications/read-all` marks all of the caller's read.
+
+Every query is scoped to the caller in the service, because
+`notification.list` is role-free and can't scope a query (same warning as
+`EVENT_LIST`). Someone else's notification id is a 404, as is a malformed
+one (instead of Postgres's 500). Marking read is conditioned on
+`read_at IS NULL`, so a second mark keeps the first read time and isn't an
+error. Mutation-tested by hand: removing that condition, and separately the
+recipient scope on the list, each made the unit and integration tests fail.
+
+### The notifications page
+
+`/notifications` (`views/NotificationsView.vue`) lists the caller's own,
+newest first as the backend sends them, unread ones shaded and in bold, with
+"Mark all as read" and an empty state. Clicking an unread one marks it read.
+Every route returns the new unread count, so the page takes the count from
+the response and doesn't refetch. It hands the count to a small Pinia store
+(`stores/notifications.js`) so anything else showing it agrees.
+
+- **Open to every role.** Its `ROUTE_ACCESS` entry lists every role, like
+  `profile`, matching the backend's role-free `notification.*` rules. It is
+  not a nav link: `NAV_LINKS` can't show a count, and `navRoles()` hides
+  links from the dashboard-only roles.
+- **Links only to pages that exist.** `lib/notifications.js::ENTITY_ROUTES`
+  maps `event` to the event page and `safety_review` to the safety review.
+  A notification links there only if the caller's roles can reach that page,
+  since the router would only bounce them to the dashboard. Any other entity
+  type is plain text, and no route was added for anyone else's story.
+  Following a link also marks the notification read.
+- **A link can still lead to a deleted entity.** There's no foreign key (see
+  above), so the page it opens shows its own "not found".
+- **The bell** sits in `AppNavBar.vue` (Aaralyn's), beside the profile icon,
+  for every signed-in role. It fetches `GET /notifications/unread-count`
+  each time a page mounts the nav bar, and doesn't poll in between. It's its
+  own commit, pending Aaralyn's sign-off; without it the page still works,
+  reached by its URL.
+
+### Out of scope
+
+- **A reminder scheduler** (e.g. "your event starts tomorrow"). It needs a
+  scheduler process; none exists, and APScheduler isn't a dependency. It
+  currently has no owner or ticket.
+- **New notification triggers.** Only the five existing hooks are wired.
+  Events no hook covered are left to the stories that own them: IS-39's
+  "Organizer is notified of cancellation", change-request notifications,
+  and waitlist promotion. Each is now one `notify(...)` call.
+- **PR #45** (Josiah, open) adds a sixth hook,
+  `block_service._notify_coordinator_venue_blocked`. It needs the same
+  one-line rewiring onto this service once it lands.
+
+## User contact and preferences (IS-68, Sprint 4, 2026-10-30)
+
+IS-68 stores the Edit Profile wireframe's Phone Number, Organisation
+(optional) and Communication Preferences (Email notifications / SMS
+notifications) on each user's profile. Built: four columns on
+`public.profiles` (migration `20261030000000_profile_contact_preferences.sql`),
+`app/me/profile_service.py`, the fields added to `GET /me`, a new
+`PATCH /me/profile`, and the action `profile.edit_own`. Frontend helpers are
+in `frontend/src/lib/profile.js`. The wireframe image isn't in the repo, so
+the field list comes from the ticket and from the comment in
+`RegistrationForm.vue`, which was laid out after the same screen.
+
+### The new columns are nullable with no backfill, so existing profiles are unaffected
+
+`phone`, `organisation`, `notify_email` and `notify_sms` are all nullable,
+with no default and no backfill. Adding a column without a default only
+changes the catalogue, so no existing profile is rewritten. NULL is a valid
+value for each, so every existing profile stays valid and still loads and
+saves. `test_profile_contact_integration.py` proves this against the local
+database: every seeded profile (written id, name and email only, the
+pre-IS-68 shape) is NULL in all four columns and still loads and saves.
+
+NULL means "not given yet". For the two preferences that is distinct from
+false ("chose not to"), which is why they have no default either. Blank text
+is stored as NULL, never `''`; two check constraints refuse `''` (and an
+over-long value) in the database too. Both pass on NULL, so they hold for
+every existing row.
+
+### Adding them activates two pieces of Justin's existing code, deliberately
+
+Justin's Attendee Registration was written to pick these fields up as soon
+as a profile story added them. IS-68 adds them, so both now take effect.
+That is intended, not a side effect:
+
+1. **`prefillFromProfile` in `frontend/src/lib/registrations.js`.** The
+   register form now starts from the profile's phone, organisation and
+   notification choices, because `GET /me` returns them.
+2. **`registration_service._db_profile_organisation` in
+   `backend/app/registrations/registration_service.py`.** It reads the
+   profile row with `select("*")` and copies its `organisation` into a
+   registration when the attendee ticks "include organisation". Before
+   IS-68 there was no such column, so it always found none.
+
+**With no data saved, both behave exactly as before.** This is the case
+every existing user is in, and the regression that would hurt users without
+anyone noticing. A profile whose four fields are all NULL gives the same
+register form it did before `GET /me` returned them at all: the same fields,
+the same defaults (phone blank, no organisation, email on, SMS off) and the
+same request body. `RegistrationForm.profileDefaults.test.js` asserts that
+directly, and
+`test_profile_contact_integration.py::test_with_nothing_saved_the_registration_organisation_copy_finds_nothing`
+asserts the backend half. Neither of Justin's files is changed. Justin is
+asked to confirm this is what he meant (docs/open-questions.md, IS-68).
+
+### PATCH /me/profile: your own profile, with no id anywhere
+
+`PATCH /me/profile` updates the caller's own profile. The profile is the
+token's user (`current_user().id`), never an id from the request:
+
+- **There is no id in the URL,** so another user's profile isn't reachable
+  through this route at all. That is why this route has no 404-vs-403
+  question: there is no other user's profile to hide (404) or refuse (403).
+- **The body refuses `id` and `email` outright.** A request containing
+  either is a 400 with code `profile_field_not_editable`, not silently
+  ignored. Email is the login identity (Supabase Auth's, mirrored on
+  profiles) and isn't part of this ticket.
+- **Any other field outside the four is a 400 too** (`Unknown profile
+  fields`). That includes `name`, which isn't editable here either.
+- **It is a partial update:** only the keys present are changed.
+- **The update query is scoped with `.eq("id", caller)`.** That scope is
+  what keeps "own" true, since the rule can't check it.
+
+Authz follows the 5-step checklist in docs/authz-usage.md:
+
+1. **Protocol: none added.** There is no resource to load: the route names
+   no profile, so there's nothing for a rule to compare against.
+2. **Action:** `PROFILE_EDIT_OWN = "profile.edit_own"` in `actions.py`.
+3. **Rule:** `rule_profile_edit_own` returns ALLOW for any authenticated
+   caller, whatever their role, since every user has a profile. It has the
+   same warning as `EVENT_LIST`: ALLOW means "you may edit *a* profile,
+   yours", and the service is what keeps it to yours.
+4. **Registered** in `_RULES` in `policy.py`.
+5. **`@require(PROFILE_EDIT_OWN)`** on the route, with no loader.
+
+### Validation
+
+- **Phone is optional on the profile.** The wireframe marks only
+  Organisation as optional. But every existing profile has no phone, and a
+  user must be able to save an organisation or a preference without one.
+  When a phone is given, it must match the same pattern registrations use
+  (`registration_service.PHONE_PATTERN`, imported, not copied). A
+  registration still requires a phone of its own.
+- **Organisation:** optional, at most 200 characters.
+- **The preferences** take true, false or null. Both false is allowed:
+  nothing sends email or SMS yet, and a registration still asks for at least
+  one of its own.
+
+### The preferences are stored, and only the register form's prefill reads them
+
+IS-69's notifications are in-app only, and each registration keeps its own
+`notify_email` / `notify_sms` (`20261005000000_registrations.sql`). So a
+profile-level preference sends nothing. The only thing that reads it is
+`prefillFromProfile`, which takes it as the new registration's starting
+choice. Logged in docs/open-questions.md.
+
+On the profile page, an unset preference shows the same starting values the
+register form uses (email on, SMS off), so the page shows what a new
+registration will start with. It stays NULL until the user changes one:
+saving only a phone number doesn't turn "never chosen" into a choice
+(`profilePayload` in `lib/profile.js`).
+
+### RLS reviewed, not changed
+
+RLS was already on for `profiles`, with the placeholder policy
+"authenticated read profiles": any signed-in user may select every profile
+through the publishable key. That now includes phone. Narrowing it changes
+what every other feature may read about people, so it needs its own story.
+It is logged in docs/open-questions.md and pinned by
+`test_open_question_a_signed_in_user_can_still_read_another_users_phone_directly`,
+so it can't change unnoticed. There is still no write policy, so only the
+backend writes. A signed-in user can't update any profile directly, not
+even their own; that is tested.
+
+### Mutation-tested by hand
+
+The guard is "a user can only read and write their own profile". Each part
+was broken once on its own, the profile tests were run (unit, route and
+integration, against a freshly reset local database), and then it was
+restored:
+
+| Mutant | Result |
+|---|---|
+| `.eq("id", caller)` deleted from the update query | 19 failed (13 unit/route, 6 integration) |
+| `id` removed from the refused fields | 5 failed |
+| `email` removed from the refused fields | 4 failed |
+| `id` let past both checks (refused fields and unknown fields), so silently ignored | 5 failed |
+| the same, and `id` also written into the update | 5 failed |
+
+**One caveat on the `id` and `email` rows.** With only the refusal removed,
+the field is still caught by the unknown-field check, so the request is
+still a 400 and nothing is written. The tests fail there only because they
+assert the specific code `profile_field_not_editable` and its message. The
+two stronger `id` mutants remove both checks; the 400-and-nothing-written
+assertions catch those. Restored: 69 passed.
+
+### Out of scope
+
+- **`GET /me` has no `@require` decorator.** It was already like that, and
+  it wasn't changed. Logged in docs/open-questions.md.
+- **Editing name or email.**
+- **Anything that sends email or SMS.**
+
+### IS-75 follow-up: the agreed acceptance criteria (2026-10-31)
+
+Justin answered the IS-68 open questions; IS-75 (`fix/IS-75-profile-contact-rules`)
+brings the code in line. This supersedes "nullable with no backfill" and
+"both preferences may be false" above.
+
+- **Migration `20261031000000_profile_contact_rules.sql`.** Existing phones
+  are normalised to `+65` + 8 digits (spaces/hyphens removed, `+65` added
+  to a bare 8 digits); anything unfixable is cleared. NULL preferences
+  become email on / SMS off, SMS is turned off where there is no phone,
+  and email is turned on where both are off. The preferences then become
+  `NOT NULL` with defaults, and three checks are added:
+  `profiles_phone_sg`, `profiles_notify_at_least_one`,
+  `profiles_sms_needs_phone`. Re-runnable.
+- **`profile_service` checks the profile after the change, not the
+  request.** It reads the caller's row, merges the partial update and
+  checks the rules on the result, so `{"phone": null}` is refused while
+  SMS is on. Shape errors are refused before any read; nothing is written
+  if any check fails.
+- **Organisation is read-only.** Added to the refused fields (400,
+  `profile_field_not_editable`), still returned by `GET /me`.
+- **Frontend.** `lib/profile.js` sends phone and both preferences every
+  time (`hasSavedPreferences` is gone: there is no "never chosen" state
+  any more). The SMS box is disabled only while unticked with no phone,
+  so a user who clears their phone can still untick SMS.
+
+
+## Notification (Attendees) (IS-76, Justin, 2026-11-01)
+
+Built on IS-69's notification table and `notify()`, the same way: one
+`_notify_*` hook per trigger in the story's own module, passing its
+arguments to one function in `app.notifications.notification_service`,
+which works out who to tell and writes the rows. No migration
+(`notifications.type` is text), no new page.
+
+### Who is told
+
+A session's attendees are its registrations with status `confirmed` or
+`waitlisted`. Withdrawing deletes the row, so nobody else has one. Each
+session is its own `events` row, so a change or cancellation of one
+session of a request never reaches another session's attendees.
+
+### Details changes are told at reconfirmation
+
+`confirm_event` calls `event_reconfirmed`. It does nothing on a session's
+first confirmation: registration only opens once a session is confirmed,
+so there's nobody to tell. On a later confirmation it looks at what
+changed since the previous `confirmed` entry in `event_status_log`:
+
+- `event_logs` entries since then: a change to `name` anywhere in the
+  request (it's shared and logged once), or to this session's
+  `preferred_start/end_date/time`. Entries the organiser only asked for
+  (`event_log.entry_kind` "requested") are skipped: they changed nothing.
+- The venue: the session's set of confirmed venues now, compared with the
+  set at the previous confirmation, replayed from
+  `venue_booking_status_log`. Rebooking the same venue is no change, and
+  a permanently deleted venue is told apart by the name kept on the
+  booking.
+
+If anything relevant changed, one notification goes to each attendee:
+details updated, see the event page. It doesn't say what changed
+(agreed with Justin: simpler, and the page shows the current details).
+
+Why not notify at each edit: an edit to a confirmed session sends it back
+to planning, and arrangements are reviewed again. Telling attendees at
+each step would send several notices, some about details that never go
+ahead. Every path back to planning (coordinator edit, approved change
+request, cancelled venue booking, deleted venue, and later Jo's venue
+blocking) ends at the same confirm route, so this one hook covers them
+all.
+
+### Messages and links
+
+Every message names the event and the session's start
+(`"Tech Talk" on 12 Nov 2026, 2:00 PM`), since a request's sessions share
+a name. Links use a new entity type, `attendee_event`, for the attendee's
+own page (`/attend/<id>`): attendees can't open the `event` page, so an
+`event` link would show as plain text. The cancellation has neither a
+link (the page can't be opened once cancelled) nor the reason (internal).
+
+### Best effort
+
+As IS-69: every hook runs after its own change succeeded, and a failed
+notification is logged and never fails the request.
+
+### Mutation-tested by hand
+
+Each guard broken once, confirmed caught, restored:
+
+- First-confirmation guard removed: 1 failed (it raised and was swallowed,
+  so the test also checks nothing was logged as a failure).
+- Organiser-requested entries counted: 1 failed.
+- The "since the last confirmation" filter removed: 1 failed.
+- Waitlisted attendees left out: 11 failed.
+- Venue comparison always "no change": 3 failed.
+- Date changes counted from any session: 1 failed.
+
+### Out of scope
+
+- Email/SMS (preferences are stored, not used).
+- Bookmarks (a separate story).
+- Reminders before an event.
+
+## Withdrawal of Equipment Booking (IS-66, Nawaz, Sprint 4)
+
+Source: IS-66, whose one criterion is "Allow for deletion of equipment
+booking request when it is pending and once it has been accepted", and a
+teammate's feedback on the Equipment Booking section: "allow the coordinator
+to cancel the equipment booking as well so the coordinator can make a new
+request for equipment at a different date and time if needed". The story says
+little, so these are the calls made; each is flagged in `open-questions.md`
+for confirmation.
+
+### Cancelled is a status, not a delete
+
+IS-66 says "deletion". Read as withdrawal: the request leaves the live queue
+and the coordinator can ask again, which is what the story is for. A request moves to `cancelled` and stays in the event's history, the same
+choice IS-9 made for venue bookings (`20261019300000_venue_booking_cancel.sql`).
+Deleting the row would also cascade away its items, reservations and any
+quantity-change history, and the coordinator could no longer see that a
+booking existed. The cost is one new enum value
+(`20261102000000_equipment_request_cancel.sql`).
+
+### Cancelling is what frees the units
+
+Availability is counted from `equipment_reservations` rows, never stored
+(design-decisions "Conventions this relies on"). So cancelling a confirmed
+request deletes its reservation rows and nothing else needs updating: the
+units are free for other events the moment the rows are gone. The same
+convention is why the new `cancelled` status needs no change to the
+availability arithmetic, the event page's allocated list (confirmed only) or
+the change-impact checks (pending/confirmed only).
+
+### Who and when
+
+- The coordinator who raised the request (the same person who can view it);
+  404 for anyone else, matching `equipment_request.view`.
+- A **pending** request can be cancelled too: the coordinator changed their
+  mind before Technical Support decided. Technical Support's queue loses it
+  and it shows under a new Cancelled tab.
+- Only while the event is `planning`, `safety_review` or `confirmed` (the
+  same window as IS-43 quantity changes). A cancelled event's equipment is
+  already released by the Release Equipment on Cancel story.
+- 403 (not 404) for a rejected or already cancelled request, or a closed
+  event: the caller can see the request, the action just is not available.
+
+### Racing a decision
+
+Cancelling moves the status conditioned on it still being what was read, the
+same guard `accept_request`/`reject_request` use. If Technical Support
+accept or reject the request at the same moment, the cancel matches nothing
+and says so, instead of freeing units that were just reserved or cancelling a
+decided request. If freeing the units fails, the status is put back.
+
+### A waiting quantity change dies with the request
+
+A pending IS-43 change on a cancelled request would sit in Technical
+Support's queue with nothing to change. It is rejected with the reason "The
+equipment request was cancelled.", and `rule_equipment_change_accept` also
+refuses a change whose request is no longer confirmed, so a change cannot be
+accepted even if that update were missed.
+
+### No reason required
+
+IS-9 requires a reason to cancel a venue booking. Nothing here asks for one:
+the coordinator is withdrawing their own request, and nobody has to act on
+the answer. Easy to add (a column plus a text box) if the team wants it.
+
+## Receive Technical Support Notifications (IS-26, Nawaz, Sprint 4)
+
+Source: IS-26's criteria (see `traceability.md`): Technical Support Staff are
+notified when equipment is requested, when equipment requirements change,
+when an event with equipment is rescheduled or cancelled, when equipment
+becomes unavailable, and only for matters relevant to them. It builds on
+IS-69's notification service (`notify()`, best effort, in-app only) and adds
+no table and no migration: `notifications.type` is free text by design.
+
+### "The relevant Technical Support Staff" is the role
+
+Nothing in the system assigns a Technical Support member to a request or an
+event (the Technical Support queue is shared, and `rule_equipment_request_*`
+check the role only). So every user with the `technical_support_staff` role
+is told, the same choice IS-69 made for Safety Officers (every one, because
+any of them may pick the item up). "Relevant" is then enforced by *what*
+triggers a notification, not by *who* receives it: an event is only news if
+it has an equipment request that is `pending` or `confirmed`, and an edit is
+only news if it touched the date, time, equipment list or room layout.
+
+### The person who did it is not told
+
+Same rule as IS-69 ("Nobody is told about their own action"). It only matters
+for a user who holds both roles, but the hook passes the actor so it holds.
+
+### Five triggers, three of them on the story's own code
+
+| Criterion | Trigger | Where |
+|---|---|---|
+| Requirement submitted | a request is created | `equipment_service.create_request` |
+| Requirements changed | a quantity change is asked for (IS-43); a booking is withdrawn (IS-66) | `change_service.create_change_request`, `equipment_service.cancel_request` |
+| Event rescheduled | a coordinator edit or an approved change request touches the date or time | `event_update.update_event`, `change_request_service.approve_change_request` |
+| Event cancelled | the cancel route, once the status has moved | `events.routes.cancel_event` |
+| Equipment unavailable | **not built**, see open-questions | |
+
+Every hook runs after the change it reports has been written, so a refused or
+conflicting action tells nobody. The edit hooks run after the move back to
+planning too, so a failure there does not leave a notification behind.
+
+### Reschedule is the date or time; equipment and layout edits are told alike
+
+The criterion is "rescheduled ... when the new date or time affects those
+arrangements". An edit to the equipment list or room layout changes what
+Technical Support prepare in the same way, and `change_impact` already warns
+the coordinator about exactly those fields for Technical Support, so they get
+a notification with different wording ("equipment or room layout ... was
+changed") using the same field list. Other edits (name, attendance, notes) are
+not told.
+
+### The notification links to the first live request
+
+A session can have several requests, and Technical Support cannot open the
+event page (their routes are role-gated), so the event-level notifications
+link to the session's first live request (lowest id, so it is stable). The
+frontend maps the new `equipment_request` entity to the request page.
+
+### Out of scope
+
+Email or SMS (IS-69's deferral), reminders, and a retry for a lost
+notification.
+
+## Equipment request workflow, decisions recorded after the fact (IS-17, IS-19, IS-41, IS-43, Nawaz)
+
+These four stories were merged with their reasoning only in
+`open-questions.md`. The team's Definition of Done wants it here too, so this
+is the short version; the questions to confirm stay in open-questions.
+
+### IS-17: Record Equipment Request for Event
+
+- The request is for one session, so its period is the session's own window
+  (Singapore time, missing end time = end of day) copied onto the request.
+  The coordinator does not type dates. Mirrors a venue booking's snapshot.
+- Only while the event is in `planning`, and only for its assigned
+  coordinator (a stranger gets 404): our reading of Aaralyn's IS-9 note.
+- One line per equipment type (the table's unique key), and several requests
+  per session are allowed; "request more" adds another.
+- Two inserts, no transaction (the REST client has none): if the lines fail
+  the request row is deleted again so Technical Support never sees an empty
+  request.
+- Nothing is reserved at this point: reservation is accepting, IS-19.
+
+### IS-19: Accept an Equipment Request and Reserve Stock
+
+- Availability is counted from reservation rows and never stored, so there
+  is no counter to keep in step; one reservation row per unit, each copying
+  the request's period.
+- Accepted whole or not at all: a partial accept would need a quantity
+  decision nobody asked for, and rejecting is the alternative.
+- Lowest asset tag first, so the result is predictable.
+- Only while the event is `planning`: a pending request past planning is a
+  leftover, and accepting it would take stock for nothing.
+- Racing: the status update is conditioned on `pending` (the loser's units
+  are deleted again), and the exclusion constraint refuses two requests for
+  the same unit.
+
+### IS-41: Get Warned and Reject
+
+- The warning is IS-18's existing availability check; IS-41 adds the
+  suggestion to reject and keeps Accept disabled while a line is short.
+- Reject is allowed whether or not stock is short (Technical Support may have
+  other reasons), and without an event-status check, so a leftover pending
+  request can be cleared. Rejecting takes no stock.
+- The reason lives on the request (`rejection_reason`, `decided_by`,
+  `decided_at`) because a request is decided once. A CHECK keeps reason and
+  status in step, added `NOT VALID` so existing rows are untouched.
+
+### IS-43: Update Quantity on an Existing Reservation
+
+- The coordinator's ask is a stored record (`equipment_change_requests`),
+  because Technical Support have to review it; until accepted nothing on the
+  request changes.
+- The recalculation is computed whenever the ask is read, never stored. It
+  counts the units the request already holds.
+- Accepting an increase reserves the lowest free tags; a decrease releases
+  the highest. Whole-line quantity only: a new type is a new request, a new
+  date is the event's own change flow.
+- Allowed while the event is `planning`, `safety_review` or `confirmed`;
+  one waiting ask per line (a partial unique index).
+- Accept writes the extra reservations, claims the ask, then updates the
+  line, and undoes the earlier steps if a later one fails.
+
+### Mutation-tested by hand (done for the DoD, 3 Nov)
+
+Each guard was removed in turn and the story's unit tests run; each removal
+made a test fail, then the code was restored.
+
+| Story | Guard removed | Caught by |
+|---|---|---|
+| IS-19 | the `pending` condition on the accept's status update | `test_equipment_accept.py` |
+| IS-19 | the deletion of the just-written reservations when that update loses | `test_equipment_accept.py` |
+| IS-41 | the `pending` condition on the reject's update | `test_equipment_reject.py` |
+| IS-43 | the `pending` condition on claiming a change | `test_equipment_change.py` |
+| IS-43 | the undo of the extra reservations when the claim is lost | `test_equipment_change.py` |
+| IS-43 | the un-claim when the quantity update fails | `test_equipment_change.py` |
+
+IS-17's one guard (deleting the request when its lines fail) is covered by
+`test_equipment_create_request.py` and its integration test; it has no
+conditional write to remove.
+
+### Mutation-tested by hand (IS-26)
+
+Removed in turn, each caught: telling the actor of their own action; ignoring
+whether a request is live; telling for any edit instead of only the arranged
+fields; telling before a refused request or an unacknowledged edit is
+written; and each of the five hooks (create, quantity change, withdraw,
+cancel event, approve change).
+
+## Notification (Event Organizer) (IS-23, Nawaz, Sprint 4)
+
+Source: IS-23's criteria (see `traceability.md`): the organizer is told when
+their request is submitted, when the coordinator approves or rejects it, when
+it is confirmed, and when it is cancelled (and when a coordinator asks for
+clarification or amendment: not built, see open-questions). Built on IS-69's
+notification service. No table, no migration.
+
+### One notification per decision, one per session for confirm and cancel
+
+Approving and rejecting apply to the whole request (`_decide` moves every
+under-review session together), so the organizer gets one notification for the
+request, linking to the session they opened. Confirming and cancelling are per
+session (each session has its own route call), so those notifications name the
+session by its date, the way IS-76 does for attendees. A request of three
+sessions is therefore one "approved" and, later, up to three "confirmed".
+
+### Submission is told even though the organizer did it
+
+The criterion asks for it, and IS-1's "Create an Event Request" says the same.
+Every other milestone is the coordinator's action, so the general rule
+(nobody is told about their own action) still holds and is enforced: if an
+organizer who also holds the coordinator role decides their own request, they
+are not told.
+
+### The reason stays on the event page
+
+A rejection or cancellation says to open the event, and does not repeat the
+reason: it is already shown from the status history, the same split IS-41 uses
+for equipment rejections.
+
+### Where the hooks sit
+
+| Milestone | Hook | After |
+|---|---|---|
+| Submitted (and resubmitted) | `event_service._submit_sessions` | every session has moved and the coordinator step is done |
+| Approved / rejected | `event_service._decide` | the opened session and its siblings have moved |
+| Confirmed | `events.routes.confirm_event` | the status move |
+| Cancelled | `events.routes.cancel_event` | the status move |
+
+Starting planning is not told: the story does not list it.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling the organizer of their own decisions;
+never telling them of their own submission; telling for planning; telling
+before a decision or the confirm move is final; telling once per session on
+decisions; and each of the submit, confirm and cancel hooks.
+
+## Notification (Event Coordinator) (IS-24, Nawaz, Sprint 4)
+
+Source: IS-24's criteria (see `traceability.md`). IS-69 already covers
+assignment, a venue booking confirmed or rejected, and an equipment request
+confirmed, rejected or changed. IS-24 adds what was missing. No table, no
+migration.
+
+### What was already there, and what was added
+
+| Criterion | Status |
+|---|---|
+| Only for events assigned to them | every notification goes to the session's current `coordinator_id` (IS-69) |
+| Auto-assigned: told | IS-69 `coordinator_assigned` (also on reassignment) |
+| Organizer submits a significant change request: told | **added** `event_change_requested` |
+| Venue Staff approve, reject or change the booking: told | approve/reject: IS-69; "change": **added** `venue_booking_blocked` |
+| Equipment confirmed or found unavailable: told | IS-69 `equipment_request_decided` (a rejection is "unavailable") |
+| Incomplete arrangements need attention: told | **not built**, see open-questions |
+
+### Only a significant change request is told
+
+The criterion says "significant". `event_log.significance` already splits
+changes into significant (date, time, attendance, layout, equipment) and
+ordinary (name, notes), and the coordinator's review page shows that label, so
+the hook uses the same rule. An ordinary request waits in the coordinator's
+review queue without a notification.
+
+### "Change the booking" is a venue block
+
+Venue Staff cannot edit a confirmed booking. The one thing that changes it
+under the coordinator is Venue Staff blocking the venue (Venue Becomes
+Unavailable), which releases the booking. `_notify_coordinator_venue_blocked`
+was still a print placeholder from that story; it now tells the coordinator
+to book another venue, one notification per booking released.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling for every change request; telling only
+for ordinary ones; telling before the pending check; the block hook; the hook
+firing when nothing was released; and the blocked notice going to the
+organizer.
+
+## Notification (Venue Staff) (IS-25, Nawaz, Sprint 4)
+
+Source: IS-25's criteria (see `traceability.md`): Venue Staff are notified
+when a coordinator submits a booking request that needs review, when an event
+with a venue arrangement is changed in a way that affects the venue, when it
+is rescheduled, and when it is cancelled, and only for venue matters. Built
+on IS-69's notification service, in the shape IS-26 gave Technical Support.
+No table, no migration.
+
+### "The relevant Venue Staff" is the role
+
+Bookings are not assigned to individual staff (`booking_service.list_bookings`:
+"venue_staff sees every booking ... no per-venue-staff-assignment"), so every
+user with the `venue_staff` role is told, the same choice as IS-26 and IS-69's
+Safety Officers. "Relevant" is enforced by what triggers it, not by who
+receives it: a booking request waiting for review, and a session that has a
+booking `pending` or `confirmed`.
+
+### Four triggers
+
+| Criterion | Trigger | Where |
+|---|---|---|
+| A booking request needs review | a request is created (`pending`) | `booking_service.create_booking_request` |
+| Changed in a way that affects the venue | an edit or approved change request touches attendance, room layout or accessibility needs | `event_update.update_event`, `change_request_service.approve_change_request` |
+| Rescheduled | the same, touching the date or time (different wording) | same |
+| Cancelled | the cancel route, once the status and the release have happened | `events.routes.cancel_event` |
+
+The field list is `change_impact.VENUE_DEPENDENT_FIELDS`, the fields the
+coordinator is already warned about for a venue. An edit to anything else
+(name, equipment, notes) is not told. Every hook runs after the change it
+reports, so a refused or conflicting action tells nobody.
+
+### A cancellation must count the booking it just released
+
+`cancel_event` releases the session's confirmed bookings before the
+notification runs, so by then they are `released`, not `confirmed`. Asking the
+database for live bookings alone would miss exactly the case that matters. The
+route passes the bookings it just released, and the lookup adds any still
+`pending` (a pending request is left alone by a cancellation). An older
+release, from before the cancellation, is not counted.
+
+### Notifications link to the booking
+
+The venue booking review page is what Venue Staff act on, so every one links to
+a booking: the new request, or (for event-level news) the session's first live
+booking by id. The frontend maps the new `venue_booking` entity to that page.
+
+### Mutation-tested by hand
+
+Removed in turn, each caught: telling the actor; ignoring whether a booking is
+live; telling for any edit; dropping the released bookings on cancel; counting
+any released booking instead of this cancellation's; and each of the booking,
+update, approve and cancel hooks, plus the booking and cancel hooks firing
+before their change.
+
+## Overwrite Venue Booking (Josiah, 2026-11-03)
+
+Source: Jira story "As a Venue Staff, I want to overwrite the previously
+approved venue booking, so that the event will not have an unsuitable venue",
+found mis-marked "Done" on the board with none of its ACs actually built --
+confirmed by re-checking the then-current `main` with nothing named
+"overwrite" or any per-booking status-override route anywhere in the codebase.
+
+**AC2 ("set status of a venue to under maintenance, with dates/timings and a
+reason") needed no new code.** It describes exactly the venue-blocking
+mechanism (Week 7 #2, already shipped): a `venue_blocks` row with
+`reason='maintenance'`, `block_start`/`block_end`. The literal phrase "set
+status... to under maintenance" describes what a block means, not a demand to
+flip `venues.status` -- the team's own prior reasoning for choosing a
+time-windowed table over the `status` flag
+(`docs/open-questions.md`, "Blocked periods got a new table") applies here
+unchanged. Nothing new was added for this AC.
+
+**AC1 and AC4 were the real gap.** AC1 ("overwrite an approved [i.e.
+CONFIRMED] booking with a different status") is a direct, one-off,
+venue-staff-initiated invalidation of ONE booking -- distinct from blocking
+(targets a VENUE for a time window and releases whatever it overlaps) and
+from the coordinator's own `cancel_booking` (IS-9: no reason requirement on
+the venue-staff side, and only reverts a *confirmed* event, which turned out
+to matter -- see below). AC4 ("if the event is confirmed, the status
+reverting to planning") is the part no other release trigger in this
+codebase does: cancel/expire/block all deliberately leave the EVENT alone
+(see the Venue Becomes Unavailable story's own "must NOT automatically be
+cancelled" AC); this story is the one case where Venue Staff pulling a
+booking must also unwind the event, because unlike those three triggers,
+this one can legitimately invalidate an event Venue Staff themselves just
+decided is unsuitable.
+
+**Reuses `booking_release.release_booking` for the write, not a new status
+value.** `released` already means exactly "left confirmed for a reason other
+than a Venue Staff rejection or a coordinator cancellation" -- a direct
+Venue Staff overwrite fits that same bucket. No migration needed.
+
+**Revert scope is deliberately `("confirmed",)`, not also `"safety_review"`.**
+Two existing precedents disagree with each other: `venue_service.delete_venue`
+(IS-61) reverts both; `booking_service._revert_confirmed_event` (IS-9's
+`cancel_booking`, the closer sibling -- also a single actor pulling one
+booking out from under a possibly-live event) reverts confirmed only. The
+AC's own text ("If the event is confirmed...") matches the narrower
+`cancel_booking` precedent exactly, so that's what this route follows. A
+session left in `safety_review` with its venue overwritten is therefore a
+known, pre-existing gap -- already true of `cancel_booking`, not introduced
+here -- flagged in `docs/open-questions.md` rather than silently fixed with
+a broader scope the AC didn't ask for.
+
+**Authorisation is role + booking-status, not a resource-ownership check.**
+`rule_venue_booking_overwrite`: `venue_staff` only (`DENY_NOT_FOUND`
+otherwise, same as approve/reject -- a booking's existence isn't a stranger's
+to know), and only a `confirmed` booking (`DENY_FORBIDDEN` otherwise) -- a
+pending request is still Venue Staff's own ordinary review-time call
+(reject it), and a rejected/released/cancelled booking is already over.
+
+**The route does its own orchestration, not a new service function.**
+Mirrors `events/routes.py::cancel_event`'s own established shape (release +
+conditional transition + notify, all directly in the route) rather than
+inventing a deeper `booking_service.overwrite_booking`: `release_booking`
+already lives in `booking_release.py`, and `booking_service.py` cannot
+import `safety_service`/`transitions` without a real risk of circularity
+(`safety_service` already imports `with_venue_names` from
+`booking_service`) -- though in the end this route needs neither
+`safety_service` nor `venue_service`'s broader revert scope, so the
+circularity never actually came up, just the reason the orchestration
+lives in the route either way.
+
+**Notifications (AC3).** `notification_service.venue_booking_overwritten`,
+same "tell the session's current coordinator" shape as `venue_booking_blocked`
+(IS-24), with the reason text included since this is a one-off Venue Staff
+judgement call, not a scheduled maintenance window a block's own reason enum
+already names generically.
+
+**Mutation-tested by hand:** the mandatory-reason check (frontend and
+backend); the authz rule's `status == "confirmed"` gate (all four other
+statuses); and the route's own `event_status == "confirmed"` revert guard,
+isolated with a `transition` spy specifically because removing it is
+otherwise silently masked by `transition()`'s own `expected_from` race-guard
+producing the same observable outcome -- genuine defense-in-depth, not a
+single point of correctness.

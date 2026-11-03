@@ -7,6 +7,15 @@
  * when opened by link (an old booking's venue), marked as deleted, without
  * the edit/delete actions; Venue Staff can then permanently delete it (its
  * past bookings keep its name).
+ *
+ * "Block this venue" (Sprint 3, Josiah, Week 7 #2) is a link to its own
+ * focused form (BlockVenueView.vue), the same reachability pattern
+ * RequestVenueBookingView.vue already uses from EventDetailsView.vue --
+ * not folded into the Edit venue form above, since blocking isn't an edit
+ * to the venue's own record. tentative_hold_minutes (Week 7 #1) IS part
+ * of the venue's own record, so it's edited through VenueFormView.vue
+ * alongside setup_minutes/turnaround_minutes, not a separate form here --
+ * see docs/design-decisions.md for why this merged that way.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -168,11 +177,17 @@ onMounted(loadVenue)
         <dt>Accessibility provisions</dt><dd>{{ formatList(venue.accessibility_features) }}</dd>
         <dt>Operating hours</dt><dd>{{ formatOperatingHours(venue.operating_hours_start, venue.operating_hours_end) }}</dd>
         <dt>Setup / turnaround</dt><dd>{{ venue.setup_minutes }} / {{ venue.turnaround_minutes }} minutes</dd>
+        <dt>Tentative hold duration</dt><dd>{{ venue.tentative_hold_minutes }} minutes</dd>
       </dl>
 
-      <router-link :to="`/venues/${venue.id}/calendar`" class="calendar-link">
-        View availability calendar &rarr;
-      </router-link>
+      <div class="links">
+        <router-link :to="`/venues/${venue.id}/calendar`" class="calendar-link">
+          View availability calendar &rarr;
+        </router-link>
+        <router-link v-if="isVenueStaff" :to="{ name: 'block-venue', params: { venueId: venue.id } }" class="block-link">
+          Block this venue &rarr;
+        </router-link>
+      </div>
       <p class="notice">
         The status badge above is a manually-set Sprint 1 flag, kept for a quick at-a-glance read. For a real
         day/week/month view of bookings and blocked periods, see the availability calendar.
@@ -196,9 +211,13 @@ dl { display: grid; grid-template-columns: 220px 1fr; gap: .75rem 1rem; margin-t
 dt { font-weight: 700; }
 dd { margin: 0; text-transform: capitalize; }
 .error { color: #b42318; }
+.success { color: #067647; }
 .notice { margin-top: .75rem; padding: .75rem; background: #f1f5f9; font-size: .9rem; color: #475569; text-transform: none; }
-.calendar-link { display: inline-block; margin-top: 2rem; font-weight: 700; color: #1f5fae; text-decoration: none; }
-.calendar-link:hover { text-decoration: underline; }
+.links { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: 2rem; }
+.calendar-link, .block-link { display: inline-block; font-weight: 700; text-decoration: none; }
+.calendar-link { color: #1f5fae; }
+.block-link { color: #b42318; }
+.calendar-link:hover, .block-link:hover { text-decoration: underline; }
 .saved { padding: .6rem .75rem; background: #eaf5ec; color: #2f6b3f; border-radius: 4px; }
 .deleted-banner { padding: .75rem; background: #f5e6e6; color: #a33f3f; border-radius: 4px; font-weight: 600; }
 .staff-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }

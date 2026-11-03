@@ -60,6 +60,7 @@ from typing import Optional
 
 from app.events.transitions import transition
 from app.extensions import supabase
+from app.notifications import notification_service
 
 # Statuses that count as "this coordinator is actively on the hook for
 # this event" -- draft/rejected/cancelled/completed don't block a slot.
@@ -194,10 +195,9 @@ def _workload(coordinator_id: str) -> int:
 
 
 def _notify_coordinator_assigned(event: dict, coordinator: dict) -> None:
-    """Hook for the Notification System story (also Justin, later sprint).
-    No-op placeholder for now -- swap this for the real notification call
-    once that story exists."""
-    print(f"[notify] {coordinator['name']} assigned to event '{event['name']}'")
+    """The coordinator gets an in-app notification (IS-69,
+    notification_service.coordinator_assigned)."""
+    notification_service.coordinator_assigned(event, coordinator)
 
 
 def _get_coordinator_profile(coordinator_id: str) -> dict:

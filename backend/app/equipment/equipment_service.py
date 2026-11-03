@@ -36,6 +36,7 @@ from types import SimpleNamespace
 from postgrest.exceptions import APIError
 
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import NotFoundError, ValidationError
 
 # The event's own [start, end) window, reused rather than re-derived so an
@@ -45,7 +46,9 @@ from app.shared.errors import NotFoundError, ValidationError
 from app.venues.booking_service import _event_window
 
 EQUIPMENT_STATUSES = {"available", "maintenance", "retired"}
-REQUEST_STATUSES = {"pending", "confirmed", "rejected"}
+REQUEST_STATUSES = {"pending", "confirmed", "rejected", "cancelled"}
+# What the coordinator may still cancel (rule_equipment_request_cancel).
+CANCELLABLE_REQUEST_STATUSES = ("pending", "confirmed")
 
 
 def _parse_timestamptz(value: str) -> datetime:
@@ -401,6 +404,7 @@ def create_request(event: SimpleNamespace, raw_items, requested_by: str) -> dict
         supabase.table("equipment_requests").delete().eq("id", request_row["id"]).execute()
         raise
 
+    _notify_technical_support(request_row["id"], "submitted", requested_by)
     return get_request(request_row["id"])
 
 
@@ -686,8 +690,69 @@ def reject_request(request_id: str, reason, decided_by: str) -> dict:
     return get_request(request_id)
 
 
+def cancel_request(request_id: str, cancelled_by: str) -> dict:
+    """The coordinator cancels an equipment request: it becomes "cancelled"
+    and, if it was confirmed, its units go back to the pool, so the
+    coordinator can ask again for a different date and time.
+
+    authz (rule_equipment_request_cancel) has already checked the caller
+    raised it, it is pending or confirmed, and its event is live.
+
+    Order, since there is no transaction through the REST client: first
+    move the status, conditioned on it still being what we read (so a
+    cancel racing an accept or reject of the same request matches nothing
+    and says so, instead of freeing units that were just reserved or
+    cancelling a decided request); then reject any quantity change still
+    waiting on it (IS-43: there is nothing left to change); then delete its
+    reservation rows, which is what frees the units. If either follow-up
+    step fails the status is put back so the request is not left cancelled
+    with its units still held. A waiting change that was already rejected
+    stays rejected -- the coordinator can ask again.
+    """
+    request = get_request(request_id)
+    previous = request["status"]
+    if previous not in CANCELLABLE_REQUEST_STATUSES:
+        raise ValidationError("This request can no longer be cancelled.")
+
+    updated = (
+        supabase.table("equipment_requests")
+        .update({"status": "cancelled"})
+        .eq("id", request_id)
+        .eq("status", previous)
+        .select("*")
+        .execute()
+    )
+    if not updated.data:
+        raise ValidationError("This request changed while you were cancelling it -- refresh to see its current status.")
+
+    item_ids = [item["id"] for item in request["items"]]
+    try:
+        if item_ids:
+            supabase.table("equipment_change_requests").update(
+                {
+                    "status": "rejected",
+                    "rejection_reason": "The equipment request was cancelled.",
+                    "decided_at": datetime.now(UTC).isoformat(),
+                }
+            ).in_("request_item_id", item_ids).eq("status", "pending").execute()
+            supabase.table("equipment_reservations").delete().in_("request_item_id", item_ids).execute()
+    except Exception:
+        supabase.table("equipment_requests").update({"status": previous}).eq("id", request_id).execute()
+        raise
+
+    _notify_request_decision(request_id, "cancelled")
+    _notify_technical_support(request_id, "cancelled", cancelled_by)
+    return get_request(request_id)
+
+
 def _notify_request_decision(request_id: str, decision: str) -> None:
-    """Hook for the Notification System story. No-op placeholder, same
-    shape as booking_service._notify_booking_decision -- no notification
-    plumbing exists anywhere in this codebase yet."""
-    print(f"[notify] equipment request {request_id} {decision}")
+    """The session's coordinator gets an in-app notification of a decision
+    (IS-69, notification_service.equipment_request_decided)."""
+    notification_service.equipment_request_decided(request_id, decision)
+
+
+def _notify_technical_support(request_id: str, what: str, actor_id: str | None = None) -> None:
+    """Technical Support Staff are told a request was submitted, a quantity
+    change was asked for, or a request was withdrawn (IS-26,
+    notification_service.technical_support_request_news)."""
+    notification_service.technical_support_request_news(request_id, what, actor_id)

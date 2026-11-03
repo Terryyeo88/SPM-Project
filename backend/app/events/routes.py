@@ -70,9 +70,11 @@ from app.events.event_service import (
 from app.events.event_update import preview_event_update, update_event
 from app.events.transitions import status_history, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.safety.safety_service import is_approved, list_reviews_for_event, submit_for_safety_check
 from app.shared.errors import NotFoundError, ValidationError
-from app.venues.booking_service import create_booking_request, list_bookings_for_event
+from app.venues.booking_release import release_bookings_for_event
+from app.venues.booking_service import create_booking_request, has_live_confirmed_booking, list_bookings_for_event
 
 events_bp = Blueprint("events", __name__, url_prefix="/events")
 
@@ -274,12 +276,33 @@ def confirm_event(event, event_id):
     will decide on the subsequent action"). rule_event_confirm checks the
     status; whether the latest review is approved is a database fact, so
     it's checked here. The Confirmed Status story's "fields should not be
-    changed once confirmed" half is NOT implemented (docs/open-questions.md)."""
+    changed once confirmed" half is NOT implemented (docs/open-questions.md).
+
+    Tentative Hold (Josiah, Sprint 3): also requires the event to still
+    have a LIVE confirmed venue booking -- without this gate, an event
+    could reach "confirmed" status with a booking whose tentative hold
+    silently expired while it sat in safety_review, directly violating
+    that story's AC ("an expired hold should not be treated as a
+    confirmed booking"). has_live_confirmed_booking touches away any
+    expired holds before answering. See docs/design-decisions.md for how
+    this gap was found during planning, not assumed safe.
+
+    IS-76: a RE-confirmation tells the session's attendees if a relevant
+    detail changed since it was last confirmed (see
+    notification_service.event_reconfirmed)."""
     if not is_approved(event_id):
         raise ValidationError(
             "The Safety Officer hasn't approved this session yet -- it can be confirmed once they do."
         )
-    return jsonify(_move(event, event_id, "confirmed")), 200
+    if not has_live_confirmed_booking(event_id):
+        raise ValidationError(
+            "This session's venue booking is no longer held (its tentative hold expired) -- "
+            "request a venue again before confirming."
+        )
+    updated = _move(event, event_id, "confirmed")
+    _notify_organizer(event_id, "confirmed")
+    _notify_attendees_reconfirmed(event_id)
+    return jsonify(updated), 200
 
 
 # -- Operational Feasibility Check (Week 7 change #6), coordinator side ------
@@ -324,16 +347,72 @@ def cancel_event(event, event_id):
     events can book it (app.equipment.reservation_release). Only after
     transition() succeeds -- a refused or conflicting cancel releases
     nothing. Not atomic with the status change, same as transition()'s own
-    history insert; see docs/open-questions.md."""
+    history insert; see docs/open-questions.md.
+
+    Release venue bookings on cancel (Josiah, Sprint 3): same pattern,
+    same place -- every CONFIRMED venue booking for this event is
+    released (app.venues.booking_release.release_bookings_for_event,
+    PLURAL-SAFE: every booking, not "the" one) so the venue is freed for
+    other events. The requesting coordinator sees this on their own event
+    page the same way a rejected booking already shows (VenueBookingStatus.vue).
+
+    IS-76 AC8: the session's registered and waitlisted attendees are told
+    it was cancelled (without the reason).
+
+    IS-23: the organizer is told too (the reason is on the event page).
+
+    IS-25 AC4: Venue Staff are told too, if the session had a venue booking
+    pending or confirmed.
+
+    IS-26 AC4: Technical Support Staff are told too, if the session had an
+    equipment request waiting or confirmed."""
     updated = _move(event, event_id, "cancelled")
     released = release_event_equipment(event_id)
+    released_bookings = release_bookings_for_event(event_id, "Event cancelled", changed_by=current_user().id)
+    _notify_organizer(event_id, "cancelled")
+    _notify_attendees_cancelled(event_id)
+    _notify_technical_support_cancelled(event_id)
+    _notify_venue_staff_cancelled(event_id, released_bookings)
     return jsonify(
         {
             **updated,
             "cancellation_reason": request.get_json(silent=True)["reason"].strip(),
             "released_equipment_units": released,
+            "released_venue_bookings": len(released_bookings),
         }
     ), 200
+
+
+def _notify_attendees_reconfirmed(event_id: str) -> None:
+    """IS-76 AC5/AC7 (notification_service.event_reconfirmed)."""
+    notification_service.event_reconfirmed(event_id)
+
+
+def _notify_organizer(event_id: str, what: str) -> None:
+    """IS-23 (notification_service.organizer_event_news)."""
+    notification_service.organizer_event_news(event_id, what, current_user().id)
+
+
+def _notify_venue_staff_cancelled(event_id: str, released_bookings: list[dict]) -> None:
+    """IS-25 AC4 (notification_service.venue_staff_event_news). The bookings
+    this cancellation just released are passed in: they are no longer
+    pending or confirmed, so the lookup alone would miss them."""
+    notification_service.venue_staff_event_news(
+        event_id,
+        "cancelled",
+        actor_id=current_user().id,
+        released_booking_ids=[booking["id"] for booking in released_bookings],
+    )
+
+
+def _notify_technical_support_cancelled(event_id: str) -> None:
+    """IS-26 AC4 (notification_service.technical_support_event_news)."""
+    notification_service.technical_support_event_news(event_id, "cancelled", actor_id=current_user().id)
+
+
+def _notify_attendees_cancelled(event_id: str) -> None:
+    """IS-76 AC8 (notification_service.event_cancelled)."""
+    notification_service.event_cancelled(event_id)
 
 
 @events_bp.route("/<event_id>/status-history", methods=["GET"])

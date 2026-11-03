@@ -7,11 +7,13 @@ import EventDetailsView from '../views/events/EventDetailsView.vue'
 import EventsListView from '../views/events/EventsListView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import NotificationsView from '../views/NotificationsView.vue'
 import EquipmentCalendarView from '../views/equipment/EquipmentCalendarView.vue'
 import EquipmentDetailView from '../views/equipment/EquipmentDetailView.vue'
 import EquipmentInventoryView from '../views/equipment/EquipmentInventoryView.vue'
 import EquipmentRequestDetailView from '../views/equipment/EquipmentRequestDetailView.vue'
 import EquipmentRequestsView from '../views/equipment/EquipmentRequestsView.vue'
+import BlockVenueView from '../views/venues/BlockVenueView.vue'
 import RequestVenueBookingView from '../views/venues/RequestVenueBookingView.vue'
 import RequestEquipmentView from '../views/equipment/RequestEquipmentView.vue'
 import RoomLayoutsView from '../views/venues/RoomLayoutsView.vue'
@@ -46,6 +48,13 @@ const routes = [
     name: 'profile',
     component: ProfileView,
     meta: { roles: _rolesByRouteName.get('profile') },
+  },
+  // Notifications (IS-69): every signed-in user's own.
+  {
+    path: '/notifications',
+    name: 'notifications',
+    component: NotificationsView,
+    meta: { roles: _rolesByRouteName.get('notifications') },
   },
   {
     path: '/events',
@@ -137,6 +146,12 @@ const routes = [
     name: 'venue-calendar',
     component: VenueCalendarView,
     meta: { roles: _rolesByRouteName.get('venue-calendar') },
+  },
+  {
+    path: '/venues/:venueId/block',
+    name: 'block-venue',
+    component: BlockVenueView,
+    meta: { roles: _rolesByRouteName.get('block-venue') },
   },
   {
     path: '/room-layouts',

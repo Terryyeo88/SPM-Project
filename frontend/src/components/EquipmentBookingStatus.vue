@@ -12,8 +12,10 @@
  * A cancelled event's confirmed requests read "Released" and list no
  * units (lib/equipment.js eventRequestStatus / allocatedEquipment).
  *
- * Quantity changes (IS-43): under a confirmed request, the coordinator can
- * ask Technical Support to change a line's quantity (EquipmentChangeRequests).
+ * Managing a request (EquipmentChangeRequests): under each pending or
+ * confirmed request the coordinator can cancel it -- freeing its equipment so
+ * they can ask again for a different date and time -- and, once confirmed,
+ * ask Technical Support to change a line's quantity (IS-43).
  *
  * Data: GET /events/<id>/equipment-requests
  * (app.equipment.equipment_service.list_requests_for_event).
@@ -22,6 +24,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet } from '../lib/api'
 import EquipmentChangeRequests from './EquipmentChangeRequests.vue'
 import {
+  CANCELLABLE_REQUEST_STATUSES,
   CHANGEABLE_EVENT_STATUSES,
   allocatedEquipment,
   equipmentTypeLabel,
@@ -45,7 +48,11 @@ const allocated = computed(() => allocatedEquipment(requests.value, props.event.
 // Same preconditions as rule_equipment_change_create (IS-43): a confirmed
 // request, while the event is still live.
 const canChange = computed(() => CHANGEABLE_EVENT_STATUSES.includes(props.event.status))
-const confirmedRequests = computed(() => requests.value.filter((request) => request.status === 'confirmed'))
+// Requests that can still be managed: asked-for changes (confirmed only) and
+// cancelling (pending or confirmed).
+const manageableRequests = computed(() =>
+  requests.value.filter((request) => CANCELLABLE_REQUEST_STATUSES.includes(request.status)),
+)
 
 const canRequest = computed(() => props.event.status === 'planning')
 
@@ -126,10 +133,11 @@ watch(() => [props.event.id, props.event.status], load)
       </p>
 
       <EquipmentChangeRequests
-        v-for="request in confirmedRequests"
+        v-for="request in manageableRequests"
         :key="`changes-${request.id}`"
         :request="request"
         :can-change="canChange"
+        @cancelled="load"
       />
 
       <p v-if="event.status === 'approved'" class="muted small">
@@ -166,6 +174,7 @@ tbody tr:last-child td { border-bottom: none; }
 .status-pending { background: #f7efe1; color: #8a5a12; }
 .status-confirmed { background: #eaf5ec; color: #2f6b3f; }
 .status-rejected { background: #f5e6e6; color: #a33f3f; }
+.status-cancelled { background: #eeeeee; color: #6a6a6a; }
 .status-released { background: #eeeeee; color: #5a5a5a; }
 
 .btn.small.primary {
