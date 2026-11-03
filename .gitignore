@@ -19,6 +19,12 @@ node_modules/
 dist/
 .vite/
 
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
+
 # Supabase local dev
 supabase/.branches
 supabase/.temp
