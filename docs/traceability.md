@@ -890,3 +890,28 @@ appropriate venue arrangements for events." Unit tests:
 | (design) A refused action tells nobody | `test_a_refused_booking_request_triggers_nothing`, `test_a_refused_cancellation_triggers_nothing` (hand-mutated) | hooks run after the write |
 | (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
 | (design) The notification opens the booking | `notifications.test.js::links a venue booking notification ...` | `ENTITY_ROUTES.venue_booking` |
+
+## Overwrite Venue Booking (Josiah, 2026-11-03)
+
+Source: "As a Venue Staff, I want to overwrite the previously approved venue
+booking, so that the event will not have an unsuitable venue." Found marked
+"Done" on the board with nothing built; reasoning for every interpretation
+call in `docs/design-decisions.md` and `docs/open-questions.md`. Unit tests:
+`test_venue_booking_overwrite.py` (service + authz + route),
+`test_notification_event_coordinator.py` (the new notification),
+`VenueBookingReviewView.test.js` (the UI). Guards marked (guard) were
+mutation-tested by hand.
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Venue Staff can overwrite an approved (confirmed) booking with a different status | `test_overwriting_releases_the_booking_and_leaves_every_other_booking_untouched`, `test_the_route_overwrites_the_booking`, `VenueBookingReviewView.test.js::overwrites the booking and shows the event reverted to planning` | `POST /venues/bookings/<id>/overwrite` (`venues/routes.py::overwrite_venue_booking_route`), `booking_release.release_booking` (confirmed -> released) |
+| A reason is required | `test_the_route_needs_a_reason` (guard), `test_the_route_refuses_a_blank_reason[*]` (guard), `VenueBookingReviewView.test.js::requires a reason before submitting` (guard, frontend) | route's own `isinstance`/`.strip()` check; `overwrite()` in the view |
+| Only Venue Staff may overwrite; everyone else is refused | `test_venue_staff_may_overwrite_a_confirmed_booking`, `test_nobody_but_venue_staff_may_overwrite_a_booking[*]`, `test_the_route_refuses_a_non_venue_staff_caller_with_a_404` | `rules.py::rule_venue_booking_overwrite` (`DENY_NOT_FOUND` for the wrong role) |
+| Only a confirmed booking can be overwritten (not pending/rejected/released/cancelled) | `test_only_a_confirmed_booking_can_be_overwritten[*]` (guard), `test_the_route_refuses_a_pending_booking` (guard) | `rule_venue_booking_overwrite`'s `_booking_status_in(booking, "confirmed")` check |
+| Set status of a venue to under maintenance, with dates/timings and a reason | satisfied by the existing venue-blocking mechanism -- see "Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry" above | `block_service.create_venue_block` (unchanged, not new for this story) |
+| If venue booking is overwritten, trigger stakeholder notifications | `test_the_route_notifies_the_coordinator`, `test_a_refused_overwrite_notifies_nobody`, `test_an_overwritten_booking_tells_the_sessions_coordinator_and_the_reason`, `test_the_coordinator_told_of_an_overwrite_is_the_current_one`, `test_an_overwritten_booking_of_an_unknown_session_tells_nobody`, `test_an_overwritten_booking_of_a_session_with_no_coordinator_tells_nobody` | `notification_service.venue_booking_overwritten`, called via `venues/routes.py::_notify_booking_overwritten` |
+| If the event is confirmed, the status reverts to planning | `test_the_route_reverts_a_confirmed_event_to_planning`, `test_an_event_that_is_not_confirmed_keeps_its_status[*]` (guard), `test_transition_is_never_attempted_for_a_non_confirmed_event[*]` (guard, isolates the route's own guard from `transition()`'s redundant `expected_from` check), `test_the_overwrite_stands_if_the_event_moved_on_since_it_was_loaded` | `overwrite_venue_booking_route`'s `event_status == "confirmed"` check + `transition(..., expected_from="confirmed")` |
+
+Not built, so not tested: reverting an event still in `safety_review` (see
+`docs/open-questions.md`); any per-venue-staff ownership/assignment
+restriction (none exists anywhere in this codebase).

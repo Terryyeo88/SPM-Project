@@ -12,6 +12,13 @@
  * app.authz.rules.rule_venue_booking_approve/reject is the real
  * enforcement regardless of what this page shows.
  *
+ * Overwrite Booking (Josiah): Venue Staff directly invalidate a CONFIRMED
+ * booking with a mandatory reason, same reason-required-panel pattern as
+ * Reject above -- "the event will not have an unsuitable venue". Shown
+ * instead of Approve/Reject (never both: a booking is either pending or
+ * confirmed, not both). app.authz.rules.rule_venue_booking_overwrite is
+ * the real enforcement.
+ *
  * Suitability panel: capacity/layout/accessibility are a pure client-side
  * comparison (lib/venueSuitability.js) between the event session's details
  * (embedded in the booking as `event`, since Venue Staff can't open the
@@ -38,15 +45,17 @@ const venue = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 
-const openPanel = ref(null) // null | 'reject'
+const openPanel = ref(null) // null | 'reject' | 'overwrite'
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
 const rejectReason = ref('')
+const overwriteReason = ref('')
 
 const isVenueStaff = computed(() => auth.roles.includes('venue_staff'))
 const isPending = computed(() => booking.value?.status === 'pending')
 const canDecide = computed(() => isVenueStaff.value && isPending.value)
+const canOverwrite = computed(() => isVenueStaff.value && booking.value?.status === 'confirmed')
 
 const suitability = computed(() => (event.value && venue.value ? checkSuitability(event.value, venue.value) : []))
 const deletedVenueLabel = computed(() =>
@@ -106,6 +115,24 @@ function reject() {
     openPanel.value = null
     rejectReason.value = ''
     success.value = 'Booking rejected. The coordinator can see the reason.'
+  })
+}
+
+function overwrite() {
+  if (!overwriteReason.value.trim()) {
+    error.value = 'Please give a reason for overwriting this booking.'
+    return
+  }
+  return run(async () => {
+    const result = await apiPost(`/venues/bookings/${booking.value.id}/overwrite`, {
+      reason: overwriteReason.value.trim(),
+    })
+    booking.value = result
+    openPanel.value = null
+    overwriteReason.value = ''
+    success.value = result.event_reverted_to_planning
+      ? 'Booking overwritten. The event was confirmed, so it has gone back to planning.'
+      : 'Booking overwritten. The coordinator has been told to book another venue.'
   })
 }
 
@@ -238,6 +265,29 @@ onMounted(load)
                   {{ busy ? 'Rejecting...' : 'Confirm Rejection' }}
                 </button>
                 <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reject')">Cancel</button>
+              </div>
+            </form>
+
+            <div v-if="canOverwrite" class="buttons">
+              <button type="button" class="btn reject" :aria-expanded="openPanel === 'overwrite'" :disabled="busy"
+                @click="togglePanel('overwrite')">
+                Overwrite Booking
+              </button>
+            </div>
+
+            <form v-if="openPanel === 'overwrite'" class="panel" @submit.prevent="overwrite">
+              <label for="overwrite-reason">Reason for overwriting</label>
+              <textarea id="overwrite-reason" v-model="overwriteReason" rows="3"
+                placeholder="Why this booking's venue is no longer suitable." />
+              <p class="muted small">
+                This releases the booking and tells the coordinator to book another venue. If the event is
+                confirmed, it goes back to planning.
+              </p>
+              <div class="panel-actions">
+                <button type="submit" class="btn small reject-solid" :disabled="busy">
+                  {{ busy ? 'Overwriting...' : 'Confirm Overwrite' }}
+                </button>
+                <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('overwrite')">Cancel</button>
               </div>
             </form>
 

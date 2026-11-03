@@ -3,6 +3,9 @@ IS-24 Notification (Event Coordinator) -- the two additions made on top of
 IS-69: who is told what when a venue is blocked under a booking and when the
 organizer asks for a significant change. In-memory fake, no database. When
 each is triggered is test_notification_hook_event_coordinator.py's job.
+
+Also covers Overwrite Venue Booking's venue_booking_overwritten -- a third,
+later addition to the same "tell the session's coordinator" shape.
 """
 
 from __future__ import annotations
@@ -71,6 +74,39 @@ def test_a_blocked_booking_of_an_unknown_session_tells_nobody(db):
 def test_a_blocked_booking_of_a_session_with_no_coordinator_tells_nobody(db):
     db.rows[0]["coordinator_id"] = None
     service.venue_booking_blocked({"id": "b1", "event_id": SESSION_ID})
+    assert db.notifications == []
+
+
+# -- Overwrite Venue Booking: Venue Staff directly invalidated a booking ----------------------
+
+
+def test_an_overwritten_booking_tells_the_sessions_coordinator_and_the_reason(db):
+    service.venue_booking_overwritten({"id": "b1", "event_id": SESSION_ID}, "Venue has a burst pipe")
+
+    row = _only(db)
+    assert (row["recipient_id"], row["type"]) == ("coord-1", service.VENUE_BOOKING_OVERWRITTEN)
+    assert row["message"] == (
+        'Venue Staff overwrote the venue booking for "Tech Symposium": Venue has a burst pipe. '
+        "Book another venue."
+    )
+    assert (row["entity_type"], row["entity_id"]) == (service.ENTITY_EVENT, SESSION_ID)
+
+
+def test_the_coordinator_told_of_an_overwrite_is_the_current_one(db):
+    db.rows[0]["coordinator_id"] = "coord-2"
+    service.venue_booking_overwritten({"id": "b1", "event_id": SESSION_ID}, "Unsuitable.")
+    assert [row["recipient_id"] for row in db.notifications] == ["coord-2"]
+
+
+def test_an_overwritten_booking_of_an_unknown_session_tells_nobody(db):
+    service.venue_booking_overwritten({"id": "b1", "event_id": "99999999-9999-9999-9999-999999999999"}, "x")
+    service.venue_booking_overwritten({"id": "b1"}, "x")
+    assert db.notifications == []
+
+
+def test_an_overwritten_booking_of_a_session_with_no_coordinator_tells_nobody(db):
+    db.rows[0]["coordinator_id"] = None
+    service.venue_booking_overwritten({"id": "b1", "event_id": SESSION_ID}, "x")
     assert db.notifications == []
 
 

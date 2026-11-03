@@ -1520,3 +1520,30 @@ confirm:
   window (the booking snapshots it); Venue Staff are told to check, and the
   coordinator has to cancel and ask again. Whether it should follow the event
   is a separate story.
+
+## Overwrite Venue Booking (Josiah, 3 Nov)
+
+Decisions made where the AC was silent or (per design-decisions.md) read
+narrowly on purpose. Please confirm:
+
+- **AC2 needed no new code.** "Set status of a venue to under maintenance,
+  with dates/timings and a reason" is read as describing the existing
+  venue-blocking mechanism (`venue_blocks`, `reason='maintenance'`), not a
+  demand to also flip `venues.status`. If the story's author actually meant
+  a literal status flip in addition to blocking, that's new scope.
+- **The revert-to-planning scope is `confirmed` only, not also
+  `safety_review`**, matching `cancel_booking`'s existing precedent rather
+  than `delete_venue`'s broader one. A session can sit in `safety_review`
+  with its venue booking overwritten and not revert -- an existing,
+  pre-existing gap `cancel_booking` already has, not introduced here. If
+  the Safety Officer approves a session in that state, `confirm_event`'s
+  own `has_live_confirmed_booking` gate still catches it before the event
+  reaches `confirmed` -- so the worst case is a safety review spent on an
+  already-invalid venue, not an event reaching `confirmed` with one.
+- **No stronger relationship check than "any venue_staff, any confirmed
+  booking."** Like booking approve/reject, there's no per-venue-staff
+  assignment table, so any Venue Staff member can overwrite any confirmed
+  booking, not just ones for venues they "own" (no such ownership concept
+  exists anywhere in this codebase).
+- **The Jira board had this story marked "Done" with nothing built.**
+  Flagged separately to the team; not something this entry can fix.

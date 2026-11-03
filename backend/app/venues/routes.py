@@ -32,6 +32,7 @@ from app.authz.actions import (
     VENUE_BOOKING_APPROVE,
     VENUE_BOOKING_CANCEL,
     VENUE_BOOKING_LIST,
+    VENUE_BOOKING_OVERWRITE,
     VENUE_BOOKING_REJECT,
     VENUE_BOOKING_VIEW,
     VENUE_CALENDAR_VIEW,
@@ -42,9 +43,12 @@ from app.authz.actions import (
     VENUE_VIEW,
 )
 from app.authz.decorators import require
+from app.events.transitions import TransitionConflictError, transition
 from app.extensions import supabase
+from app.notifications import notification_service
 from app.shared.errors import ValidationError
 from app.venues.block_service import create_venue_block, list_venue_blocks
+from app.venues.booking_release import release_booking
 from app.venues.booking_service import (
     BOOKING_STATUSES,
     cancel_booking,
@@ -113,11 +117,71 @@ def cancel_venue_booking_route(booking, booking_id):
     return jsonify(cancelled), 200
 
 
+# Overwrite Venue Booking: Venue Staff directly invalidate a CONFIRMED
+# booking with a mandatory reason ("the event will not have an unsuitable
+# venue"). Distinct from /cancel above (the coordinator's own action, no
+# event-status consequence) and from venue blocking (targets a VENUE for a
+# time window, see block_service.py): this is Venue Staff unilaterally
+# pulling ONE booking out from under a possibly-already-confirmed event.
+#
+# Reuses booking_release.release_booking for the actual confirmed ->
+# released write -- same race-guard and audit-log shape as every other
+# release trigger (cancel, hold expiry, block) -- then, unlike any of
+# those, also reverts the EVENT if it had already reached "confirmed"
+# (AC's own literal wording: "If the event is confirmed, the status
+# reverting to planning"). Deliberately scoped to "confirmed" only, NOT
+# also "safety_review" -- matching booking_service._revert_confirmed_event
+# (IS-9's cancel_booking, the closest sibling: a coordinator-or-staff
+# action pulling one booking out from under an event), not
+# venue_service.delete_venue's broader scope (IS-61's venue deletion, a
+# different trigger that also withdraws a pending safety review). A
+# session left in safety_review with an
+# invalidated venue is a known, pre-existing gap shared with cancel_booking
+# -- see docs/open-questions.md -- not something this route invents. Not
+# atomic across the two writes (release, then transition), same
+# non-atomic-by-design stance every other release-plus-status-change in
+# this codebase already takes.
+# Static path -- must come before GET /venues/<venue_id> below.
+@venues_bp.route("/bookings/<booking_id>/overwrite", methods=["POST"])
+@require(VENUE_BOOKING_OVERWRITE, loader=lambda booking_id: load_booking_with_event(booking_id))
+def overwrite_venue_booking_route(booking, booking_id):
+    body = request.get_json(silent=True) or {}
+    reason = body.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError("A reason is required to overwrite a venue booking.")
+    reason = reason.strip()
+
+    overwritten = release_booking(booking_id, vars(booking), reason, changed_by=current_user().id)
+
+    reverted = False
+    if getattr(booking, "event_status", None) == "confirmed":
+        try:
+            transition(
+                booking.event_id,
+                "planning",
+                current_user().id,
+                reason=f"Venue booking overwritten by Venue Staff: {reason}",
+                expected_from="confirmed",
+            )
+            reverted = True
+        except TransitionConflictError:
+            pass  # moved on since (e.g. cancelled) -- the overwrite stands either way
+
+    _notify_booking_overwritten(overwritten, reason)
+    return jsonify({**overwritten, "event_reverted_to_planning": reverted}), 200
+
+
+def _notify_booking_overwritten(overwritten_booking: dict, reason: str) -> None:
+    """Overwrite Venue Booking AC3 (notification_service.venue_booking_overwritten)."""
+    notification_service.venue_booking_overwritten(overwritten_booking, reason)
+
+
 def load_booking_with_event(booking_id: str) -> SimpleNamespace:
     """load_booking plus the booking's event's coordinator_id and status
-    (as event_coordinator_id / event_status), which rule_venue_booking_cancel
-    needs: the event's current coordinator cancels, not whoever requested
-    the booking."""
+    (as event_coordinator_id / event_status). rule_venue_booking_cancel
+    needs coordinator_id (the event's current coordinator cancels, not
+    whoever requested the booking); overwrite_venue_booking_route needs
+    event_status (to decide whether to revert the event to planning)."""
     booking = load_booking(booking_id)
     rows = supabase.table("events").select("coordinator_id, status").eq("id", booking.event_id).execute().data or []
     event = rows[0] if rows else {}
