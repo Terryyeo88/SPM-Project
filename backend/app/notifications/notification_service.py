@@ -844,7 +844,7 @@ def _details_changed_since(session: dict, since: datetime) -> bool:
 
 
 def _venue_key(booking: dict):
-    # A permanently deleted venue loses venue_id but keeps its name (IS-61).
+    # A deleted venue loses venue_id but keeps its name (IS-61).
     return booking.get("venue_id") or booking.get("venue_name")
 
 

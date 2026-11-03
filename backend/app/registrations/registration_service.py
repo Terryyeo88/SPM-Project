@@ -231,7 +231,7 @@ def _with_places(session: dict, counts: dict[str, int]) -> dict:
 
 
 def _venue(row: dict) -> dict:
-    """{"name", "location"} for one confirmed booking. A permanently deleted
+    """{"name", "location"} for one confirmed booking. A deleted
     venue has no row any more (IS-61), only the name kept on the booking."""
     venue = row.get("venues")
     if isinstance(venue, list):

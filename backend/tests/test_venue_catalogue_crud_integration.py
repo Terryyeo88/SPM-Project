@@ -1,10 +1,13 @@
 """Live Supabase tests for IS-61 CRUD in Venue Catalogue: what the unit tests'
 fakes (test_venue_catalogue_crud.py) can't prove. See
-supabase/migrations/20261023100000_venue_catalogue_crud.sql.
+supabase/migrations/20261023100000_venue_catalogue_crud.sql and
+20261103000000_venue_hard_delete.sql.
 
   AC1  an added venue is stored and listed in the catalogue.
   AC2  an edit is stored; a deleted venue can't be edited.
-  AC3  a deleted venue leaves the catalogue but can still be looked up.
+  AC3  deleting a venue removes its record from the venues table; every
+       booking of it -- completed and cancelled events' included -- keeps
+       the venue's name as text, so past records still show where they were.
   AC4  deleting releases the pending/confirmed bookings of ongoing events
        (cancelled, flagged released_by_venue_deletion, logged with a
        reason) and leaves completed/cancelled/rejected events' bookings
@@ -32,11 +35,10 @@ from postgrest.exceptions import APIError
 from supabase import create_client
 
 from app.extensions import supabase
-from app.shared.errors import ValidationError
+from app.shared.errors import NotFoundError, ValidationError
 from app.venues import venue_service as service
 from app.venues.booking_conflicts import clashes_for_booking
 from app.venues.booking_service import confirm_booking, create_booking_request, get_booking, list_bookings_for_event
-from app.venues.venue_service import VenueDeletedError, VenuePermanentDeleteError
 
 pytestmark = pytest.mark.integration
 
@@ -157,7 +159,6 @@ def test_ac1_an_added_venue_is_stored_and_listed(f):
     assert stored["supported_layouts"] == ["theatre"]
     # Not part of the form: a new venue has no set hours.
     assert (stored["operating_hours_start"], stored["operating_hours_end"]) == (None, None)
-    assert stored["deleted_at"] is None
     assert venue["id"] in _catalogue_ids()
 
 
@@ -178,19 +179,73 @@ def test_ac2_the_database_refuses_a_negative_buffer_written_straight_to_the_tabl
     assert refused.value.code == "23514"
 
 
-def test_ac3_a_deleted_venue_leaves_the_catalogue_but_can_be_looked_up_and_not_edited(f, staff):
+def _venue_row(venue_id):
+    return supabase.table("venues").select("*").eq("id", venue_id).execute().data
+
+
+def test_ac3_deleting_a_venue_removes_its_record(f, staff):
     venue = f.venue()
 
     result = service.delete_venue(venue["id"], staff)
 
-    assert result["venue"]["deleted_at"]
+    assert result["venue"]["name"] == venue["name"]
+    assert _venue_row(venue["id"]) == []
     assert venue["id"] not in _catalogue_ids()
-    stored = service.get_venue(venue["id"])
-    assert (bool(stored["deleted_at"]), stored["deleted_by"]) == (True, staff)
-    with pytest.raises(VenueDeletedError):
+    with pytest.raises(NotFoundError):
+        service.get_venue(venue["id"])
+    with pytest.raises(NotFoundError):
         service.update_venue(venue["id"], {"capacity": 5})
-    with pytest.raises(VenueDeletedError, match="already been deleted"):
+    with pytest.raises(NotFoundError):
         service.delete_venue(venue["id"], staff)
+
+
+@pytest.mark.parametrize("event_status", ["completed", "cancelled"])
+def test_ac3_past_events_keep_the_deleted_venues_name(f, staff, coordinator, event_status):
+    venue = f.venue()
+    event = f.event(coordinator, "planning")
+    booking = f.booking(event, venue, coordinator, "confirmed")
+    supabase.table("events").update({"status": event_status}).eq("id", event["id"]).execute()
+
+    service.delete_venue(venue["id"], staff)
+
+    assert _venue_row(venue["id"]) == []
+    kept = _booking(booking["id"])
+    # The booking itself is untouched apart from the venue: the name is kept
+    # as text and only the link goes.
+    assert (kept["venue_id"], kept["venue_name"], kept["status"]) == (None, venue["name"], "confirmed")
+    assert kept["released_by_venue_deletion"] is False
+    # The event's own booking list still shows which venue it was.
+    [listed] = list_bookings_for_event(event["id"])
+    assert listed["venues"] == {"name": venue["name"]}
+
+
+def test_ac3_a_released_booking_keeps_the_venues_name_and_its_release_time(f, staff, coordinator):
+    # The coordinator's alert compares bookings against released_at; removing
+    # the venue rewrites the row (updated_at) but must not move it.
+    venue = f.venue()
+    event = f.event(coordinator, "planning")
+    booking = f.booking(event, venue, coordinator, "confirmed")
+
+    service.delete_venue(venue["id"], staff)
+
+    after = _booking(booking["id"])
+    assert after["released_at"]
+    assert (after["venue_id"], after["venue_name"], after["status"]) == (None, venue["name"], "cancelled")
+
+
+def test_ac3_a_deleted_venues_booking_can_still_be_opened(f, staff, coordinator):
+    # The booking review page loads the booking and its conflicts; both used
+    # to query by venue_id, which is now empty.
+    venue = f.venue()
+    event = f.event(coordinator, "planning")
+    booking = f.booking(event, venue, coordinator, "confirmed")
+    supabase.table("events").update({"status": "completed"}).eq("id", event["id"]).execute()
+    service.delete_venue(venue["id"], staff)
+
+    opened = get_booking(booking["id"])
+
+    assert (opened["venue_id"], opened["venue_name"], opened["conflict"]) == (None, venue["name"], False)
+    assert clashes_for_booking(SimpleNamespace(**opened)) == []
 
 
 # -- AC4 -----------------------------------------------------------------------
@@ -337,7 +392,7 @@ def test_a_deleted_venue_cannot_be_requested(f, staff, coordinator):
     event = f.event(coordinator, "planning")
     service.delete_venue(venue["id"], staff)
 
-    with pytest.raises(ValidationError, match="has been deleted"):
+    with pytest.raises(ValidationError, match="does not reference an existing venue"):
         create_booking_request(SimpleNamespace(**event), venue["id"], coordinator)
 
 
@@ -359,7 +414,27 @@ def test_the_database_refuses_a_booking_on_a_deleted_venue_written_straight_to_t
                 "booking_end": "2026-12-01T12:00:00+08:00",
             }
         ).execute()
-    assert refused.value.code == "23514"
+    assert refused.value.code == "23503"  # the venue's row is gone: foreign key violation
+
+
+def test_the_database_refuses_a_booking_with_no_venue(f, coordinator):
+    event = f.event(coordinator, "planning")
+
+    with pytest.raises(APIError) as refused:
+        supabase.table("venue_bookings").insert(
+            {
+                "event_id": event["id"],
+                "venue_id": None,
+                "venue_name": "Somewhere",
+                "status": "pending",
+                "requested_by": coordinator,
+                "setup_minutes": 0,
+                "turnaround_minutes": 0,
+                "booking_start": "2026-12-01T09:00:00+08:00",
+                "booking_end": "2026-12-01T12:00:00+08:00",
+            }
+        ).execute()
+    assert refused.value.code == "23514"  # trg_venue_bookings_refuse_deleted_venue
 
 
 def test_a_pending_booking_left_on_a_deleted_venue_cannot_be_approved(f, staff, coordinator):
@@ -396,113 +471,21 @@ def test_a_signed_in_user_cannot_call_delete_venue_directly(f, staff):
         _signed_in_as(staff).rpc("delete_venue", {"p_venue_id": venue["id"], "p_deleted_by": staff}).execute()
 
     assert refused.value.code == "42501"  # permission denied: execute is revoked from authenticated
-    assert service.get_venue(venue["id"])["deleted_at"] is None
+    assert _venue_row(venue["id"])
 
 
 def test_a_signed_in_user_cannot_change_a_venue_directly(f, staff):
     venue = f.venue()
 
     # venues has a read policy only (20260923000000_venues.sql), so RLS
-    # matches no row to update or soft-delete.
-    _signed_in_as(staff).table("venues").update({"capacity": 1, "deleted_at": "2026-10-23T00:00:00+00:00"}).eq(
-        "id", venue["id"]
-    ).execute()
+    # matches no row to update.
+    _signed_in_as(staff).table("venues").update({"capacity": 1}).eq("id", venue["id"]).execute()
 
-    stored = service.get_venue(venue["id"])
-    assert (stored["capacity"], stored["deleted_at"]) == (100, None)
-
-
-# -- permanent delete (the second step after deleting) -------------------------
-
-
-def _venue_row(venue_id):
-    return supabase.table("venues").select("*").eq("id", venue_id).execute().data
-
-
-@pytest.mark.parametrize("event_status", ["completed", "cancelled"])
-def test_a_permanently_deleted_venues_past_bookings_keep_its_name(f, staff, coordinator, event_status):
-    venue = f.venue()
-    event = f.event(coordinator, "planning")
-    booking = f.booking(event, venue, coordinator, "confirmed")
-    supabase.table("events").update({"status": event_status}).eq("id", event["id"]).execute()
-    service.delete_venue(venue["id"], staff)
-
-    service.permanently_delete_venue(venue["id"])
-
-    assert _venue_row(venue["id"]) == []
-    kept = _booking(booking["id"])
-    assert (kept["venue_id"], kept["venue_name"], kept["status"]) == (None, venue["name"], "confirmed")
-    # The event's own booking list still shows which venue it was.
-    [listed] = list_bookings_for_event(event["id"])
-    assert listed["venues"] == {"name": venue["name"]}
-
-
-def test_permanent_delete_needs_the_venue_deleted_from_the_catalogue_first(f, staff):
-    venue = f.venue()
-
-    with pytest.raises(VenuePermanentDeleteError, match="must be deleted from the catalogue before"):
-        service.permanently_delete_venue(venue["id"])
-
-    assert _venue_row(venue["id"])
-
-
-def test_a_deleted_venue_waits_in_the_deleted_list_until_permanently_deleted(f, staff):
-    venue = f.venue()
-    service.delete_venue(venue["id"], staff)
-    assert venue["id"] in [row["id"] for row in service.list_deleted_venues()]
-
-    service.permanently_delete_venue(venue["id"])
-
-    assert venue["id"] not in [row["id"] for row in service.list_deleted_venues()]
-
-
-def test_the_database_refuses_removing_a_venue_an_ongoing_event_still_uses(f, coordinator):
-    # Written around the soft delete: deleted_at set without releasing.
-    venue = f.venue()
-    event = f.event(coordinator, "planning")
-    booking = f.booking(event, venue, coordinator, "confirmed")
-    supabase.table("venues").update({"deleted_at": "2026-10-23T00:00:00+00:00"}).eq("id", venue["id"]).execute()
-
-    with pytest.raises(VenuePermanentDeleteError, match="still has bookings for ongoing events"):
-        service.permanently_delete_venue(venue["id"])
-
-    assert _venue_row(venue["id"])
-    assert _booking(booking["id"])["venue_id"] == venue["id"]
-
-
-def test_a_released_booking_keeps_its_release_time_through_a_permanent_delete(f, staff, coordinator):
-    # The coordinator's alert compares bookings against released_at; the
-    # SET NULL rewrites the row (updated_at) but must not move it.
-    venue = f.venue()
-    event = f.event(coordinator, "planning")
-    booking = f.booking(event, venue, coordinator, "confirmed")
-    service.delete_venue(venue["id"], staff)
-    released_at = _booking(booking["id"])["released_at"]
-    assert released_at
-
-    service.permanently_delete_venue(venue["id"])
-
-    after = _booking(booking["id"])
-    assert after["released_at"] == released_at
-    assert after["venue_name"] == venue["name"]
-
-
-def test_a_booking_left_pending_on_a_permanently_deleted_venue_cannot_be_approved(f, staff, coordinator):
-    venue = f.venue()
-    event = f.event(coordinator, "planning")
-    booking = f.booking(event, venue, coordinator, "pending")
-    supabase.table("events").update({"status": "cancelled"}).eq("id", event["id"]).execute()
-    service.delete_venue(venue["id"], staff)
-    service.permanently_delete_venue(venue["id"])
-
-    with pytest.raises(ValidationError, match="permanently deleted"):
-        confirm_booking(booking["id"], SimpleNamespace(**_booking(booking["id"])), staff)
-    assert _booking(booking["id"])["status"] == "pending"
+    assert service.get_venue(venue["id"])["capacity"] == 100
 
 
 def test_a_signed_in_user_cannot_remove_a_venue_directly(f, staff):
     venue = f.venue()
-    service.delete_venue(venue["id"], staff)
 
     # venues has no delete policy: RLS matches no row.
     _signed_in_as(staff).table("venues").delete().eq("id", venue["id"]).execute()
@@ -510,17 +493,15 @@ def test_a_signed_in_user_cannot_remove_a_venue_directly(f, staff):
     assert _venue_row(venue["id"])
 
 
-def test_a_permanently_deleted_venues_booking_can_still_be_opened(f, staff, coordinator):
-    # The booking review page loads the booking and its conflicts; both used
-    # to query by venue_id, which is now empty.
+def test_the_database_refuses_removing_a_venue_an_ongoing_event_still_uses(f, coordinator):
+    # A plain DELETE written around delete_venue(), which releases first.
     venue = f.venue()
     event = f.event(coordinator, "planning")
     booking = f.booking(event, venue, coordinator, "confirmed")
-    supabase.table("events").update({"status": "completed"}).eq("id", event["id"]).execute()
-    service.delete_venue(venue["id"], staff)
-    service.permanently_delete_venue(venue["id"])
 
-    opened = get_booking(booking["id"])
+    with pytest.raises(APIError) as refused:
+        supabase.table("venues").delete().eq("id", venue["id"]).execute()
 
-    assert (opened["venue_id"], opened["venue_name"], opened["conflict"]) == (None, venue["name"], False)
-    assert clashes_for_booking(SimpleNamespace(**opened)) == []
+    assert refused.value.code == "23503"  # before_venue_delete
+    assert _venue_row(venue["id"])
+    assert _booking(booking["id"])["venue_id"] == venue["id"]

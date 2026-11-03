@@ -59,7 +59,7 @@ const canOverwrite = computed(() => isVenueStaff.value && booking.value?.status 
 
 const suitability = computed(() => (event.value && venue.value ? checkSuitability(event.value, venue.value) : []))
 const deletedVenueLabel = computed(() =>
-  booking.value?.venue_name ? `${booking.value.venue_name} (permanently deleted)` : '',
+  booking.value?.venue_name ? `${booking.value.venue_name} (deleted)` : '',
 )
 
 function time(value) {
@@ -75,7 +75,7 @@ async function load() {
     // Venue Staff may read the booking but not GET /events/<id> itself.
     // Kept in its own ref because approve/reject return the bare booking row.
     event.value = booking.value.event ?? null
-    // IS-61: a permanently deleted venue leaves the booking with no venue_id,
+    // IS-61: a deleted venue leaves the booking with no venue_id,
     // only its name (venue_name) -- nothing to fetch.
     venue.value = booking.value.venue_id ? await apiGet(`/venues/${booking.value.venue_id}`) : null
   } catch (requestError) {

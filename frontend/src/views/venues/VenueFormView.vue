@@ -74,10 +74,6 @@ async function load() {
       isEdit.value ? apiGet(`/venues/${venueId.value}`) : Promise.resolve(null),
     ])
     activeLayouts.value = layoutNames
-    if (existing?.deleted_at) {
-      loadError.value = 'This venue has been deleted from the catalogue, so it can no longer be edited.'
-      return
-    }
     venue.value = existing
     form.value = existing ? venueToForm(existing) : emptyVenueForm()
     // An existing venue that already breaks a rule (e.g. no layouts) shows

@@ -7,6 +7,7 @@ vi.mock('../lib/supabaseClient', () => ({
       signInWithPassword: vi.fn(),
       signOut: vi.fn(),
       getSession: vi.fn(),
+      onAuthStateChange: vi.fn(),
     },
   },
 }))
@@ -229,6 +230,62 @@ describe('auth store', () => {
       await auth.restoreSession()
 
       expect(apiGet).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('watchAccountChanges', () => {
+    let onChange
+    let reload
+
+    beforeEach(() => {
+      supabase.auth.onAuthStateChange.mockImplementation((callback) => {
+        onChange = callback
+      })
+      reload = vi.fn()
+      vi.stubGlobal('location', { reload })
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('reloads when another tab signs in as a different account, so this tab never shows actions the token cannot do', () => {
+      const auth = useAuthStore()
+      auth.profile = PROFILE
+      auth.watchAccountChanges()
+
+      onChange('SIGNED_IN', { access_token: 'other', user: { id: 'u2' } })
+
+      expect(reload).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a token refresh for the same account alone', () => {
+      const auth = useAuthStore()
+      auth.profile = PROFILE
+      auth.watchAccountChanges()
+
+      onChange('TOKEN_REFRESHED', SESSION)
+
+      expect(reload).not.toHaveBeenCalled()
+    })
+
+    it("leaves this tab's own sign-in alone (no profile loaded yet)", () => {
+      const auth = useAuthStore()
+      auth.watchAccountChanges()
+
+      onChange('SIGNED_IN', SESSION)
+
+      expect(reload).not.toHaveBeenCalled()
+    })
+
+    it('leaves a sign-out alone (the next request sends this tab to login)', () => {
+      const auth = useAuthStore()
+      auth.profile = PROFILE
+      auth.watchAccountChanges()
+
+      onChange('SIGNED_OUT', null)
+
+      expect(reload).not.toHaveBeenCalled()
     })
   })
 })

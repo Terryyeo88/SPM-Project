@@ -1242,6 +1242,22 @@ Catalogue (IS-61)".
   a venue is deleted; finished and rejected events keep their record.
   Please confirm rejected events shouldn't lose their booking too.
 
+Revised 3 Nov (Aaralyn): deleting a venue now removes its record in one
+step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
+"Revised 3 Nov").
+
+- **Only the venue's name is kept on past records**, as text on each
+  booking (`venue_bookings.venue_name`), not its location, capacity or
+  other details. Please confirm the name is enough when reviewing a past
+  event, or say which other details need keeping.
+- **The name is kept per booking, not per event.** An event can have
+  several venue bookings, so each booking keeps the name of the venue it
+  was for. Please confirm.
+- **A delete can't be undone, and there is no list of deleted venues.**
+  The earlier soft delete and its "Deleted" tab are gone, along with any
+  venues that were already soft-deleted (their bookings keep the name).
+  Please confirm Venue Staff don't need to see or restore deleted venues.
+
 ## Notification System (IS-69, 27 Oct)
 
 - **The acceptance criteria are our reading.** IS-69's ticket text isn't in

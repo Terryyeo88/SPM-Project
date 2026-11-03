@@ -76,6 +76,30 @@ export const useAuthStore = defineStore('auth', {
       this.profile = await apiGet('/me')
     },
 
+    /** Called once at startup (main.js). Every API call sends the session
+     * Supabase keeps in browser storage, which all tabs share -- but this
+     * tab's profile (and so its roles, its staff buttons, its data) was
+     * loaded for whoever was signed in when it opened. Signing in as
+     * someone else in another tab (e.g. testing as a coordinator, then
+     * coming back to a Venue Staff tab) used to leave this tab showing
+     * Venue Staff actions that the backend then refused ("Not authorised
+     * to perform 'venue.delete'"). Supabase broadcasts the new sign-in to
+     * every tab; when it's a different account from the loaded profile,
+     * reload, so the page is rebuilt for the account actually signed in.
+     *
+     * Only a switch to a DIFFERENT user counts: this tab's own sign-in
+     * (no profile loaded yet), a token refresh (same user) and a sign-out
+     * (no new user -- the next request's auth_missing_token already sends
+     * this tab to /login, see api.js) are left alone. */
+    watchAccountChanges() {
+      supabase.auth.onAuthStateChange((_event, session) => {
+        const signedInAs = session?.user?.id
+        if (this.profile && signedInAs && signedInAs !== this.profile.id) {
+          window.location.reload()
+        }
+      })
+    },
+
     /** Called once by the router guard on first navigation -- picks up
      * an existing Supabase session (e.g. after a page refresh) without
      * forcing the user to log in again. Safe to call multiple times
