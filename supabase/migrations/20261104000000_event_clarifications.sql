@@ -69,14 +69,22 @@ create index if not exists idx_event_clarifications_shared_event_id
 -- Row Level Security
 -- ============================================================
 -- Deliberately STRICTER than the placeholder "any authenticated user may
--- read/write" policies on the older tables: RLS is on with NO policies, so
--- only Flask's service-role key (which bypasses RLS) can touch this table.
--- That works because the frontend never queries tables directly -- it uses
--- Supabase only to sign in, and reads/writes everything through the Flask
--- API, where app/authz decides who may see or post in a thread. Without
--- this, any signed-in user could read every thread with the anon key.
+-- read/write" policies on the older tables: the one policy here allows
+-- NOTHING, so only Flask's service-role key (which bypasses RLS) can touch
+-- this table. That works because the frontend never queries tables
+-- directly -- it uses Supabase only to sign in, and reads/writes everything
+-- through the Flask API, where app/authz decides who may see or post in a
+-- thread. Without this, any signed-in user could read every thread with
+-- the anon key. The deny-all policy changes nothing over "RLS on, no
+-- policies"; it is there to state the intent explicitly (and per the
+-- Definition of Done, every RLS table carries a policy).
 alter table public.event_clarifications enable row level security;
 
+drop policy if exists "no direct access event_clarifications" on public.event_clarifications;
+create policy "no direct access event_clarifications" on public.event_clarifications
+  for all to anon, authenticated using (false) with check (false);
+
 -- Rollback intent (manual; no down-migration tooling yet):
+--   drop policy if exists "no direct access event_clarifications" on public.event_clarifications;
 --   drop table if exists public.event_clarifications;
 --   drop type if exists public.clarification_author_role;

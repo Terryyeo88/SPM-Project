@@ -2897,9 +2897,11 @@ only** -- not the Lead (agreed scope). Access follows the current
 assignment, so a reassigned-away coordinator loses it and the new one sees
 the whole thread.
 
-**RLS on with no policies.** Stricter on purpose than the placeholder
-"any authenticated user" policies on older tables: only Flask's
-service-role key touches `event_clarifications`. This works because the
+**RLS on with a single deny-all policy** (`using (false)`). Stricter on
+purpose than the placeholder "any authenticated user" policies on older
+tables: only Flask's service-role key touches `event_clarifications`. The
+policy behaves the same as having none; it states the intent and meets the
+Definition of Done's "RLS enabled with at least a placeholder policy". This works because the
 frontend uses Supabase only to sign in and reads everything through the
 API.
 
