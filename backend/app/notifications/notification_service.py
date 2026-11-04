@@ -170,6 +170,11 @@ EVENT_REQUEST_REJECTED = "event_request_rejected"
 EVENT_CONFIRMED = "event_confirmed"
 EVENT_CANCELLED_ORGANIZER = "event_cancelled_organizer"
 
+# Clarification thread (Event Review and Approval): the coordinator asks,
+# the organizer answers.
+CLARIFICATION_REQUESTED = "clarification_requested"
+CLARIFICATION_REPLIED = "clarification_replied"
+
 
 def _best_effort(func):
     """See BEST EFFORT in the module docstring."""
@@ -559,6 +564,42 @@ def organizer_event_news(event_id: str, what: str, actor_id: str | None = None) 
     type_, template = _ORGANIZER_NEWS[what]
     message = template.format(name=session.get("name") or "Your event", label=session_label(session))
     notify([organizer], type_, message, ENTITY_EVENT, session["id"])
+
+
+# -- Clarification thread -------------------------------------------------------
+#
+# Notifications story: "Given an Event Coordinator requests clarification or
+# amendment, when the request is made, then the Event Organizer receives a
+# notification." The reply goes the other way, so the coordinator knows to
+# look. Generic on purpose, like every other notification here: the message
+# itself stays on the event page, not in the notification. Linked to the
+# session the message was sent from.
+
+
+@_best_effort
+def clarification_posted(event_id: str, author_role: str) -> None:
+    """A message was added to the request's clarification thread by the
+    `author_role` side ("coordinator" or "organizer"); tell the other side."""
+    session = _session(event_id)
+    if not session:
+        return
+    name = session.get("name") or "your event request"
+    if author_role == "coordinator":
+        notify(
+            [session.get("organizer_id")],
+            CLARIFICATION_REQUESTED,
+            f'The Event Coordinator sent a clarification request about "{name}". Open it to reply.',
+            ENTITY_EVENT,
+            session["id"],
+        )
+    elif author_role == "organizer":
+        notify(
+            [session.get("coordinator_id")],
+            CLARIFICATION_REPLIED,
+            f'The Event Organizer replied to your clarification request about "{name}".',
+            ENTITY_EVENT,
+            session["id"],
+        )
 
 
 _SAFETY_DECISIONS = {

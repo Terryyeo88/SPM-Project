@@ -1474,7 +1474,11 @@ Notifications"). Please confirm:
 Reasoning is in `design-decisions.md` ("Notification (Event Organizer)").
 Please confirm:
 
-- **"Clarification or amendment" is NOT built.** The criterion says "Given an
+- **~~"Clarification or amendment" is NOT built.~~ Resolved: built as the
+  clarification thread** (`app/events/clarification_service.py`; see
+  `design-decisions.md` "Clarification thread"). The organizer is now
+  notified when the coordinator sends a clarification request. Original
+  note, kept for the record: The criterion says "Given an
   Event Coordinator requests clarification or amendment, when the request is
   made, then the Event Organizer receives a notification". There is no such
   request in the app: the coordinator can approve or reject (rejection needs a

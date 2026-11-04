@@ -2618,7 +2618,8 @@ cancel event, approve change).
 Source: IS-23's criteria (see `traceability.md`): the organizer is told when
 their request is submitted, when the coordinator approves or rejects it, when
 it is confirmed, and when it is cancelled (and when a coordinator asks for
-clarification or amendment: not built, see open-questions). Built on IS-69's
+clarification or amendment: added later with the clarification thread, see
+"Clarification thread"). Built on IS-69's
 notification service. No table, no migration.
 
 ### One notification per decision, one per session for confirm and cancel
@@ -2848,3 +2849,66 @@ isolated with a `transition` spy specifically because removing it is
 otherwise silently masked by `transition()`'s own `expected_from` race-guard
 producing the same observable outcome -- genuine defense-in-depth, not a
 single point of correctness.
+
+## Clarification thread (Event Review and Approval, Justin)
+
+Source: Event Review and Approval ("request for clarification or
+amendments ... enter comments and submit it for the Event Organizer to
+view"; "the Event Organizer is able to answer to the Event Coordinator"),
+Week 9 ("happening offline but the system should have a means for
+recording the comments for tracking") and Week 4 ("No separate status
+required"). Criteria and tests: `traceability.md` "Clarification thread".
+
+**An append-only comment log, not a live chat.** Week 9 says the
+conversation itself happens offline; what the system owes is the record.
+So there are no websockets or polling: the thread loads with the page and
+after each send. Messages are never edited or deleted (no `updated_at`, no
+delete route).
+
+**One thread per event request (`shared_event_id`), not per session.**
+Approve and reject already act on every session of a request together
+(`event_service._decide`), so the conversation about it is one too.
+`event_id` records which session's page a message was sent from, for
+reference only.
+
+**`author_role` is stored with each message, not derived.** Comparing
+`author_id` with `events.coordinator_id` would mislabel a previous
+coordinator's messages after a reassignment.
+
+**The coordinator asks; the organizer only answers.** The organizer can't
+open a thread: to change details themselves they already have Request
+Change (IS-21), and a second way in would split the same conversation
+across two places. The "coordinator has asked something" check needs a
+database read, so it is in `clarification_service` (400), not in the pure
+authz rule, which only checks role, ownership and status.
+
+**Two POST routes, one per side** (`/clarifications/request`,
+`/clarifications/reply`), each an ordinary `@require`, rather than one
+route that works out the caller's side itself. Which side a message is
+posted as comes from the route called, never from the request body.
+
+**Open only while under review; readable afterwards.** Matches the story
+("Given that an event request is under review") and Week 4. Changes after
+approval go through Request Change and the coordinator's own edits.
+Widening it later is a one-line change to the two posting rules.
+
+**Visible to the owning organizer and the current assigned coordinator
+only** -- not the Lead (agreed scope). Access follows the current
+assignment, so a reassigned-away coordinator loses it and the new one sees
+the whole thread.
+
+**RLS on with no policies.** Stricter on purpose than the placeholder
+"any authenticated user" policies on older tables: only Flask's
+service-role key touches `event_clarifications`. This works because the
+frontend uses Supabase only to sign in and reads everything through the
+API.
+
+**Notifications are generic** ("The Event Coordinator sent a
+clarification request about ..."), like every other notification; the
+message itself stays on the event page.
+
+**UI: one chat box for both sides.** The coordinator's "Request
+Clarification" button (the story's wording) sits next to Approve/Reject
+and moves the cursor into the Conversation chat box, where the first
+question and every follow-up are written. The organizer's page shows the
+same chat box once the coordinator has asked something.

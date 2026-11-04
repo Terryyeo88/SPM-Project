@@ -869,14 +869,9 @@ def list_event_requests(user, status: str | None = None) -> list[dict]:
     events" -- applied after the ownership scoping above, never in place
     of it.
 
-    NOT implemented here: replying to Event Coordinator feedback on a
-    request "under review" (the rest of that same acceptance criterion).
-    That depends on a clarification/feedback record that doesn't exist
-    yet -- it belongs to Event Review and Approval (Aaralyn), which
-    sprint planning explicitly deferred past Sprint 1 ("leave this to a
-    later date"). Wiring a reply flow against a table that doesn't exist
-    would be guessing at a shape someone else's story still needs to
-    define.
+    Replying to Event Coordinator feedback on a request "under review"
+    (the rest of that same acceptance criterion) is the clarification
+    thread, not part of listing: app.events.clarification_service.
     """
     if status is not None and status not in EVENT_STATUSES:
         raise ValidationError(f"status must be one of: {', '.join(sorted(EVENT_STATUSES))}.")

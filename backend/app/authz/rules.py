@@ -327,6 +327,47 @@ def rule_event_request_clarification(user: Any, event: Any) -> Decision:
     return Decision.ALLOW
 
 
+# -- event.clarification_reply --------------------------------------------
+# Source: Event Review and Approval -- "Given that an event request is under
+# review, when the Event Coordinator sends feedback for amendments or
+# clarification, then the Event Organizer is able to answer to the Event
+# Coordinator." Only the organiser who owns the request, only while it is
+# under_review. "Only once the coordinator has asked something" needs a
+# database read, so app.events.clarification_service checks that, not this
+# pure rule. The organiser never STARTS a thread -- to change details they
+# use Request Change (event.request_change).
+
+
+def rule_event_clarification_reply(user: Any, event: Any) -> Decision:
+    if not (_has_role(user, "event_organizer") and _owns_event(user, event)):
+        if rule_event_view(user, event) is Decision.ALLOW:
+            return Decision.DENY_FORBIDDEN
+        return Decision.DENY_NOT_FOUND
+    if not _event_status_in(event, "under_review"):
+        return Decision.DENY_FORBIDDEN
+    return Decision.ALLOW
+
+
+# -- event.clarification_view ---------------------------------------------
+# Who may read the thread: the organiser who owns the request and the
+# CURRENT assigned coordinator -- not the Lead (agreed scope), and not a
+# coordinator the request was reassigned away from. Any status: the thread
+# is the record of what was asked ("recording the comments for tracking",
+# Week 9), so it stays readable after the request leaves under_review.
+# A Lead who can see the event itself gets 403, not 404 -- they already
+# know it exists.
+
+
+def rule_event_clarification_view(user: Any, event: Any) -> Decision:
+    if _has_role(user, "event_organizer") and _owns_event(user, event):
+        return Decision.ALLOW
+    if _has_role(user, "event_coordinator") and _is_assigned_coordinator(user, event):
+        return Decision.ALLOW
+    if rule_event_view(user, event) is Decision.ALLOW:
+        return Decision.DENY_FORBIDDEN
+    return Decision.DENY_NOT_FOUND
+
+
 # -- event.cancel -------------------------------------------------------
 # Source: Cancelled Status story -- "Coordinator can change status to
 # cancelled after approval of the event request". DECIDED (see

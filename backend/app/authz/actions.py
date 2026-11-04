@@ -34,6 +34,9 @@ EVENT_DELETE = "event.delete"
 EVENT_APPROVE = "event.approve"
 EVENT_REJECT = "event.reject"
 EVENT_REQUEST_CLARIFICATION = "event.request_clarification"
+# The organiser's side of the clarification thread, and who may read it.
+EVENT_CLARIFICATION_REPLY = "event.clarification_reply"
+EVENT_CLARIFICATION_VIEW = "event.clarification_view"
 EVENT_CANCEL = "event.cancel"
 EVENT_REASSIGN_COORDINATOR = "event.reassign_coordinator"
 # Week 7 change #5 (Event Coordinator Lead): "Newly submitted event

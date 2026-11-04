@@ -354,3 +354,53 @@ describe('CoordinatorEventReview -- no Reassign (Week 9: only the Lead reassigns
     expect(wrapper.find('#reassign-to').exists()).toBe(false)
   })
 })
+
+describe('CoordinatorEventReview -- Request Clarification', () => {
+  const clarifyButton = (wrapper) => wrapper.findAll('button').find((b) => b.text() === 'Request Clarification')
+
+  it('offers Request Clarification next to Approve and Reject while under review', () => {
+    expect(clarifyButton(mountWith('under_review'))).toBeTruthy()
+  })
+
+  it.each(['approved', 'planning', 'confirmed', 'rejected'])('offers no Request Clarification when %s', (status) => {
+    expect(clarifyButton(mountWith(status))).toBeUndefined()
+  })
+
+  it('jumps to the Conversation box and puts the cursor in it', async () => {
+    const { apiGet } = await import('../../lib/api')
+    apiGet.mockResolvedValue([])
+    Element.prototype.scrollIntoView ??= () => {}
+    const wrapper = mount(CoordinatorEventReview, {
+      props: { event: event('under_review'), sessions: [] },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    await clarifyButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(document.activeElement).toBe(wrapper.find('#clarification-message').element)
+    expect(apiPost).not.toHaveBeenCalled() // nothing is sent until the coordinator writes and sends
+    wrapper.unmount()
+  })
+
+  it('sends from the Conversation box without changing the status', async () => {
+    const { apiGet } = await import('../../lib/api')
+    apiGet.mockResolvedValue([])
+    apiPost.mockResolvedValueOnce({
+      clarification_id: 'c1', author_role: 'coordinator', author_name: 'Alice Tan',
+      message: 'Is the date flexible?', created_at: '2026-11-04T07:00:00Z',
+    })
+    const wrapper = mountWith('under_review')
+    await flushPromises()
+
+    await wrapper.find('#clarification-message').setValue('Is the date flexible?')
+    await wrapper.find('#clarification-message').element.form.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/events/session-1/clarifications/request', { message: 'Is the date flexible?' })
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.findAll('li.message')).toHaveLength(1)
+  })
+})
