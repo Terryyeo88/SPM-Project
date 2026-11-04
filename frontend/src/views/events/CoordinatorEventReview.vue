@@ -48,8 +48,14 @@
  *   every session of it (the `sessions` prop, from GET /events/<id>/sessions).
  *   Each links to its own review page, where it can be viewed and edited.
  *
- * The Conversation section is a placeholder until clarification messages
- * exist (Request Clarification isn't built yet).
+ * Clarification:
+ *   Request Clarification -> jumps to the Conversation chat box
+ *               (ClarificationThread) and puts the cursor in it. Messages are
+ *               written there -- the first question and every follow-up --
+ *               and sent to POST /events/<id>/clarifications/request
+ *               (under_review only; the status stays under_review). One
+ *               thread per request: the coordinator's questions and the
+ *               organiser's replies.
  */
 import { computed, reactive, ref, watch } from 'vue'
 import { apiPost } from '../../lib/api'
@@ -72,6 +78,7 @@ import {
   savedMessage,
 } from '../../lib/eventUpdates'
 import EventSessionFields from '../../components/EventSessionFields.vue'
+import ClarificationThread from '../../components/ClarificationThread.vue'
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -88,6 +95,8 @@ const success = ref('')
 
 const rejectReason = ref('')
 const cancelReason = ref('')
+// The Conversation chat box; Request Clarification focuses its message box.
+const thread = ref(null)
 
 const isUnderReview = computed(() => props.event.status === 'under_review')
 const isApproved = computed(() => props.event.status === 'approved')
@@ -328,6 +337,13 @@ function reject() {
   })
 }
 
+function requestClarification() {
+  openPanel.value = null
+  error.value = ''
+  success.value = ''
+  thread.value?.focusComposer()
+}
+
 function cancelEvent() {
   if (!cancelReason.value.trim()) {
     error.value = 'Please give a reason for cancelling.'
@@ -380,6 +396,9 @@ function cancelEvent() {
             @click="togglePanel('reject')">
             Reject Request
           </button>
+          <button type="button" class="btn neutral" :disabled="busy || editing" @click="requestClarification">
+            Request Clarification
+          </button>
         </template>
         <button v-if="isApproved" type="button" class="btn approve" :disabled="busy || editing" @click="startPlanning">
           {{ busy && !openPanel ? 'Starting...' : 'Start Planning' }}
@@ -424,19 +443,7 @@ function cancelEvent() {
       <p v-if="success" class="success" role="status">{{ success }}</p>
     </section>
 
-    <section aria-labelledby="conversation-heading" class="stack">
-      <div>
-        <h2 id="conversation-heading">Conversation</h2>
-        <p class="muted small">Clarification messages between you and the organiser will appear here.</p>
-      </div>
-      <p class="note">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-        No messages yet.
-      </p>
-    </section>
+    <ClarificationThread ref="thread" :event="event" role="coordinator" />
 
     <section v-if="sessions.length > 1" class="card" aria-labelledby="sessions-heading">
       <h2 id="sessions-heading">Sessions in this Request</h2>
@@ -577,10 +584,6 @@ h2 { margin: 0 0 4px; font-size: var(--cs-text-md); font-family: var(--cs-font-d
 .muted { color: var(--cs-ink-soft); }
 .small { font-size: var(--cs-text-sm); margin: 0; }
 
-.note {
-  display: flex; align-items: center; gap: var(--cs-space-2); margin: 0;
-  background: var(--cs-neutral-tint); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-sm); padding: var(--cs-space-3) var(--cs-space-4); font-size: var(--cs-text-sm); color: var(--cs-ink-soft);
-}
 
 .card { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-md); padding: var(--cs-space-6) var(--cs-space-7); }
 .card h2 { margin-bottom: var(--cs-space-2); }

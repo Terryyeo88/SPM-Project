@@ -1474,7 +1474,11 @@ Notifications"). Please confirm:
 Reasoning is in `design-decisions.md` ("Notification (Event Organizer)").
 Please confirm:
 
-- **"Clarification or amendment" is NOT built.** The criterion says "Given an
+- **~~"Clarification or amendment" is NOT built.~~ Resolved: built as the
+  clarification thread** (`app/events/clarification_service.py`; see
+  `design-decisions.md` "Clarification thread"). The organizer is now
+  notified when the coordinator sends a clarification request. Original
+  note, kept for the record: The criterion says "Given an
   Event Coordinator requests clarification or amendment, when the request is
   made, then the Event Organizer receives a notification". There is no such
   request in the app: the coordinator can approve or reject (rejection needs a
@@ -1567,3 +1571,27 @@ narrowly on purpose. Please confirm:
   exists anywhere in this codebase).
 - **The Jira board had this story marked "Done" with nothing built.**
   Flagged separately to the team; not something this entry can fix.
+
+## Clarification thread (Event Review and Approval, Justin, 4 Nov)
+
+Built; reasoning in `docs/design-decisions.md` ("Clarification thread").
+Interpretive calls the story text didn't settle -- please confirm:
+
+- **Open only while "under review".** The story says "Given that an event
+  request is under review" and Week 4 puts clarification inside review, so
+  no new messages can be sent once the request is approved or rejected
+  (the thread stays readable). Changes after approval go through Request
+  Change. Say if the conversation should stay open later (e.g. until
+  completed/cancelled) -- a one-line change to the two posting rules.
+- **The organiser can only reply, never start a thread.** They already
+  have Request Change for anything they want changed. Confirm they don't
+  need to open a conversation of their own.
+- **The Event Coordinator Lead can't see the thread.** Only the owning
+  organiser and the current assigned coordinator. A coordinator the
+  request was reassigned away from loses access; the new one sees the
+  whole history. Say if the Lead should be able to read it.
+- **One thread per event request, not per session.** Every session of a
+  request shares the conversation, matching how approve/reject decide the
+  whole request.
+- **1000-character limit per message.** Not in the story; chosen as a
+  sensible cap. Say if a different limit is wanted.

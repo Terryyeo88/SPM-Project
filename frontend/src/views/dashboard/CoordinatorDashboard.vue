@@ -11,8 +11,9 @@
  * are at different stages appears under each of those tabs.
  *
  * Not in this pass (tracked separately):
- *   - Approve / reject / clarify actions -- Event Review and Approval.
- *     Rows link to the existing event details page for now.
+ *   - Approve / reject / clarify actions inline in a row -- they live on
+ *     the event details page (CoordinatorEventReview and its Conversation
+ *     chat), which every row links to.
  *   - The wireframe's inline per-row Reassign picker -- coordinators no
  *     longer reassign at all (Week 9 clarification: only the Event
  *     Coordinator Lead does, from the Lead dashboard).

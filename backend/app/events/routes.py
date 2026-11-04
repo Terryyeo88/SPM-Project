@@ -22,6 +22,8 @@ from app.authz.actions import (
     EVENT_APPROVE,
     EVENT_ASSIGN_COORDINATOR,
     EVENT_CANCEL,
+    EVENT_CLARIFICATION_REPLY,
+    EVENT_CLARIFICATION_VIEW,
     EVENT_COMPLETE,
     EVENT_CONFIRM,
     EVENT_CREATE,
@@ -31,6 +33,7 @@ from app.authz.actions import (
     EVENT_REASSIGN_COORDINATOR,
     EVENT_REJECT,
     EVENT_REQUEST_CHANGE,
+    EVENT_REQUEST_CLARIFICATION,
     EVENT_REVIEW_CHANGE,
     EVENT_START_PLANNING,
     EVENT_SUBMIT,
@@ -48,6 +51,9 @@ from app.events.change_request_service import (
     reject_change_request,
     request_event_change,
 )
+from app.events.clarification_service import COORDINATOR as CLARIFICATION_FROM_COORDINATOR
+from app.events.clarification_service import ORGANIZER as CLARIFICATION_FROM_ORGANIZER
+from app.events.clarification_service import list_clarifications, post_clarification
 from app.events.coordinator_service import (
     NoCoordinatorAvailableError,
     assign_initial_coordinator,
@@ -454,6 +460,38 @@ def get_change_requests(event, event_id):
 @require(EVENT_VIEW, loader=lambda event_id: load_event(event_id))
 def get_event_logs(event, event_id):
     return jsonify(list_event_logs(event)), 200
+
+
+# -- clarification thread (Event Review and Approval) ---------------------------
+# One thread per event request (app.events.clarification_service). Two POST
+# routes, one per side, so each is an ordinary @require: the coordinator
+# asks (under_review, assigned coordinator only), the organizer answers
+# (under_review, owning organizer only, and only once the coordinator has
+# asked -- that last check is the service's). Neither changes the status.
+# The side a message is posted as comes from WHICH route was called, never
+# from the request body.
+
+
+@events_bp.route("/<event_id>/clarifications", methods=["GET"])
+@require(EVENT_CLARIFICATION_VIEW, loader=lambda event_id: load_event(event_id))
+def get_clarifications(event, event_id):
+    return jsonify(list_clarifications(event)), 200
+
+
+@events_bp.route("/<event_id>/clarifications/request", methods=["POST"])
+@require(EVENT_REQUEST_CLARIFICATION, loader=lambda event_id: load_event(event_id))
+def request_clarification(event, event_id):
+    body = request.get_json(silent=True) or {}
+    created = post_clarification(event, current_user().id, CLARIFICATION_FROM_COORDINATOR, body.get("message"))
+    return jsonify(created), 201
+
+
+@events_bp.route("/<event_id>/clarifications/reply", methods=["POST"])
+@require(EVENT_CLARIFICATION_REPLY, loader=lambda event_id: load_event(event_id))
+def reply_to_clarification(event, event_id):
+    body = request.get_json(silent=True) or {}
+    created = post_clarification(event, current_user().id, CLARIFICATION_FROM_ORGANIZER, body.get("message"))
+    return jsonify(created), 201
 
 
 @events_bp.route("/<event_id>/change-requests/<change_id>/approve", methods=["POST"])
