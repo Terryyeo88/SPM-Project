@@ -58,6 +58,12 @@ SAFETY_OFFICERS = [
     {"email": "safety1@example.com", "name": "Hannah Lee"},
 ]
 
+# Venue Staff (Venue Booking Approval, IS-61 venue catalogue CRUD): approves
+# or rejects venue booking requests and manages the venue catalogue.
+VENUE_STAFF = [
+    {"email": "venuestaff1@example.com", "name": "Vanessa Lim"},
+]
+
 # Equipment inventory, unit level (IS-18): one entry per physical item.
 # Types match app.events.event_service.EQUIPMENT. PRJ-003 is under
 # maintenance on purpose, so the availability check has an out-of-service
@@ -495,6 +501,11 @@ def main():
         uid = get_or_create_user(officer["email"], officer["name"])
         add_role(uid, "safety_officer")
         print(f"Safety officer:    {officer['name']} <{officer['email']}> -> {uid}")
+
+    for staff in VENUE_STAFF:
+        uid = get_or_create_user(staff["email"], staff["name"])
+        add_role(uid, "venue_staff")
+        print(f"Venue staff:       {staff['name']} <{staff['email']}> -> {uid}")
 
     for attendee in ATTENDEES:
         uid = get_or_create_user(attendee["email"], attendee["name"])

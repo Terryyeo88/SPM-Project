@@ -4,10 +4,7 @@
 // specific one.
 export const SEED_PASSWORD = 'Password123!'
 
-// One representative seeded account per role seed.py actually creates.
-// venue_staff has no seeded account (see docs/open-questions.md) --
-// tests needing one are skipped, not given a guessed email that may not
-// exist.
+// One representative seeded account per role seed.py creates.
 export const USERS = Object.freeze({
   organizer: { email: 'organizer1@example.com', name: 'Derek Ong' },
   coordinator: { email: 'coordinator1@example.com', name: 'Alice Tan' },
@@ -15,6 +12,7 @@ export const USERS = Object.freeze({
   attendee: { email: 'attendee1@example.com', name: 'Ethan Koh' },
   technicalSupport: { email: 'techsupport1@example.com', name: 'Ivan Goh' },
   safetyOfficer: { email: 'safety1@example.com', name: 'Hannah Lee' },
+  venueStaff: { email: 'venuestaff1@example.com', name: 'Vanessa Lim' },
 })
 
 /** Logs in through the real UI (not a shortcut) and waits for the
