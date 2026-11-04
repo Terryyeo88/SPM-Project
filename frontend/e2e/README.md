@@ -41,9 +41,9 @@ E2E_BACKEND_PORT=5001 npm run test:e2e
   (`lib/roles.js`'s `ROUTE_ACCESS` / `NAV_LINKS`), proven through a real
   login and a real route, not just the unit-tested table.
 
-`venue_staff` has no seeded account (see `docs/open-questions.md`), so
-no test here logs in as one; anything needing that role is run manually
-against a hand-created account until a seed exists.
+Every role has a seeded account in `backend/seed.py`, including
+`venue_staff` (`venuestaff1@example.com`), so the "every role can sign in"
+test covers all seven.
 
 ## CI
 
