@@ -139,7 +139,9 @@ async function sendReply() {
 async function focusComposer() {
   await nextTick()
   scroller.value?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  composer.value?.focus()
+  // preventScroll: the smooth scroll above already brings the box into
+  // view; focus()'s own jump would cut it short.
+  composer.value?.focus({ preventScroll: true })
 }
 defineExpose({ focusComposer })
 
