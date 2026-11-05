@@ -404,3 +404,80 @@ describe('CoordinatorEventReview -- Request Clarification', () => {
     expect(wrapper.findAll('li.message')).toHaveLength(1)
   })
 })
+
+describe('CoordinatorEventReview -- Mark as Completed (IS-38)', () => {
+  function completeButton(wrapper) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Mark as Completed')
+  }
+  function editButton(wrapper) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Edit Details')
+  }
+
+  // AC: "Coordinator can change status to completed only from confirmed".
+  it('offers Mark as Completed on a confirmed session', () => {
+    expect(completeButton(mountWith('confirmed'))).toBeTruthy()
+  })
+
+  it.each(['draft', 'submitted', 'under_review', 'approved', 'planning', 'safety_review', 'completed', 'cancelled', 'rejected'])(
+    'does not offer it when %s',
+    (status) => {
+      expect(completeButton(mountWith(status))).toBeUndefined()
+    },
+  )
+
+  it('asks for confirmation before completing, and "Not Yet" backs out without a request', async () => {
+    const wrapper = mountWith('confirmed')
+    await completeButton(wrapper).trigger('click')
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('.panel-complete').text()).toContain("can't be undone")
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Not Yet').trigger('click')
+    expect(wrapper.find('.panel-complete').exists()).toBe(false)
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('completes the session and passes the updated row up', async () => {
+    const updated = { ...event('completed') }
+    apiPost.mockResolvedValue(updated)
+    const wrapper = mountWith('confirmed')
+
+    await completeButton(wrapper).trigger('click')
+    await wrapper.find('.panel-complete').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/events/session-1/complete', {})
+    expect(wrapper.emitted('updated')[0]).toEqual([updated])
+    expect(wrapper.find('[role="status"]').text()).toBe('Session marked as completed. Its record is now read-only.')
+    expect(wrapper.find('.panel-complete').exists()).toBe(false)
+  })
+
+  it('shows the error and keeps the panel open if the backend refuses', async () => {
+    apiPost.mockRejectedValue(new Error('This event is no longer Confirmed'))
+    const wrapper = mountWith('confirmed')
+
+    await completeButton(wrapper).trigger('click')
+    await wrapper.find('.panel-complete').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').text()).toBe('This event is no longer Confirmed')
+    expect(wrapper.find('.panel-complete').exists()).toBe(true)
+    expect(wrapper.emitted('updated')).toBeUndefined()
+  })
+
+  // AC: "Completed events are read-only going forward".
+  it('shows a completed session read-only: no edit, cancel or complete, and says why', () => {
+    const wrapper = mountWith('completed')
+
+    expect(editButton(wrapper)).toBeUndefined()
+    expect(cancelButton(wrapper)).toBeUndefined()
+    expect(completeButton(wrapper)).toBeUndefined()
+    expect(wrapper.find('[data-test="read-only-notice"]').text()).toContain('read-only')
+  })
+
+  it('a confirmed session is still editable before it is completed', () => {
+    const wrapper = mountWith('confirmed')
+    expect(editButton(wrapper)).toBeTruthy()
+    expect(wrapper.find('[data-test="read-only-notice"]').exists()).toBe(false)
+  })
+})
