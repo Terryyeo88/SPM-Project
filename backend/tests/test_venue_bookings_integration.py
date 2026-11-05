@@ -179,6 +179,10 @@ def test_reject_booking_records_reason_coordinator_can_then_read(fixtures):
 
     rejected = reject_booking(booking["id"], _event_namespace(booking), staff["id"], "Venue too small for this event.")
     assert rejected["status"] == "rejected"
+    # Venue Staff's own screen replaces its booking with this exact return
+    # value (no second fetch) -- without the reason here too, they'd see
+    # "Rejected" with no reason until a reload happened to re-fetch it.
+    assert rejected["rejection"]["reason"] == "Venue too small for this event."
 
     # The coordinator's actual read path: get_booking must surface the
     # reason itself (joined from venue_booking_status_log), not just the
