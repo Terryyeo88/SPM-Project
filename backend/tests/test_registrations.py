@@ -426,6 +426,25 @@ def test_the_event_page_shows_its_confirmed_venues(monkeypatch):
     assert service.get_session("s1", "att-1")["venues"] == [{"name": "Hall", "location": "L1"}]
 
 
+def test_a_changed_venue_shows_the_next_time_the_event_is_viewed(monkeypatch):
+    """IS-71 AC5: nothing is cached -- each view reads the confirmed venues
+    afresh, so after the coordinator moves the event to another venue the
+    attendee sees the new one on their next visit."""
+    monkeypatch.setattr(service, "_db_sessions_by_id", lambda ids: [{"id": "s1", "registration_needs": False}])
+    monkeypatch.setattr(service, "_db_registration_statuses", lambda ids: [])
+    monkeypatch.setattr(service, "list_my_registrations", lambda attendee_id: [])
+    current = {"venue": {"name": "Hall", "location": "L1"}}
+    monkeypatch.setattr(
+        service,
+        "_db_confirmed_venues",
+        lambda event_ids: [{"event_id": "s1", "venue_name": None, "venues": dict(current["venue"])}],
+    )
+
+    assert service.get_session("s1", "att-1")["venues"] == [{"name": "Hall", "location": "L1"}]
+    current["venue"] = {"name": "Annex", "location": "L2"}  # the booking moved
+    assert service.get_session("s1", "att-1")["venues"] == [{"name": "Annex", "location": "L2"}]
+
+
 def test_only_the_venue_name_and_location_are_sent():
     """No booking details (status, requester, notes) reach the attendee."""
     venue = service._venue(

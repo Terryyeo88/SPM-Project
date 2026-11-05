@@ -202,6 +202,7 @@ Frontend: `lib/eventSessions.test.js` (form validation), `router/index.test.js`
 | An Event Organiser can create an event request and submit it for review in one step | `test_event_submission.py::test_create_event_request_inserts_and_submits_every_session`, `::test_create_route_passes_the_group_body_and_returns_201`, `test_event_submission_integration.py::test_create_and_submit_event_request_against_supabase` | `POST /events` (`routes.py::create_event`), `event_service.py::create_event_request`, `CreateEventView.vue` |
 | Only an Event Organiser can create a request | `test_event_submission.py::test_create_route_denies_a_non_organizer`, `router/index.test.js` ("/create-event (organiser only)"), `roles.test.js` ("create-event is reachable by event_organizer ONLY") | `rules.py::rule_event_create`, `ROUTE_ACCESS` |
 | Required details must be given before submission, and each missing one is named | `test_event_submission.py::test_submission_rejects_each_missing_required_field`, `::test_create_event_request_requires_every_shared_field`, `::test_submit_event_route_rejects_incomplete_draft`, `::test_submission_names_the_one_missing_registration_field`, `eventSessions.test.js` (`sessionIsComplete`) | `event_service.py::validate_event_payload` / `validate_event_group(for_submission=True)` |
+| (IS-3 AC1/AC2, the page) An incomplete request can't be submitted: Submit Request stays disabled, and submitting anyway highlights each missing field and sends nothing; a highlight clears once its field is filled | `CreateEventView.test.js` (all 3) | `CreateEventView.vue` (`canSubmit`, `validateForm`), `lib/eventSessions.js::validateSession` |
 | Preferred dates are in the future and times are valid (end after start, or on a later date) | `test_event_submission.py::test_submission_rejects_today_and_past_preferred_start_dates`, `::test_submission_accepts_tomorrows_preferred_start_date`, `::test_submission_rejects_end_date_before_start_date`, `::test_submission_accepts_end_date_equal_to_start_date`, `::test_submission_accepts_event_spanning_multiple_days`, `::test_submission_rejects_end_time_before_start_time_on_the_same_date`, `::test_submission_rejects_equal_start_and_end_times`, `::test_submission_allows_end_time_before_start_time_when_end_date_is_later`, `eventSessions.test.js` ("allows an overnight session...", "reactive validation") | `event_service.py::validate_event_payload` |
 | Equipment and accessibility needs are optional, but any quantity given is valid | `test_event_submission.py::test_submission_allows_empty_accessibility_and_equipment`, `::test_submission_rejects_zero_equipment_quantity`, `::test_submission_rejects_unknown_jsonb_items`, `::test_submission_allows_empty_special_requests`, `::test_submission_rejects_malformed_fields` | `event_service.py::validate_event_payload` |
 | An invalid request writes nothing | `test_event_submission.py::test_create_event_request_writes_nothing_when_any_session_is_invalid`, `::test_create_route_returns_400_for_an_invalid_session`, `::test_submission_rejects_a_body_that_is_not_an_object` | validation runs before the single insert |
@@ -292,6 +293,8 @@ against the session's requirements. Frontend: `lib/venueSearch.test.js`,
 | (IS-12) Search venues by capacity, location, room layout, accessibility features and facilities | `venueSearch.test.js` (`filterVenues`: one case per criterion) | `lib/venueSearch.js::filterVenues`, filter panel in `RequestVenueBookingView.vue` |
 | (IS-12) Several criteria narrow the results together (AND, not OR) | `venueSearch.test.js` ("applies multiple criteria together (AND, not OR)", "requiring every one selected") | `lib/venueSearch.js::filterVenues` |
 | (IS-12) No match shows an explicit empty result, not an error | `venueSearch.test.js` ("returns an explicit empty array, not an error...", `hasActiveCriteria`) | `lib/venueSearch.js::hasActiveCriteria`, empty state in `RequestVenueBookingView.vue` |
+| (IS-12 AC3) Each result shows the venue's capacity, location, supported layouts, accessibility features and facilities | `RequestVenueBookingView.test.js` ("venue search results") | `RequestVenueBookingView.vue` venue cards |
+| (IS-12 AC5) Changing one criterion keeps the others applied; "Clear criteria" removes them all and shows every venue again | `RequestVenueBookingView.test.js` ("changing and clearing criteria") | `RequestVenueBookingView.vue` (`criteria`, `clearCriteria`) |
 | (IS-13) Each candidate is checked against the session's capacity, room layout, accessibility needs and facilities, and an unsuitable one says why | `venueSuitability.test.js` (`checkSuitabilityForEvent`: "flags capacity as unsuitable, naming the shortfall", "flags room layout...", "flags accessibility ... names exactly what is missing") | `lib/venueSuitability.js::checkSuitabilityForEvent`, suitability badges and breakdown in `RequestVenueBookingView.vue` |
 | (IS-13) A requirement the session didn't record is reported as "not assessed", not as a pass | `venueSuitability.test.js` ("reports capacity as not_assessed...", "...room layout as not_assessed...", "...accessibility as not_assessed...", "always reports facilities as not_assessed") | `lib/venueSuitability.js::checkSuitabilityForEvent` |
 | (IS-13) The overall verdict is unsuitable if any assessed check fails; flagging never blocks the request | `venueSuitability.test.js` (`isSuitableOverall`) | `lib/venueSuitability.js::isSuitableOverall` (advisory only) |
@@ -337,7 +340,7 @@ customer-confirmation items are flagged in `docs/open-questions.md`.
 | Venue Staff reject, must provide a reason | `test_booking_service.py::test_reject_booking_requires_a_reason_and_leaves_status_unchanged`, `::test_reject_booking_rejects_every_blank_or_non_string_reason` | `app/venues/booking_service.py::reject_booking` |
 | Coordinator can view the rejection reason | `test_booking_service.py::test_get_booking_attaches_the_latest_rejection_reason`, `::test_get_booking_rejection_is_the_most_recent_one`, `test_venue_bookings_integration.py::test_reject_booking_records_reason_coordinator_can_then_read` | `app/venues/booking_service.py::_attach_rejection_reasons`, `app/authz/rules.py::rule_venue_booking_view` (requester OR any venue_staff) |
 | Only `venue_staff` may approve/reject, and only while the booking is still `pending` (race-proofed against a double decision) | `test_authz_venue_bookings.py::test_venue_staff_cannot_redecide_an_already_decided_booking`, `::test_requesting_coordinator_cannot_decide_their_own_booking`, `test_booking_service.py::test_second_decision_is_refused_once_no_longer_pending` | `app/authz/rules.py::rule_venue_booking_approve`/`rule_venue_booking_reject`, `app/venues/booking_service.py::_decide_booking` |
-| An approved booking should notify the Coordinator (ties to the unbuilt Notification System — print-stub only, no real plumbing exists anywhere in this codebase yet) | not independently tested — see `app/venues/booking_service.py::_notify_booking_decision`'s own docstring | `app/venues/booking_service.py::_notify_booking_decision` |
+| An approved booking notifies the Coordinator (built with the notification system, IS-69) | `test_notification_hook_booking.py`, `test_notification_service.py` (booking decision) | `booking_service` -> `notification_service` |
 | Routes wire the above up with the correct authz per role (POST/GET on the events blueprint, 4 routes on the venues blueprint, static `/bookings` paths before the dynamic `/<venue_id>`) | `test_venue_bookings_routes.py` (all cases) | `app/events/routes.py::create_venue_booking`, `get_venue_bookings_for_event`; `app/venues/routes.py::list_venue_bookings_route`, `get_venue_booking_route`, `approve_venue_booking_route`, `reject_venue_booking_route` |
 | End-to-end against a real database (migration actually applies, buffers/conflict/rejection round-trip for real) | `test_venue_bookings_integration.py` (all cases) | `supabase/migrations/20261005100000_venue_bookings.sql`, `app/venues/booking_service.py` |
 | Frontend: tab grouping, request-form validation | `frontend/src/lib/venueBookings.test.js` | `frontend/src/lib/venueBookings.js` |
@@ -457,8 +460,32 @@ Story: As an Attendee, I want to see the venue of each confirmed event, so that 
 | The event page shows the venue name and location | `test_registrations.py::test_the_event_page_shows_its_confirmed_venues` | `registration_service.get_session`; `registrations.js::venueLines`; `AttendeeEventView.vue` |
 | An event with more than one venue shows all its confirmed venues | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `::test_a_venue_is_listed_once_and_a_deleted_venue_keeps_its_name` | `registration_service._confirmed_venues` |
 | Only confirmed venue bookings are shown | Not unit-tested (a database filter); check manually on the local stack | `registration_service._db_confirmed_venues` (`status = confirmed`) |
-| A changed venue shows when the event is viewed again | read live on every request, nothing cached | `registration_service._db_confirmed_venues` |
+| A changed venue shows when the event is viewed again | `test_registrations.py::test_a_changed_venue_shows_the_next_time_the_event_is_viewed` (read live on every request, nothing cached) | `registration_service._db_confirmed_venues` |
 | No internal booking information is shown | `test_registrations.py::test_only_the_venue_name_and_location_are_sent` | `registration_service._venue` |
+
+## Coordinator's assigned event requests (IS-5, Justin)
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| The Event Coordinator sees a list of the submitted requests assigned to them | `test_event_list_integration.py::test_coordinator_sees_only_events_assigned_to_them`, `test_event_submission.py::test_is31_coordinator_sees_only_the_sessions_assigned_to_them` | `event_service.list_event_requests` |
+| Can filter by status | `test_event_decisions.py::test_list_status_filter_narrows_within_the_callers_events`, `test_event_list_integration.py::test_status_filter_narrows_results`, `CoordinatorDashboard.test.js` ("only shows the sessions that belong in the open tab") | `GET /events?status=`, dashboard tabs |
+| Clicking a request opens its full details | `CoordinatorDashboard.test.js` ("opening a request (IS-5 AC3)") | `CoordinatorDashboard.vue` `requestLink` / `eventLink` |
+
+## View Venue Catalogue (IS-10, Nawaz)
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Opening a venue shows its location, maximum capacity, facilities, accessibility provisions and supported layouts | `VenueDetailView.test.js` ("what a venue record shows"), `test_venues_integration.py` (list/open against the real table) | `VenueDetailView.vue` |
+| Its availability shows when it is occupied and when free | `VenueDetailView.test.js` ("links to the availability calendar"); the calendar itself: View Venue Availability Calendar (IS-11) | `VenueDetailView.vue` -> `VenueCalendarView.vue` |
+
+## Stories with no automated tests, by nature
+
+- **IS-45 Change pages to wireframe.** "Matches the wireframe" is a visual
+  check, done by hand against the wireframes; nothing to assert in code.
+- **IS-49 Reconcile migration files with the live database.** A one-off
+  process story; its evidence is `supabase/migrations/20260927000000_reconcile_events_with_live.sql`
+  (every difference found is listed in its header) and a fresh
+  `supabase db reset` applying every migration in order.
 
 ## Explicitly deferred (not tested because not built)
 
@@ -613,7 +640,7 @@ Week 9 (Sreya): "Is the reassignment of coordinators now handled by Event Coordi
 
 The rule change was mutation-tested by hand: restoring the "current coordinator may reassign" branch fails the three coordinator-denied tests above.
 
-## Clarification thread (Event Review and Approval, Justin)
+## Clarification thread (IS-30, IS-76, Event Review and Approval, Justin)
 
 Two stories: the coordinator's "Request Clarification on an Event Request" and the organiser's "Reply to a Clarification Request". Week 9: the conversation "is happening offline but the system should have a means for recording the comments for tracking"; Week 4: no separate status. Decisions in `design-decisions.md` ("Clarification thread").
 
@@ -978,6 +1005,10 @@ every profile directly through the existing RLS policy
 
 
 ## Sprint 4 — Notification (Attendees) (IS-22, Justin)
+
+Numbering: the ACs below are numbered as built, not as in Jira. Jira's IS-22
+AC2 = AC1 here, AC3 = AC2, AC4 = AC3/AC4, AC5 = AC5-AC7, AC6 = AC8, AC7 =
+AC9/AC10. Jira's AC1 (bookmarks) is not built -- see design-decisions.md.
 
 Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
 `feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
