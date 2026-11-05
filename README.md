@@ -1,8 +1,56 @@
 # SPM-Project (ConnectSphere)
 
-IS212 Software Project Management team project. Vue frontend (not built yet)
--> Flask backend -> Supabase. The frontend never talks to Supabase directly
-and never holds the service role key.
+IS212 Software Project Management team project (AY2026/27 T1).
+Event planning and venue booking: Vue 3 SPA -> Flask API -> Supabase (Postgres).
+The frontend never talks to Supabase directly and never holds the service role key.
+
+**Repository:** https://github.com/Terryyeo88/SPM-Project
+
+Architecture: `docs/c4/` (C1 context, C2 container, C3 component -- .puml sources
+with rendered .png/.svg). CI pipeline: `.github/workflows/ci.yml`.
+
+## Quick start
+
+The five-minute path from clone to a running app. "Setup" below is the
+reference for each step.
+
+**There are two env files, and you need both.** The backend reads `.env` at
+the repo root (holds the SECRET service role key). The frontend reads its own
+`frontend/.env` (publishable anon key only). Copying just one is the most
+common way this goes wrong.
+
+```bash
+git clone https://github.com/Terryyeo88/SPM-Project.git
+cd SPM-Project
+cp .env.example .env                    # backend: fill in SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+cp frontend/.env.example frontend/.env  # frontend: fill in VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
+```
+
+Backend (terminal 1), serves http://127.0.0.1:5000:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate               # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python check_env.py                     # confirms which project and key type, never prints the secret
+flask --app wsgi run
+```
+
+Frontend (terminal 2), needs Node `^22.18.0 || >=24.12.0`, serves http://localhost:5173:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 (use `localhost`, not `127.0.0.1`: the API only
+accepts requests from `http://localhost:5173`). `VITE_API_BASE_URL` in
+`frontend/.env` must point at the backend, `http://127.0.0.1:5000` by default.
+
+Seed the throwaway accounts with `python seed.py` from `backend/`, then sign
+in as one of them (emails and the shared password are in `backend/seed.py`).
 
 ## Setup
 
@@ -159,6 +207,21 @@ pytest's header line says which case you're in (e.g.
 `integration tests: RUN against 127.0.0.1 [local]`). Integration tests
 rely on `supabase/seed.sql`, which `db reset` loads.
 
+### Frontend
+
+```bash
+cd frontend
+npm test                 # Vitest unit and component tests -- no servers needed
+npm run test:e2e         # Playwright end-to-end tests (frontend/e2e/)
+```
+
+**End-to-end tests need both servers running**: the backend on 5000 and the
+frontend on 5173, against a database with the seed accounts. Start them first
+(see Quick start); Playwright reuses servers that are already running. Its own
+fallback for starting the backend runs `backend/venv/bin/flask`, which
+doesn't match the `.venv` created in Setup, so don't rely on it.
+`frontend/e2e/README.md` has the details.
+
 ## Secrets
 
 `SUPABASE_SERVICE_ROLE_KEY` bypasses Row Level Security entirely and is
@@ -178,3 +241,5 @@ file.
   (`app/authz`) when building new routes.
 - `docs/open-questions.md` — decisions made that still need customer
   confirmation.
+- `docs/definition-of-done.md` — the team's Definition of Done.
+- `docs/c4/` — C4 model: context, container and component diagrams.
