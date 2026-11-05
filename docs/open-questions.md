@@ -683,6 +683,19 @@ Lead-only. Judgement calls made while applying it, for confirmation:
   takes over, the previous one is unassigned) still hold for the Lead's
   reassignment. Please confirm the backlog marks it accordingly.
 
+- **IS-7's "the previous coordinator retains view access but cannot
+  edit" is superseded, not built.** With the Lead doing every
+  reassignment, access follows the current assignment
+  (`rule_event_view` checks the current `coordinator_id` only): once an
+  event is moved to another coordinator, the previous one can no longer
+  open it at all -- the same 404 as any event that isn't theirs
+  (`test_authz_policy.py::test_coordinator_reassigned_away_loses_view_of_the_event`).
+  Hand-over context lives with the event itself (status history, event
+  logs, the clarification thread), which the new coordinator sees in
+  full. If the customer wants the previous coordinator to keep read-only
+  access, that needs a record of past assignments (there is none today)
+  and a change to `rule_event_view` -- a new story. Please confirm.
+
 ## Update Event Information During Planning (IS-9, 15 Oct)
 
 The calls below were made because the story didn't say. Each is written up
