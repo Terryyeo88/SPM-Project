@@ -1,14 +1,15 @@
 @startuml 03-component-api
 ' C4 Level 3 -- Components inside the API Application (backend/app).
-' Laid out in layers, top to bottom: request pipeline -> HTTP routes ->
-' domain services (grouped by domain) -> persistence.
+' Layers, top to bottom: request pipeline -> HTTP routes -> domain services
+' (grouped by domain) -> shared services -> persistence.
 ' Each component's technology field is the module it lives in.
+' Arrows drawn from a domain boundary mean "every service in this domain".
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
 
 LAYOUT_TOP_DOWN()
 SetDefaultLegendEntries("")
-skinparam nodesep 40
-skinparam ranksep 70
+skinparam nodesep 30
+skinparam ranksep 60
 
 AddElementTag("crosscut", $bgColor="#5a7d9a", $legendText="cross-cutting")
 AddElementTag("route", $bgColor="#3c7fc0", $legendText="HTTP routes (Flask Blueprint)")
@@ -29,108 +30,111 @@ Container_Boundary(api, "API Application (Flask)") {
     }
 
     Boundary(routes, "HTTP routes") {
-        Component(meRoutes, "Me / Health Routes", "me/, health/", "GET /me, /health, /health/db", $tags="route")
-        Component(eventRoutes, "Event Routes", "events/routes.py", "/events: lifecycle actions, change requests, logs, coordinator assignment, venue bookings", $tags="route")
-        Component(venueRoutes, "Venue Routes", "venues/routes.py, conflict_routes.py", "/venues: catalogue, calendar, booking queue, approve/reject, conflicts", $tags="route")
-        Component(equipRoutes, "Equipment Routes", "equipment/routes.py", "/equipment: inventory, requests, availability", $tags="route")
+        Component(meRoutes, "Me / Health Routes", "me/, health/", "/me (profile, contact preferences), /health, /health/db", $tags="route")
+        Component(eventRoutes, "Event Routes", "events/routes.py", "/events: lifecycle, edits + preview, clarifications, change requests, coordinator assignment, bookings, cancel", $tags="route")
+        Component(venueRoutes, "Venue Routes", "venues/routes.py, conflict_routes.py", "/venues: catalogue CRUD, calendar, blocks, booking queue, approve/reject, conflicts", $tags="route")
+        Component(equipRoutes, "Equipment Routes", "equipment/routes.py, calendar_routes.py", "/equipment: inventory, requests, change requests, availability calendar", $tags="route")
+        Component(safetyRoutes, "Safety Review Routes", "safety/routes.py", "/safety-reviews: queue, approve / reject / request changes", $tags="route")
+        Component(layoutRoutes, "Room Layout Routes", "room_layouts/routes.py", "/room-layouts: list, create, disable, delete", $tags="route")
         Component(regRoutes, "Registration Routes", "registrations/routes.py", "/registrations: open events, mine, register, withdraw", $tags="route")
+        Component(notifRoutes, "Notification Routes", "notifications/routes.py", "/notifications: list, unread count, mark read", $tags="route")
     }
 
     Boundary(eventsDomain, "Events domain") {
         Component(eventSvc, "Event Request Service", "events/event_service.py", "Validation, drafts, multi-session submission, approve/reject, role-scoped lists", $tags="service")
+        Component(updateSvc, "Event Update Service", "events/event_update.py", "Edits during planning; preview of affected arrangements before commit", $tags="service")
+        Component(clarSvc, "Clarification Service", "events/clarification_service.py", "Coordinator <-> organiser thread during review", $tags="service")
         Component(coordSvc, "Coordinator Assignment Service", "events/coordinator_service.py", "Lead assigns / reassigns; availability and workload checks", $tags="service")
         Component(changeSvc, "Change Request Service", "events/change_request_service.py", "Raise, approve (with impact ack) or reject change requests", $tags="service")
-        Component(impact, "Change Impact Assessor", "events/change_impact.py", "Which arrangements a change touches", $tags="service")
+        Component(impact, "Change Impact Assessor", "events/change_impact.py", "Which arrangements a change touches; releases bookings that no longer fit", $tags="service")
         Component(transitions, "Status Transition Engine", "events/transitions.py", "Guarded state machine for events.status; 409 on races; status log", $tags="service")
         Component(eventLog, "Event Audit Log", "events/event_log.py", "Field-level diffs: what, who, when", $tags="service")
-        Component(notifyHook, "Notification Service", "notifications/notification_service.py", "In-app notifications (IS-69): who to tell, best-effort write; recipient's list, unread count, mark read", $tags="service")
     }
 
     Boundary(venuesDomain, "Venues domain") {
-        Component(venueSvc, "Venue Catalogue Service", "venues/venue_service.py", "Read-only venue list and detail", $tags="service")
+        Component(venueSvc, "Venue Catalogue Service", "venues/venue_service.py", "Venue CRUD, supported layouts, hard delete via delete_venue RPC", $tags="service")
         Component(calendarSvc, "Venue Calendar Service", "venues/calendar_service.py", "Tentatively held / confirmed / blocked entries", $tags="service")
-        Component(bookingSvc, "Venue Booking Service", "venues/booking_service.py", "Create (pending), confirm, reject with reason; overlap guard", $tags="service")
+        Component(blockSvc, "Venue Block Service", "venues/block_service.py", "Block a venue for a period with a reason; releases clashing bookings", $tags="service")
+        Component(bookingSvc, "Venue Booking Service", "venues/booking_service.py", "Create (pending), confirm, reject with reason; tentative-hold expiry; overlap guard", $tags="service")
         Component(conflicts, "Booking Conflict Detector", "venues/booking_conflicts.py", "Lists confirmed bookings a booking clashes with", $tags="service")
+        Component(bookingRelease, "Booking Release", "venues/booking_release.py", "Releases a confirmed booking: cancel, hold expiry, block, change", $tags="service")
     }
 
     Boundary(equipDomain, "Equipment domain") {
-        Component(equipSvc, "Equipment Service", "equipment/equipment_service.py", "Unit-level inventory; availability vs overlapping reservations", $tags="service")
+        Component(equipSvc, "Equipment Service", "equipment/equipment_service.py", "Unit-level inventory; requests; availability vs overlapping reservations", $tags="service")
+        Component(equipChange, "Equipment Change Service", "equipment/change_service.py", "Quantity change requests on accepted reservations", $tags="service")
+        Component(equipCal, "Equipment Calendar Service", "equipment/calendar_service.py", "Reserved entries per equipment type over a range", $tags="service")
+        Component(resRelease, "Reservation Release", "equipment/reservation_release.py", "Frees reserved units when an event is cancelled", $tags="service")
     }
 
-    Boundary(regDomain, "Registrations domain") {
-        Component(regSvc, "Registration Service", "registrations/registration_service.py", "Confirmed vs waitlisted by capacity; withdraw promotes next", $tags="service")
+    Boundary(otherDomains, "Other domains") {
+        Component(safetySvc, "Safety Review Service", "safety/safety_service.py", "Operational Feasibility Check; request changes sends event back a stage", $tags="service")
+        Component(regSvc, "Registration Service", "registrations/registration_service.py", "Confirmed vs waitlisted by capacity (register_attendee RPC); withdraw promotes next", $tags="service")
+        Component(layoutSvc, "Room Layout Service", "room_layouts/room_layout_service.py", "Layout list; soft and hard delete", $tags="service")
+        Component(profileSvc, "Profile Service", "me/profile_service.py", "Caller's contact details and notification preferences", $tags="service")
     }
 
-    Component(dbClient, "Supabase Client", "extensions.py", "Shared lazy client using the service role key", $tags="crosscut")
+    Boundary(sharedSvcs, "Shared services") {
+        Component(notifySvc, "Notification Service", "notifications/notification_service.py", "In-app notifications: who to tell, best-effort write; list, unread count, mark read", $tags="crosscut")
+        Component(sharedCal, "Calendar Helpers", "shared/calendar.py", "Range parsing, filtering and response shape for both calendars", $tags="crosscut")
+        Component(dbClient, "Supabase Client", "extensions.py", "Shared lazy client using the service role key", $tags="crosscut")
+    }
 }
 
 ' --- request pipeline -----------------------------------------------------
 Rel_D(spa, authCtx, "All requests", "JSON/HTTPS")
-Rel_R(authCtx, supabaseAuth, "JWKS (cached)", "HTTPS")
+Rel_L(authCtx, supabaseAuth, "JWKS (cached)", "HTTPS")
 Lay_R(authCtx, authz)
 Lay_R(authz, errors)
-
-Rel_D(authCtx, meRoutes, "")
-Rel_D(authCtx, eventRoutes, "")
-Rel_D(authCtx, venueRoutes, "")
-Rel_D(authCtx, equipRoutes, "")
-Rel_D(authCtx, regRoutes, "")
-
-Rel_U(eventRoutes, authz, "@require")
-Rel_U(venueRoutes, authz, "@require")
-Rel_U(equipRoutes, authz, "@require")
-Rel_U(regRoutes, authz, "@require")
-
-Lay_R(meRoutes, eventRoutes)
-Lay_R(eventRoutes, venueRoutes)
-Lay_R(venueRoutes, equipRoutes)
-Lay_R(equipRoutes, regRoutes)
+Rel_D(authCtx, routes, "authenticated request")
+Rel_U(routes, authz, "@require(action)")
 
 ' --- routes -> services -----------------------------------------------------
-Rel_D(eventRoutes, eventSvc, "")
-Rel_D(eventRoutes, coordSvc, "")
-Rel_D(eventRoutes, changeSvc, "")
-Rel_D(eventRoutes, transitions, "planning / confirm / complete / cancel")
-Rel_D(eventRoutes, eventLog, "direct edits, logs")
-Rel(eventRoutes, bookingSvc, "request booking")
-
-Rel_D(venueRoutes, venueSvc, "")
-Rel_D(venueRoutes, calendarSvc, "")
-Rel_D(venueRoutes, bookingSvc, "")
-Rel_D(venueRoutes, conflicts, "")
-
-Rel_D(equipRoutes, equipSvc, "")
+Rel_D(meRoutes, profileSvc, "")
+Rel_D(eventRoutes, eventsDomain, "")
+Rel(eventRoutes, resRelease, "cancel")
+Rel(eventRoutes, bookingRelease, "cancel")
+Rel_D(venueRoutes, venuesDomain, "")
+Rel_D(equipRoutes, equipDomain, "")
+Rel_D(safetyRoutes, safetySvc, "")
+Rel_D(layoutRoutes, layoutSvc, "")
 Rel_D(regRoutes, regSvc, "")
+Rel_D(notifRoutes, notifySvc, "")
 
 ' --- within / across domains -----------------------------------------------
-Rel_D(eventSvc, transitions, "submit, approve, reject")
-Rel_D(coordSvc, transitions, "submitted -> under review")
-Rel_D(coordSvc, notifyHook, "assigned")
-Rel(bookingSvc, notifyHook, "decided")
-Rel(venueSvc, notifyHook, "booking released")
-Rel(equipSvc, notifyHook, "decided")
-Rel_D(changeSvc, impact, "")
-Rel_D(changeSvc, eventLog, "")
-Rel_L(changeSvc, eventSvc, "re-validate")
+Rel(eventSvc, transitions, "submit, approve, reject")
+Rel(coordSvc, transitions, "submitted -> under review")
+Rel(updateSvc, impact, "")
+Rel(changeSvc, impact, "")
+Rel(changeSvc, updateSvc, "apply approved change")
+Rel(clarSvc, eventLog, "")
 Rel(impact, bookingSvc, "event windows")
-Rel_L(bookingSvc, transitions, "event status")
-Rel_R(conflicts, bookingSvc, "overlap predicate")
-Rel_L(calendarSvc, venueSvc, "")
+Rel(bookingSvc, transitions, "event status")
+Rel(bookingSvc, bookingRelease, "hold expiry")
+Rel(blockSvc, bookingRelease, "")
+Rel(conflicts, bookingSvc, "overlap predicate")
+Rel(calendarSvc, venueSvc, "")
+Rel(equipChange, equipSvc, "")
+Rel(equipCal, equipSvc, "")
+Rel(safetySvc, transitions, "proceed / send back")
+Rel(calendarSvc, sharedCal, "")
+Rel(equipCal, sharedCal, "")
 
-' --- persistence ------------------------------------------------------------
-Rel_D(transitions, dbClient, "")
-Rel_D(eventLog, dbClient, "")
-Rel_D(eventSvc, dbClient, "")
-Rel_D(coordSvc, dbClient, "")
-Rel_D(changeSvc, dbClient, "")
-Rel_D(bookingSvc, dbClient, "")
-Rel_D(calendarSvc, dbClient, "")
-Rel_D(venueSvc, dbClient, "")
-Rel_D(equipSvc, dbClient, "")
-Rel_D(notifyHook, dbClient, "")
-Rel_D(regSvc, dbClient, "")
+' --- notifications + persistence -------------------------------------------
+' Every domain service writes through the Supabase Client and most call the
+' Notification Service; drawn once from the shared layer to keep it readable.
+Rel_U(notifySvc, dbClient, "")
 Rel_U(authCtx, dbClient, "session_activity, profiles")
-Rel_D(dbClient, db, "PostgREST", "HTTPS")
+Rel_D(dbClient, db, "PostgREST + RPC", "HTTPS")
+Lay_D(eventsDomain, sharedSvcs)
+Lay_D(venuesDomain, sharedSvcs)
+
+note as N1
+<b>Not drawn per service:</b>
+every domain service reads/writes via the
+<b>Supabase Client</b>, and every domain sends
+in-app notifications via the <b>Notification Service</b>.
+end note
 
 SHOW_LEGEND()
 @enduml
