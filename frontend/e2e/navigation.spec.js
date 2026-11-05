@@ -42,12 +42,17 @@ test.describe('Role-based navigation', () => {
     await expect(page.getByRole('banner').getByRole('link', { name: 'Venues' })).toHaveCount(0)
   })
 
-  test('every signed-in role can reach their own profile', async ({ page }) => {
-    await loginAs(page, USERS.attendee)
-    await page.goto('/profile')
-    await expect(page).toHaveURL(/\/profile$/)
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
-  })
+  // One test per seeded role, so the name means what it says -- the earlier
+  // version only ever logged in as the attendee.
+  for (const [role, user] of Object.entries(USERS)) {
+    test(`${role} can reach their own profile`, async ({ page }) => {
+      await loginAs(page, user)
+      await page.goto('/profile')
+      await expect(page).toHaveURL(/\/profile$/)
+      await expect(page.getByRole('heading', { name: 'My Profile' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
+    })
+  }
 })
 
 test.describe('Venue catalogue journey', () => {
@@ -64,8 +69,13 @@ test.describe('Venue catalogue journey', () => {
     // while testing nothing if the seed ever regressed.
     const firstVenue = page.locator('a.row').first()
     await expect(firstVenue).toBeVisible()
+    const venueName = (await firstVenue.locator('.row-name').innerText()).trim()
 
     await firstVenue.click()
-    await expect(page).toHaveURL(/\/venues\/.+/)
+    // The URL alone isn't proof: /venues/new and /venues/bookings also match
+    // /venues/.+, so a link pointing at the wrong page would still pass. The
+    // detail page must show the venue that was clicked.
+    await expect(page).toHaveURL(/\/venues\/[0-9a-f-]{36}$/)
+    await expect(page.getByRole('heading', { level: 1, name: venueName })).toBeVisible()
   })
 })
