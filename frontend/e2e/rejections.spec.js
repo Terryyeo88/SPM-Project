@@ -54,8 +54,11 @@ test('coordinator rejects with a reason; the organiser edits and resubmits', asy
     await context.close()
   })
 
+  // A resubmitted request goes straight back to the coordinator who
+  // rejected it -- rejected -> submitted -> under_review in one step
+  // (test_resubmission_keeps_same_coordinator_and_returns_to_review).
   const event = await getEvent(eventId)
-  expect(event.status).toBe('submitted')
+  expect(event.status).toBe('under_review')
   expect(event.purpose).toBe('End-to-end testing of the rejection and resubmission flow.')
 })
 
@@ -102,6 +105,13 @@ test('venue staff reject the booking; the safety check is then refused', async (
     await page.getByRole('button', { name: 'Reject Booking' }).click()
     await page.locator('#reject-reason').fill(reason)
     await page.getByRole('button', { name: 'Confirm Rejection' }).click()
+    await expect(page.getByText('Booking rejected.')).toBeVisible()
+    await context.close()
+  })
+
+  await test.step('coordinator can see the reason on the booking', async () => {
+    const { context, page } = await asRole(browser, USERS.coordinator)
+    await page.goto(`/venues/bookings/${booking.id}`)
     await expect(page.getByText(reason)).toBeVisible()
     await context.close()
   })
