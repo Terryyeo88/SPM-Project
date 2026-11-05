@@ -2914,3 +2914,37 @@ Clarification" button (the story's wording) sits next to Approve/Reject
 and moves the cursor into the Conversation chat box, where the first
 question and every follow-up are written. The organizer's page shows the
 same chat box once the coordinator has asked something.
+
+## Completed Status -- coordinator UI (IS-38, Aaralyn)
+
+The IS-38 backend already existed (Terry, Sprint 2), but no page called
+`POST /events/<id>/complete`, so a coordinator couldn't complete an event
+and the e2e golden path had a `test.fixme` waiting for it. This adds a
+"Mark as Completed" button to `CoordinatorEventReview.vue`. No backend
+change.
+
+**Shown only when the session is `confirmed`.** `canComplete` mirrors
+`rule_event_complete` exactly, so the button never offers something the
+backend will refuse. The backend is still the authority: if the status
+changed underneath (a 409 from `transition()`), the error is shown and the
+panel stays open.
+
+**A confirmation step, not a one-click button.** No edge leaves
+`completed`, so a slip can't be undone. Approve and Start Planning are
+one-click because they're reversible in practice (edits, cancel);
+completion isn't, so it gets the same two-step pattern as Cancel Event,
+without a reason field because the story asks for none.
+
+**Read-only is shown, not just enforced.** The AC "completed events are
+read-only going forward" was already enforced by every `rule_event_*`
+status window. The UI already hid Edit Details and Cancel Event for
+`completed` (canEdit / canCancel), and the venue, equipment and safety
+panels already gate on status. What was missing was telling the
+coordinator *why* the buttons are gone, so a completed session now shows a
+"read-only" notice.
+
+**Not date-gated.** The story text says "after it has taken place"; the
+ACs don't, and the merged backend doesn't check dates. Adding a date check
+only in the UI would just hide a button the API still accepts, so we left
+it out of both and flagged it in `docs/open-questions.md` rather than
+changing another story's route.

@@ -18,6 +18,15 @@
  *               with Release Equipment on Cancel). Cancels THIS session only.
  *               The backend then releases the session's reserved equipment
  *               and says how many units it freed.
+ *   Mark as Completed -> POST /events/<id>/complete (confirmed -> completed,
+ *               IS-38). THIS session only, like Cancel -- the route moves
+ *               one event row. Asks for confirmation first: no transition
+ *               leaves `completed`, so it can't be undone. Afterwards the
+ *               session is read-only ("completed events are read-only going
+ *               forward"): Edit Details and Cancel Event disappear because
+ *               canEdit / canCancel exclude `completed`, matching the backend
+ *               rules. Not gated on the session's date -- see
+ *               docs/open-questions.md (IS-38, "after it has taken place").
  *   No Reassign here: since the Week 9 clarification only the Event
  *   Coordinator Lead reassigns ("it is now manually assigned by the lead"),
  *   from the Lead dashboard -- rule_event_reassign_coordinator.
@@ -88,7 +97,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['updated'])
 
-const openPanel = ref(null) // null | 'reject' | 'cancel'
+const openPanel = ref(null) // null | 'reject' | 'cancel' | 'complete'
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
@@ -100,6 +109,9 @@ const thread = ref(null)
 
 const isUnderReview = computed(() => props.event.status === 'under_review')
 const isApproved = computed(() => props.event.status === 'approved')
+// Same status precondition as rule_event_complete (IS-38): confirmed only.
+const canComplete = computed(() => props.event.status === 'confirmed')
+const isCompleted = computed(() => props.event.status === 'completed')
 
 function sessionWhen(session) {
   const range = formatDateRange(session.preferred_start_date, session.preferred_end_date)
@@ -323,6 +335,15 @@ function startPlanning() {
   })
 }
 
+function completeEvent() {
+  return run(async () => {
+    const updated = await apiPost(`/events/${props.event.id}/complete`, {})
+    openPanel.value = null
+    success.value = 'Session marked as completed. Its record is now read-only.'
+    emit('updated', updated)
+  })
+}
+
 function reject() {
   if (!rejectReason.value.trim()) {
     error.value = 'Please give the organiser a reason for rejecting.'
@@ -385,6 +406,14 @@ function cancelEvent() {
         Start planning when you're ready to request a venue or equipment.
       </p>
 
+      <p v-if="canComplete" class="muted small">
+        Once this session has taken place, mark it as completed so the records show it finished.
+      </p>
+
+      <p v-if="isCompleted" class="muted small" data-test="read-only-notice">
+        This session is completed, so it's read-only: its details, venue and equipment can no longer be changed.
+      </p>
+
       <p v-if="editing" class="muted small">Save or cancel your edits before making a decision.</p>
 
       <div class="buttons">
@@ -403,6 +432,10 @@ function cancelEvent() {
         <button v-if="isApproved" type="button" class="btn approve" :disabled="busy || editing" @click="startPlanning">
           {{ busy && !openPanel ? 'Starting...' : 'Start Planning' }}
         </button>
+        <button v-if="canComplete" type="button" class="btn approve" :aria-expanded="openPanel === 'complete'"
+          :disabled="busy || editing" @click="togglePanel('complete')">
+          Mark as Completed
+        </button>
         <button v-if="canCancel" type="button" class="btn reject" :aria-expanded="openPanel === 'cancel'"
           :disabled="busy || editing" @click="togglePanel('cancel')">
           Cancel Event
@@ -418,6 +451,21 @@ function cancelEvent() {
             {{ busy ? 'Rejecting...' : 'Confirm Rejection' }}
           </button>
           <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('reject')">Cancel</button>
+        </div>
+      </form>
+
+      <form v-if="openPanel === 'complete'" class="panel panel-complete" @submit.prevent="completeEvent">
+        <p class="small">
+          Mark this session as completed? Only do this once it has taken place.
+          Afterwards its details, venue and equipment can't be changed, and it can't be undone.
+        </p>
+        <div class="panel-actions">
+          <button type="submit" class="btn small approve" :disabled="busy">
+            {{ busy ? 'Completing...' : 'Confirm Completed' }}
+          </button>
+          <button type="button" class="btn small neutral" :disabled="busy" @click="togglePanel('complete')">
+            Not Yet
+          </button>
         </div>
       </form>
 
@@ -635,6 +683,7 @@ h2 { margin: 0 0 4px; font-size: var(--cs-text-md); font-family: var(--cs-font-d
   background: var(--cs-neutral-tint); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm); padding: var(--cs-space-4) var(--cs-space-5);
 }
 .panel-reject { background: var(--cs-occupied-tint); border-color: var(--cs-occupied); }
+.panel-complete p { margin: 0; }
 .panel label { font-size: var(--cs-text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--cs-ink-soft); }
 .panel textarea, .panel select, .panel input {
   box-sizing: border-box; width: 100%; padding: var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);

@@ -1595,3 +1595,32 @@ Interpretive calls the story text didn't settle -- please confirm:
   whole request.
 - **1000-character limit per message.** Not in the story; chosen as a
   sensible cap. Say if a different limit is wanted.
+
+## Completed Status -- coordinator UI (IS-38, Aaralyn, 5 Nov)
+
+The backend for IS-38 (`rule_event_complete`, `POST /events/<id>/complete`,
+the `(confirmed, completed)` edge, read-only rules) shipped in Sprint 2.
+This adds the coordinator's "Mark as Completed" button so the story can
+actually be used. Reasoning in `docs/design-decisions.md` ("Completed
+Status -- coordinator UI"). Please confirm:
+
+- **"After it has taken place" is not enforced.** The story says the
+  coordinator marks an event completed "after it has taken place", but
+  neither AC says it, and the backend accepts any confirmed session,
+  including one dated next year. We kept that behaviour (the button
+  appears as soon as a session is confirmed, and the confirmation prompt
+  tells the coordinator to only do this once it has taken place) rather
+  than changing the merged route. If completion should be refused until
+  the session's end date/time has passed, that's a small rule/route change
+  plus the matching UI gate. Note the e2e golden path completes a
+  far-future session, so it would need a past-dated fixture instead.
+- **Per session, not per request.** "Mark as Completed" completes the
+  session being viewed, the same as Cancel Event and the route itself.
+  Approve / Reject / Start Planning act on the whole request. Sessions of
+  one request happen on different days, so completing each as it finishes
+  seemed right. Say if one click should complete every confirmed session
+  of the request.
+- **No reason is asked for and nobody is notified.** The story asks for
+  neither. The status change is still recorded with its actor in the
+  event's status history. Say if the organiser or attendees should be
+  notified.

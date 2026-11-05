@@ -5,7 +5,8 @@
 //   approves and starts planning -> coordinator requests a venue, venue
 //   staff approve -> coordinator requests equipment, tech support accept ->
 //   coordinator submits for the safety check, safety officer approves ->
-//   coordinator confirms -> attendee registers
+//   coordinator confirms -> attendee registers -> coordinator marks it
+//   completed (IS-38)
 //
 // Each role gets its own browser context (its own login), so one test can
 // hand the request from role to role exactly as people would. test.step()
@@ -199,11 +200,23 @@ test.describe('Golden path: from event request to registration', () => {
       await attendee.context.close()
     })
 
+    // IS-38. The session is dated years ahead, so in real life it hasn't
+    // "taken place" yet -- completion isn't date-gated (docs/open-questions.md),
+    // which is what lets the journey end here.
+    await test.step('coordinator marks the confirmed event completed; it is read-only', async () => {
+      const { page } = coordinator
+      await page.goto(`/events/${eventId}`)
+      await page.getByRole('button', { name: 'Mark as Completed' }).click()
+      await page.getByRole('button', { name: 'Confirm Completed' }).click()
+      await expect(page.getByText('Session marked as completed.')).toBeVisible()
+      // Survives a reload, i.e. it's the stored status, not local state.
+      await page.reload()
+      await expect(page.getByText('Completed', { exact: true }).first()).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Edit Details' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Cancel Event' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Mark as Completed' })).toHaveCount(0)
+    })
+
     for (const role of [organiser, lead, coordinator]) await role.context.close()
   })
-
-  // No page calls POST /events/<id>/complete yet -- there is no "Complete
-  // Event" button anywhere in the UI, so this step of the journey can't be
-  // driven through the browser. Flagged to the team; un-fixme once it exists.
-  test.fixme('coordinator marks the confirmed event completed', async () => {})
 })
