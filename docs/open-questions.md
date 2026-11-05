@@ -1529,9 +1529,14 @@ Please confirm:
   the criterion says. Say if the coordinator should hear about every request.
 - **"Change the booking" is read as a venue block.** If Venue Staff are meant
   to be able to move a booking some other way, that way does not exist yet.
-- **An expired tentative hold is not notified.** The system releases it
-  silently (`release_expired_hold`), and the criterion does not list it. It
-  reads like it should be; say if it is wanted.
+- **An expired tentative hold is not notified (IS-24 AC7, NOT built).**
+  Jira's IS-24 lists it ("Event Coordinator should be informed before or
+  when the tentatively held venue for an event expires"), but the system
+  releases an expired hold silently (`release_expired_hold`). Telling the
+  coordinator "before" it expires needs a scheduled job, like the
+  reminders above; telling them "when" it expires could hook into
+  `release_expired_hold`. Not built yet -- please confirm whether it's
+  wanted for this release.
 
 ## Notification (Venue Staff) (IS-25, Nawaz, Sprint 4)
 

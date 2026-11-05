@@ -119,3 +119,31 @@ describe('VenueDetailView -- IS-61 Venue Staff actions', () => {
     expect(wrapper.find('[role="status"]').text()).toBe('Venue details saved.')
   })
 })
+
+describe('VenueDetailView -- what a venue record shows (IS-10 AC1/AC2)', () => {
+  it("shows the venue's location, capacity, facilities, accessibility provisions and supported layouts", async () => {
+    apiGet.mockResolvedValue({
+      ...venue,
+      facilities: ['projector_screen', 'stage'],
+      accessibility_features: ['wheelchair_access'],
+      supported_layouts: ['theatre', 'banquet'],
+    })
+    auth.roles = ['event_coordinator']
+    const wrapper = await render()
+    const details = wrapper.text()
+    expect(details).toContain('Main Building, Level 3')
+    expect(details).toContain('300')
+    expect(details).toMatch(/projector/i)
+    expect(details).toMatch(/stage/i)
+    expect(details).toMatch(/wheelchair/i)
+    expect(details).toMatch(/theatre/i)
+    expect(details).toMatch(/banquet/i)
+  })
+
+  it('links to the availability calendar, which shows when the venue is occupied or free', async () => {
+    auth.roles = ['event_coordinator']
+    const wrapper = await render()
+    const calendar = wrapper.findAllComponents(RouterLinkStub).find((link) => link.props('to') === '/venues/venue-1/calendar')
+    expect(calendar).toBeTruthy()
+  })
+})

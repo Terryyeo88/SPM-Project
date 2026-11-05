@@ -99,3 +99,20 @@ describe('CoordinatorDashboard -- event search bar (IS-48)', () => {
     expect(wrapper.findAll('.request')).toHaveLength(0)
   })
 })
+
+describe('CoordinatorDashboard -- opening a request (IS-5 AC3)', () => {
+  it("links each request to its event's full details page", async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    const link = wrapper.find('.request .request-header').findComponent(RouterLinkStub)
+    expect(link.props('to')).toEqual({ name: 'event-details', params: { eventId: 's1' } })
+  })
+
+  it('links each session of a multi-session request to its own details page', async () => {
+    const wrapper = await mountWith([
+      session({ id: 's1' }),
+      session({ id: 's2', preferred_start_date: '2099-03-02', preferred_end_date: '2099-03-02' }),
+    ])
+    const targets = wrapper.findAll('.session-row').map((row) => row.findComponent(RouterLinkStub).props('to').params.eventId)
+    expect(targets).toEqual(['s1', 's2'])
+  })
+})
