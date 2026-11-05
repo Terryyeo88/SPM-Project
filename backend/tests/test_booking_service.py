@@ -690,3 +690,7 @@ def test_reject_booking_sets_status_and_logs_the_trimmed_reason(fake_db):
     assert result["status"] == "rejected"
     assert fake_db.inserts[0][1]["reason"] == "Venue too small"
     assert fake_db.inserts[0][1]["to_status"] == "rejected"
+    # The reason must be on THIS return value, not just a later get_booking
+    # -- the review screen replaces its whole booking with this response
+    # directly, with no second fetch.
+    assert result["rejection"]["reason"] == "Venue too small"

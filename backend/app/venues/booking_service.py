@@ -563,10 +563,17 @@ def confirm_booking(booking_id: str, booking: SimpleNamespace, decided_by: str) 
 def reject_booking(booking_id: str, booking: SimpleNamespace, decided_by: str, reason) -> dict:
     """Venue Booking Approval: Venue Staff reject -> "rejected". A reason
     is required (AC2: "they must provide a reason, and the Coordinator
-    can view it")."""
+    can view it").
+
+    Attaches the rejection reason before returning (not just on a later
+    GET): the frontend replaces its whole booking with this response
+    directly (see VenueBookingReviewView.vue), so without this the
+    reason was invisible until the page reloaded and get_booking's own
+    _attach_rejection_reasons call ran."""
     if not isinstance(reason, str) or not reason.strip():
         raise ValidationError("A reason is required to reject a venue booking.")
     decided = _decide_booking(booking_id, booking, "rejected", decided_by, reason.strip())
+    decided = _attach_rejection_reasons([decided])[0]
     _notify_booking_decision(decided, "rejected")
     return decided
 
