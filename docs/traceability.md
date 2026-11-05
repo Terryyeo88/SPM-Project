@@ -299,6 +299,20 @@ against the session's requirements. Frontend: `lib/venueSearch.test.js`,
 Not covered by an automated test: `RequestVenueBookingView.vue` itself
 (manual check; the logic it shows is the two tested libraries).
 
+## Event search bar (IS-48, Nawaz)
+
+Every list's search is client-side over the events the page already loaded for the caller, so it can only narrow what they may see; the scoping itself is the backend's. Search matches the event name (case-insensitive); the attendee list can also be narrowed by date. Venues are shown on attendee results but not searched.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A search bar is shown on the events list | `EventsListView.test.js` ("shows a search bar"), `AttendeeDashboard.test.js` ("shows a search bar"), `CoordinatorDashboard.test.js` ("event search bar (IS-48)") | `EventsListView.vue`, `AttendeeDashboard.vue`, `CoordinatorDashboard.vue` |
+| Typing a keyword filters to events whose name matches, ignoring case; the attendee list can also filter by date | `EventsListView.test.js` ("filters by event name"), `AttendeeDashboard.test.js` ("filters by event name"), `coordinatorDashboard.test.js` (`filterBySearch`), `leadDashboard.test.js` (`filterRequests`), `registrations.test.js` (`filterSessions`, incl. date) | `EventsListView.vue` `visibleRequests`, `lib/coordinatorDashboard.js::filterBySearch`, `lib/registrations.js::filterSessions` |
+| Results only include events the user is permitted to see | Backend scoping: `test_event_list_integration.py::test_organizer_sees_only_their_own_events`, `::test_coordinator_sees_only_events_assigned_to_them`, `test_registrations.py::test_attendee_cannot_see_a_session_that_is_not_confirmed`; search only narrows that list: `EventsListView.test.js`, `AttendeeDashboard.test.js` ("only ever narrows ...") | `GET /events`, `GET /registrations/open`, then client-side filtering |
+| A search matching nothing shows an explicit empty result, not an error or a blank page | `EventsListView.test.js`, `AttendeeDashboard.test.js`, `CoordinatorDashboard.test.js` ("says so when no event matches") | the "No ... match" messages in each view |
+| Clearing the search restores the full list | `EventsListView.test.js`, `AttendeeDashboard.test.js` ("clearing the search ..."), `coordinatorDashboard.test.js` ("returns everything for a blank query") | as above |
+
+Mutation-tested by hand: making the organiser search ignore the typed term fails 4 of the 5 `EventsListView` tests; removing the attendee empty-result message fails the AC4 test.
+
 ## Venue Booking Request / Approval (IS-14, Josiah, Sprint 2)
 
 Not IS-1's own criteria — the Venue Booking Request (3pt) and Venue Booking

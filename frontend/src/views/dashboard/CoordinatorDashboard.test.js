@@ -85,3 +85,17 @@ describe('CoordinatorDashboard -- one card per event request', () => {
     expect(card.find('.status').text()).toBe('Under Review')
   })
 })
+
+describe('CoordinatorDashboard -- event search bar (IS-48)', () => {
+  it('shows a search bar (AC1)', async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    expect(wrapper.find('#coordinator-search').exists()).toBe(true)
+  })
+
+  it('says so when no event matches, instead of an error or a blank list (AC4)', async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    await wrapper.find('#coordinator-search').setValue('zzz')
+    expect(wrapper.text()).toContain('No events match "zzz".')
+    expect(wrapper.findAll('.request')).toHaveLength(0)
+  })
+})
