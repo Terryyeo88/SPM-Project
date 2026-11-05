@@ -39,6 +39,18 @@ def test_coordinator_allowed_view_on_assigned_event():
     assert can(user, actions.EVENT_VIEW, event) is True
 
 
+def test_coordinator_reassigned_away_loses_view_of_the_event():
+    """IS-7's "the previous coordinator retains view access" is superseded
+    by IS-64 (Week 9: only the Lead reassigns): access follows the CURRENT
+    assignment, so once the Lead moves the event to coord-2, coord-1 can no
+    longer see it at all -- a 404, like any event not theirs."""
+    previous = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-2", status="planning")
+    assert can(previous, actions.EVENT_VIEW, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(previous, actions.EVENT_VIEW, event)
+
+
 # -- event.edit -----------------------------------------------------------
 
 
