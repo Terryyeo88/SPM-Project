@@ -2,6 +2,9 @@
 .env
 .env.local
 .env.*.local
+# E2E settings (see .env.e2e.example) and local Supabase signing keys
+.env.e2e
+supabase/signing_keys.json
 
 # Claude Code personal settings — not shared with the team
 .claude/settings.local.json
