@@ -1642,3 +1642,17 @@ Status -- coordinator UI"). Please confirm:
   neither. The status change is still recorded with its actor in the
   event's status history. Say if the organiser or attendees should be
   notified.
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+
+- **Anonymous callers can tell real routes from unknown ones.** Flask matches
+  the URL before the auth hook runs, and the hook skips a request that matched
+  no route, so without a token a real protected route gives 401, an unknown path
+  gives 404, and a wrong method gives 405 with an `Allow` header. This isn't new:
+  before IS-73 the same probe gave 401 against 500. IS-73 leaves the hook alone.
+  Closing the gap means requiring a token on unmatched requests in
+  `app/auth/context.py`, so anonymous callers get 401 everywhere but `@public`
+  routes, at the cost of a token check and database reads on every authenticated
+  404. Say if that's wanted; it would be its own change.
+  `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one` pins today's
+  behaviour and would need updating.

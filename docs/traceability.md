@@ -76,6 +76,7 @@ To run them:
 | IS-67 View events without registration | View Events Without Registration |
 | IS-68, IS-75 Contact details and preferences | User contact and preferences |
 | IS-69 Notification system | Notification System |
+| IS-73 Unknown URLs and wrong methods return 404/405 | HTTP error status codes |
 | Week 7 customer changes #1, #2, #4, #5, #6 | Venue Settings…; Event Coordinator Lead; Event statuses; Safety Officer |
 | Stories without a ticket number in this repo | Attendee Registration, View Event Venue, Room layouts, View Reserved Equipment, Overwrite Venue Booking |
 
@@ -1209,3 +1210,27 @@ Not built, so not tested: the same revert-from-`safety_review` question for
 unchanged by this story, flagged in `docs/open-questions.md` as worth its
 own team decision; any per-venue-staff ownership/assignment restriction
 (none exists anywhere in this codebase).
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+
+Bug: unknown URLs and wrong HTTP methods returned 500 and were logged as
+crashes, because Werkzeug's `NotFound` and `MethodNotAllowed` reached the
+catch-all `@app.errorhandler(Exception)`. The ticket's own text isn't in this
+repo, so this traces the criteria as agreed for the fix. Unit tests:
+`test_http_errors.py`. Design notes: `docs/design-decisions.md` and
+`docs/open-questions.md` (IS-73). Guards marked (guard) were mutation-tested by
+hand (Terry Yeo, 2026-11-06): removing the `HTTPException` handler fails the 404
+and 405 tests; dropping the `InternalServerError` registration fails the
+crash-outside-the-view test; logging via `logger.exception` fails the 404 and 405
+tests; sending `error.description` fails the 404, 405 and description tests.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| An unknown path returns 404 in the `{"error": {"code", "message"}}` envelope, with the stable code `not_found` | `test_unknown_path_is_a_404_in_the_envelope` (guard) | `app/__init__.py::handle_http_exception` |
+| A known path with the wrong method returns 405 in the same envelope, with the stable code `method_not_allowed` and an `Allow` header | `test_wrong_method_is_a_405_in_the_envelope` (guard) | `handle_http_exception` (`error.get_response()` keeps the header) |
+| An `HTTPException` is not logged via `logger.exception`; it is a routine client error, logged at INFO | `test_unknown_path_is_a_404_in_the_envelope` (guard), `test_wrong_method_is_a_405_in_the_envelope` (guard) | `handle_http_exception` |
+| A genuine unhandled exception still returns 500 `internal_error`, logs full detail server-side, and leaks nothing to the caller | `test_exception_in_a_view_is_a_generic_500_with_full_detail_logged` | `app/__init__.py::handle_unexpected_error` |
+| (design) A crash outside the view, which Flask wraps in `InternalServerError` (itself an `HTTPException`), stays on that 500 path | `test_crash_outside_the_view_is_a_generic_500_not_an_http_error` (guard) | `@app.errorhandler(InternalServerError)` on `handle_unexpected_error` |
+| (design) An `HTTPException`'s `description` is never sent to the caller | `test_http_exception_description_is_never_sent_to_the_caller` (guard) | `handle_http_exception` (code and message come from `error.name`) |
+| `AppError` subclasses keep their behaviour; the deliberate 404s from `app.authz` still come out of the `AppError` path with code `not_found`, unchanged | `test_authz_404_still_comes_from_the_app_error_path`, plus the existing `test_authz_policy.py::test_404_not_403_when_no_relationship_exists`, `test_authz_decorators.py::test_require_loaders_own_not_found_propagates_unchanged` | `app/__init__.py::handle_app_error` (`AppError` is not an `HTTPException`, so Flask's handler lookup still picks it) |
+| (design) The auth hook is unchanged: an unknown path is a 404 for an anonymous caller too, and a known protected route is still a 401 | `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one`, `test_known_protected_route_still_401s_for_an_anonymous_caller` | `app/auth/context.py::register_auth_hooks` (unchanged; flagged in `docs/open-questions.md`) |
