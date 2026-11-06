@@ -92,8 +92,10 @@ EDITABLE_FIELDS = frozenset(
 )
 # Operating hours (IS-11 AC5, 6 Nov): one daily window per venue, the same
 # every day. Optional -- both empty means no restriction -- but set as a
-# pair, and the window closes after it opens (no overnight windows). New
-# booking requests must fit inside it (booking_service.create_booking_request);
+# pair. A closing time earlier than the opening time closes the next day
+# (an overnight window, e.g. 20:00-01:00, or 08:00-00:00 for "until
+# midnight"); the two can't be the same. New booking requests must fit
+# inside it (booking_service.create_booking_request);
 # existing bookings are left as they are when the hours change.
 _HOURS_FIELDS = ("operating_hours_start", "operating_hours_end")
 
@@ -183,8 +185,10 @@ def _operating_hours(record: dict) -> dict:
     closes = _clock_time(record, "operating_hours_end", "Closing time")
     if (opens is None) != (closes is None):
         raise ValidationError("Set both an opening and a closing time, or leave both empty.")
-    if opens is not None and closes <= opens:
-        raise ValidationError("Closing time must be later than opening time.")
+    if opens is not None and closes == opens:
+        raise ValidationError(
+            "Opening and closing times can't be the same. Leave both empty if the venue has no set hours."
+        )
     return {
         "operating_hours_start": opens.isoformat("minutes") if opens else None,
         "operating_hours_end": closes.isoformat("minutes") if closes else None,

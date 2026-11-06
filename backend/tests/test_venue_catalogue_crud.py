@@ -167,8 +167,10 @@ def test_ac1_a_missing_required_detail_is_refused(db):
         # and closing after opening.
         ({"operating_hours_start": "08:00"}, "Set both an opening and a closing time"),
         ({"operating_hours_end": "20:00"}, "Set both an opening and a closing time"),
-        ({"operating_hours_start": "20:00", "operating_hours_end": "08:00"}, "Closing time must be later"),
-        ({"operating_hours_start": "08:00", "operating_hours_end": "08:00"}, "Closing time must be later"),
+        (
+            {"operating_hours_start": "08:00", "operating_hours_end": "08:00"},
+            "Opening and closing times can't be the same",
+        ),
         ({"operating_hours_start": "8am", "operating_hours_end": "20:00"}, "Opening time must be a time of day"),
         ({"operating_hours_start": "08:00", "operating_hours_end": 20}, "Closing time must be a time of day"),
         ({"operating_hours_start": "25:00", "operating_hours_end": "26:00"}, "Opening time must be a time of day"),
@@ -284,10 +286,19 @@ def test_ac2_clearing_only_one_operating_hours_field_is_refused(db):
     assert _stored(db)["operating_hours_end"] == "23:59:00"
 
 
-def test_ac2_an_edit_that_closes_before_opening_is_refused(db):
+def test_ac2_an_edit_that_closes_at_the_opening_time_is_refused(db):
     # Checked against the venue's current opening time (07:00).
-    with pytest.raises(ValidationError, match="Closing time must be later than opening time"):
-        service.update_venue("venue-1", {"operating_hours_end": "06:00"})
+    with pytest.raises(ValidationError, match="Opening and closing times can't be the same"):
+        service.update_venue("venue-1", {"operating_hours_end": "07:00"})
+    assert _stored(db)["operating_hours_end"] == "23:59:00"
+
+
+@pytest.mark.parametrize("closes", ["06:00", "01:00", "00:00"])
+def test_ac2_a_closing_time_before_the_opening_time_closes_the_next_day(db, closes):
+    # 07:00 to 06:00 / 01:00 / 00:00 (midnight): an overnight window.
+    service.update_venue("venue-1", {"operating_hours_end": closes})
+
+    assert _stored(db)["operating_hours_end"] == closes
 
 
 def test_ac2_a_venue_keeps_a_layout_listed_before_it_was_soft_deleted(db):

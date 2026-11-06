@@ -128,16 +128,18 @@ describe('validateVenueForm (IS-61 AC1/AC2)', () => {
     expect(validateVenueForm(validForm({ tentative_hold_minutes: '1' }))).toEqual({})
   })
 
-  it('takes operating hours as an optional pair, closing after opening (IS-11 AC5)', () => {
+  it('takes operating hours as an optional pair, overnight allowed (IS-11 AC5)', () => {
     expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '20:00' }))).toEqual({})
     expect(validateVenueForm(validForm({ operating_hours_start: '08:00' })).operating_hours).toBe(
       'Set both an opening and a closing time, or leave both empty.',
     )
     expect(validateVenueForm(validForm({ operating_hours_end: '20:00' })).operating_hours).toBeTruthy()
-    expect(validateVenueForm(validForm({ operating_hours_start: '20:00', operating_hours_end: '08:00' })).operating_hours).toBe(
-      'Closing time must be later than opening time.',
+    // A closing time earlier than the opening time closes the next day.
+    expect(validateVenueForm(validForm({ operating_hours_start: '20:00', operating_hours_end: '01:00' }))).toEqual({})
+    expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '00:00' }))).toEqual({})
+    expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '08:00' })).operating_hours).toBe(
+      "Opening and closing times can't be the same. Leave both empty if the venue has no set hours.",
     )
-    expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '08:00' })).operating_hours).toBeTruthy()
     // "09:00" < "10:00" but "9:00" > "10:00" as text: <input type="time"> always pads.
     expect(validateVenueForm(validForm({ operating_hours_start: '09:00', operating_hours_end: '10:00' }))).toEqual({})
   })
@@ -147,6 +149,11 @@ describe('formatOperatingHours', () => {
   it("shows a venue's existing hours, or that it has none", () => {
     expect(formatOperatingHours('07:00:00', '23:59:00')).toBe('07:00 - 23:59 daily')
     expect(formatOperatingHours(null, null)).toBe('No set hours')
+  })
+
+  it('says when an overnight window closes the next day', () => {
+    expect(formatOperatingHours('20:00:00', '01:00:00')).toBe('20:00 - 01:00 (next day) daily')
+    expect(formatOperatingHours('08:00:00', '00:00:00')).toBe('08:00 - 00:00 (midnight) daily')
   })
 })
 

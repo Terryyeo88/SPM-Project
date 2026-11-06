@@ -12,7 +12,9 @@
  *
  * Operating hours (IS-11 AC5, added to the form 6 Nov): one opening and
  * closing time per venue, the same every day. Optional -- both empty means
- * no set hours -- but set as a pair, closing after opening. The venue
+ * no set hours -- but set as a pair. A closing time earlier than the opening
+ * time closes the next day (20:00-01:00, or 08:00-00:00 for "until
+ * midnight"); the two can't be the same. The venue
  * calendar shows the time outside them as unavailable, and a new booking
  * request must fit inside them (app.venues.booking_service).
  *
@@ -134,17 +136,27 @@ export function validateVenueForm(form) {
   const closes = payload.operating_hours_end
   if (Boolean(opens) !== Boolean(closes)) {
     errors.operating_hours = 'Set both an opening and a closing time, or leave both empty.'
-  } else if (opens && closes <= opens) {
-    // "HH:MM" strings compare in time order.
-    errors.operating_hours = 'Closing time must be later than opening time.'
+  } else if (opens && closes === opens) {
+    // An earlier closing time is fine: it closes the next day.
+    errors.operating_hours =
+      "Opening and closing times can't be the same. Leave both empty if the venue has no set hours."
   }
   return errors
 }
 
-/** A venue's hours for display: "07:00 - 23:59 daily" or "No set hours". */
+/**
+ * A venue's hours for display: "07:00 - 23:59 daily", "20:00 - 01:00 (next
+ * day) daily", "08:00 - 00:00 (midnight) daily" or "No set hours".
+ */
 export function formatOperatingHours(start, end) {
   if (!start || !end) return 'No set hours'
-  return `${timeValue(start)} - ${timeValue(end)} daily`
+  const opens = timeValue(start)
+  const closes = timeValue(end)
+  // "HH:MM" strings compare in time order.
+  let note = ''
+  if (closes === '00:00') note = ' (midnight)'
+  else if (closes < opens) note = ' (next day)'
+  return `${opens} - ${closes}${note} daily`
 }
 
 

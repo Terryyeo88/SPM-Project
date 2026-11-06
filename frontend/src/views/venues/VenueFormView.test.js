@@ -254,15 +254,26 @@ describe('VenueFormView -- edit (IS-61 AC2)', () => {
     expect(apiPost).toHaveBeenCalledWith('/venues/venue-1', { operating_hours_end: '22:00' })
   })
 
-  it('refuses a closing time before the opening time, once the field is left', async () => {
+  it('refuses a closing time equal to the opening time, once the field is left', async () => {
     const wrapper = await render()
 
-    await wrapper.find('#venue-closes').setValue('06:00')
+    await wrapper.find('#venue-closes').setValue('07:00')
     expect(shownError(wrapper, 'operating_hours')).toBeNull()
     await wrapper.find('#venue-closes').trigger('blur')
 
-    expect(shownError(wrapper, 'operating_hours')).toBe('Closing time must be later than opening time.')
+    expect(shownError(wrapper, 'operating_hours')).toBe(
+      "Opening and closing times can't be the same. Leave both empty if the venue has no set hours.",
+    )
     expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  it('accepts a closing time before the opening time, as closing the next day', async () => {
+    const wrapper = await render()
+
+    await wrapper.find('#venue-closes').setValue('01:00')
+    await wrapper.find('#venue-closes').trigger('blur')
+
+    expect(shownError(wrapper, 'operating_hours')).toBeNull()
   })
 
   it('can clear the operating hours', async () => {

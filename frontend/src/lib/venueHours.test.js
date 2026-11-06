@@ -51,6 +51,20 @@ describe('outsideHoursEntries (IS-11 AC5)', () => {
     expect(entries.map((e) => e.period)).toEqual(['after_closing'])
   })
 
+  it('marks the daytime gap of an overnight window as unavailable', () => {
+    const [entry, ...rest] = outsideHoursEntries(oneDay, '20:00:00', '01:00:00', 'day')
+
+    expect(rest).toEqual([])
+    expect([entry.period, clock(entry.start), clock(entry.end)]).toEqual(['closed_between', '2 01:00', '2 20:00'])
+    expect(outsideHoursLabel(entry)).toBe('Closed 01:00–20:00')
+  })
+
+  it('treats a 00:00 closing time as open until midnight', () => {
+    const entries = outsideHoursEntries(oneDay, '08:00', '00:00', 'day')
+
+    expect(entries.map((e) => [e.period, clock(e.start), clock(e.end)])).toEqual([['before_opening', '2 00:00', '2 08:00']])
+  })
+
   it('writes times in UTC, so they sort with the backend\'s UTC timestamps', () => {
     const [first] = outsideHoursEntries(oneDay, '08:00', '20:00', 'day')
 

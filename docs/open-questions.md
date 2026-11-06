@@ -1714,17 +1714,20 @@ under IS-11. These are the calls made beyond that:
   Staff are at the venue during setup and turnaround too. Asked on 6 Nov,
   not yet answered; built this way. If only the event's own times should
   count, `_check_operating_hours` is given the session window instead.
-- **A booking that runs past midnight is outside the hours, and so is a
-  multi-day session.** With one window per day, the venue is closed
-  overnight, so a session from 1 Nov 09:00 to 2 Nov 17:00 is refused at a
-  venue with set hours (a venue with no set hours still takes it). Please
+- **A multi-day session is outside the hours.** The booked period must fit
+  inside one window, so a session from 1 Nov 09:00 to 2 Nov 17:00 is
+  refused at a venue with set hours (a venue with no set hours still takes it). Please
   confirm, or say if a multi-day session should be read as "these hours on
   each day".
 - **A closing time of 23:59 is "open until midnight" on the calendar**, so
   no one-minute "closed" entry is shown. A booking still has to end by
   23:59, because the booking check compares the exact time.
-- **No overnight windows.** Closing must be later than opening, so a venue
-  open 20:00-02:00 can't be entered. Not asked for; please say if needed.
+- **Resolved (6 Nov, Aaralyn): overnight windows are allowed.** A closing
+  time earlier than the opening time closes the next day, so 20:00-01:00 and
+  08:00-00:00 ("until midnight") can be entered, and a booking may run past
+  midnight inside such a window. Opening and closing can't be the same time
+  (leave both empty for no set hours). The calendar shows the daytime gap
+  (01:00-20:00) as closed.
 - **An older pending request outside new hours can still be approved.**
   "Existing bookings stay the same" is read as covering requests made
   before the hours changed, not only confirmed ones; only a new request is
