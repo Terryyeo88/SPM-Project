@@ -846,22 +846,23 @@ in docs/design-decisions.md; please confirm or correct:
   ruled out schema changes. AC2 is met except for location. Should units
   get a location (free text, or a venue reference)?
 
-- **Calendar range is a day off in UTC+8 -- the venue calendar is
-  affected now.** `lib/calendar.js::toISODate` uses `toISOString()`, so
-  local midnight in Singapore becomes the previous UTC date. The venue
-  calendar's November query is `2026-10-31..2026-11-29`. The backend
-  (`CalendarRange.overlaps`) compares the UTC times PostgREST returns
-  against those days, so on the venue calendar:
-  - a booking on the last day of the month after 08:00 SGT is missing
+- ~~**Calendar range is a day off in UTC+8 -- the venue calendar is
+  affected now.**~~ **Fixed by IS-74 (Terry, 6 Nov), pending Nawaz's sign-off
+  on the venue calendar behaviour.** `lib/calendar.js::toISODate` now returns
+  the local date, `app/shared/calendar.py::CalendarRange.overlaps` converts
+  entries to Singapore time, and `widenRange` is deleted. See "Calendar days
+  are Singapore days (IS-74)" in `docs/design-decisions.md`. The defect was:
+  `toISODate` used `toISOString()`, so local midnight in Singapore became the
+  previous UTC date. The venue calendar's November query was
+  `2026-10-31..2026-11-29`, and the backend compared the UTC times PostgREST
+  returns against those days, so on the venue calendar:
+  - a booking on the last day of the month after 08:00 SGT was missing
     from the month view;
-  - in the day view, a booking after 08:00 on the chosen day is missing,
-    and the previous day's late bookings are shown instead.
+  - in the day view, a booking after 08:00 on the chosen day was missing,
+    and the previous day's late bookings were shown instead.
 
-  Fixing only the dates moves the gap to the first day's 00:00-08:00. The
-  equipment calendar works around it by asking for a day more on each side
-  (`widenRange`). The real fix is in the shared code: interpret calendar
-  days as Singapore days on the backend, and send local dates from the
-  frontend. That changes the venue calendar, so it needs Nawaz's sign-off.
+  Fixing only the dates would have moved the gap to the first day's
+  00:00-08:00, which is why the backend had to change too.
 
 - **Mutation test result.** Each `<` in `spans_overlap` (the comparison
   the equipment calendar filters with) was flipped to `<=` in turn, and
@@ -891,8 +892,9 @@ in docs/design-decisions.md; please confirm or correct:
     calendar. The wireframe shows only previous/next.
   - **A multi-day reservation is marked on every day it covers, with its
     end exclusive:** one ending at midnight does not mark the next day.
-  - **The page asks for one day more than the month on each side**
-    (`widenRange`), to work around the UTC+8 range defect above.
+  - ~~**The page asks for one day more than the month on each side**
+    (`widenRange`), to work around the UTC+8 range defect above.~~ Removed by
+    IS-74: the page now asks for exactly the month.
   - **The calendar route is its own blueprint**
     (`app/equipment/calendar_routes.py`), so IS-18's `routes.py` is
     untouched.

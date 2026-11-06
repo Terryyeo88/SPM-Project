@@ -77,6 +77,7 @@ To run them:
 | IS-68, IS-75 Contact details and preferences | User contact and preferences |
 | IS-69 Notification system | Notification System |
 | IS-73 Unknown URLs and wrong methods return 404/405 | HTTP error status codes |
+| IS-74 Calendars a day off in Singapore time | Calendar days are Singapore days |
 | Week 7 customer changes #1, #2, #4, #5, #6 | Venue Settings…; Event Coordinator Lead; Event statuses; Safety Officer |
 | Stories without a ticket number in this repo | Attendee Registration, View Event Venue, Room layouts, View Reserved Equipment, Overwrite Venue Booking |
 
@@ -682,18 +683,18 @@ Unit tests: `test_event_update.py` (one section per criterion), `test_venue_book
 
 ## View Equipment Availability Calendar (IS-47, Sprint 3)
 
-Unit tests: `test_equipment_calendar_service.py` (service, including the boundary cases), `test_equipment_calendar_routes.py` (route), `test_authz_equipment_calendar.py` (rule); integration: `test_equipment_calendar_integration.py` (the reservation -> request -> event join against local Postgres); frontend: `EquipmentCalendarView.test.js`, `lib/calendar.test.js` (`monthCells` with `spanDays`, `widenRange`), `lib/roles.test.js` and `router/index.test.js` (route access).
+Unit tests: `test_equipment_calendar_service.py` (service, including the boundary cases), `test_equipment_calendar_routes.py` (route), `test_authz_equipment_calendar.py` (rule); integration: `test_equipment_calendar_integration.py` (the reservation -> request -> event join against local Postgres); frontend: `EquipmentCalendarView.test.js`, `lib/calendar.test.js` (`monthCells` with `spanDays`), `lib/roles.test.js` and `router/index.test.js` (route access).
 
 | Criterion | Test | Implementation |
 |---|---|---|
 | AC1 Technical Support Staff can open a unit and see its reservation calendar | `test_equipment_calendar_routes.py::test_route_succeeds_for_technical_staff`, `test_authz_equipment_calendar.py::test_technical_staff_allowed_calendar_view`, `router/index.test.js` ("technical_support_staff reaches /equipment/unit-1/calendar"), `EquipmentCalendarView.test.js` | `GET /equipment/<id>/calendar` (`equipment/calendar_routes.py::get_equipment_calendar_route`), `equipment/calendar_service.py::get_equipment_calendar`, `EquipmentCalendarView.vue` (route `equipment-calendar`), link on `EquipmentDetailView.vue` (pending Nawaz's sign-off; without it the page is reached by URL only) |
 | AC2 Page shows asset tag, type, description/notes, location and current status | `test_equipment_calendar_service.py::test_response_carries_the_unit_profile_and_the_range`, `EquipmentCalendarView.test.js` ("shows the asset tag, type, status pill and the profile") | `calendar_service.py` resource block; profile block and status pill in `EquipmentCalendarView.vue`. **Location is not shown: `equipment_units` has no location column** (docs/open-questions.md) |
 | AC3 One month at a time, with previous/next | `EquipmentCalendarView.test.js` ("shows one month, and previous/next fetch the neighbouring months"), `lib/calendar.test.js` (`stepAnchor`, `rangeFor`) | `useCalendarRange('month')`, `AvailabilityCalendar` with `view="month"` |
-| AC4 Every day with a confirmed reservation is marked with the event's name | `test_equipment_calendar_service.py::test_reservation_within_range_is_an_entry_naming_its_event`, `::test_reservations_outside_the_range_are_excluded`, `test_equipment_calendar_integration.py::test_calendar_entries_name_the_event_through_the_real_join`, `EquipmentCalendarView.test.js` ("marks every day...", "a reservation on the last day of the month is marked", "asks for a range that covers the whole local month") | `equipment_service.get_equipment` (occupancy with event name), `calendar_service.py` (`CalendarRange.overlaps`), `widenRange` in `lib/calendar.js` |
+| AC4 Every day with a confirmed reservation is marked with the event's name | `test_equipment_calendar_service.py::test_reservation_within_range_is_an_entry_naming_its_event`, `::test_reservations_outside_the_range_are_excluded`, `test_equipment_calendar_integration.py::test_calendar_entries_name_the_event_through_the_real_join`, `EquipmentCalendarView.test.js` ("marks every day...", "a reservation on the last day of the month is marked", "asks for a range that covers the whole local month") | `equipment_service.get_equipment` (occupancy with event name), `calendar_service.py` (`CalendarRange.overlaps`) |
 | AC5 A multi-day reservation is marked on every day it covers | `test_equipment_calendar_service.py::test_multi_day_reservation_is_one_entry_with_its_whole_period`, `::test_multi_day_reservation_starting_before_the_range_is_included`, `lib/calendar.test.js` ("monthCells with spanDays"), `EquipmentCalendarView.test.js` ("marks every day of a multi-day reservation") | `monthCells(range, entries, { spanDays: true })`, `AvailabilityCalendar` `span-days` prop |
 | AC6 Only Technical Support Staff; anyone else gets the same response as an unknown unit | `test_authz_equipment_calendar.py::test_every_other_role_denied_calendar_view[*]`, `::test_denial_is_a_404_not_a_403[*]`, `test_equipment_calendar_routes.py::test_route_is_404_for_every_other_role`, `::test_a_hidden_unit_and_an_unknown_unit_get_the_same_response`, `lib/roles.test.js` (equipment calendar), `router/index.test.js` (non-staff redirected) | `rules.py::rule_equipment_calendar_view` (`DENY_NOT_FOUND`), `calendar_routes.py::load_unit` (same 404 message as `authorise()`), `ROUTE_ACCESS` `equipment-calendar` |
 | AC7 Unknown unit -> 404; missing or malformed dates -> 400 | `test_equipment_calendar_routes.py::test_route_returns_404_for_an_unknown_unit`, `::test_route_requires_start_and_end`, `::test_route_rejects_malformed_dates_and_end_before_start`, `test_equipment_calendar_service.py::test_rejects_end_before_start`, `::test_rejects_malformed_date[*]`, `test_equipment_calendar_routes.py::test_route_rejects_unauthenticated` (401) | `calendar_routes.py::load_unit`, route's missing-parameter check, `shared/calendar.py::parse_calendar_range` |
-| Range edges (not an AC; DoD boundary tests) | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded`, `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_starting_at_the_ranges_last_instant_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
+| Range edges (not an AC; DoD boundary tests) | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded`, `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_starting_at_the_ranges_last_instant_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included` (edges at `+08:00` since IS-74), `::test_reservation_returned_in_utc_is_placed_by_its_singapore_day` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
 
 Not built, so not tested: a "pending" state and dated maintenance periods on the calendar, and the unit's location (see `docs/open-questions.md`).
 
@@ -1236,3 +1237,52 @@ tests; sending `error.description` fails the 404, 405 and description tests.
 | (design) An `HTTPException`'s `description` is never sent to the caller | `test_http_exception_description_is_never_sent_to_the_caller` (guard) | `handle_http_exception` (code and message come from `error.name`) |
 | `AppError` subclasses keep their behaviour; the deliberate 404s from `app.authz` still come out of the `AppError` path with code `not_found`, unchanged | `test_authz_404_still_comes_from_the_app_error_path`, plus the existing `test_authz_policy.py::test_404_not_403_when_no_relationship_exists`, `test_authz_decorators.py::test_require_loaders_own_not_found_propagates_unchanged` | `app/__init__.py::handle_app_error` (`AppError` is not an `HTTPException`, so Flask's handler lookup still picks it) |
 | (design) The auth hook is unchanged: an unknown path is a 404 for an anonymous caller too, and a known protected route is still a 401 | `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one`, `test_known_protected_route_still_401s_for_an_anonymous_caller` | `app/auth/context.py::register_auth_hooks` (unchanged; flagged in `docs/open-questions.md`) |
+
+## Calendar days are Singapore days (IS-74, Terry, 2026-11-06)
+
+Bug: the venue calendar showed bookings a day off in Singapore (UTC+8). The
+ticket's own text isn't in this repo, so this traces the criteria as agreed for
+the fix. Unit tests: `test_calendar_singapore_window.py` (venue service and exact
+edges, values in UTC), `test_equipment_calendar_service.py`,
+`test_shared_calendar.py`. Frontend: `VenueCalendarView.test.js`, which pins
+`TZ=Asia/Singapore` and asserts the pin took effect, `EquipmentCalendarView.test.js`,
+`lib/calendar.test.js`. Design notes: `docs/design-decisions.md`, "Calendar days
+are Singapore days (IS-74)".
+
+Each change was mutation-tested by hand (Terry Yeo, 2026-11-06): broken, confirmed
+caught, then restored.
+
+- `toISODate` back to `toISOString().slice(0, 10)`: 5 red on a UTC host, all in
+  `VenueCalendarView.test.js` ("asks for exactly the local month", "shows a 23:00
+  booking on the last day", "does not show that 00:30 booking in the previous
+  month", "day view shows that day's entries only", "stepping the day view back").
+  On a Singapore host 7 are red, adding `calendar.test.js` (`rangeQuery`) and
+  `EquipmentCalendarView.test.js` ("asks for a range"). "shows a 00:30 booking on
+  the first day" stays green: the shifted window starts a day early, so it still
+  contains that booking.
+- Singapore conversion removed from `overlaps()`: 10 red. 8 are in
+  `test_calendar_singapore_window.py`, plus
+  `test_shared_calendar.py::test_entry_offset_is_converted_to_singapore_time` and
+  `test_reservation_returned_in_utc_is_placed_by_its_singapore_day`. That last one
+  was added because the rewritten IS-47 boundary tests stay green here: a `+08:00`
+  input already has Singapore wall-clock time, so they can't see the conversion.
+- `a_start < b_end` flipped to `<=`: `test_period_starting_at_the_singapore_days_last_instant_is_outside`,
+  `test_reservation_starting_at_the_ranges_last_instant_is_excluded`,
+  `test_touching_spans_do_not_overlap_either_way`.
+- `b_start < a_end` flipped to `<=`: `test_period_ending_exactly_at_the_singapore_midnight_it_starts_from_is_outside`,
+  `test_reservation_ending_exactly_at_the_range_start_is_excluded`,
+  `test_touching_spans_do_not_overlap_either_way`,
+  `test_entry_ending_exactly_at_range_start_is_outside`.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A booking at 23:00 local on the last day of the displayed month appears in the venue month view | `VenueCalendarView.test.js` ("shows a 23:00 booking on the last day of the month, on that day") (guard), `test_a_2300_booking_on_the_last_day_is_in_that_month_and_day[*]` | `lib/calendar.js::toISODate`, `shared/calendar.py::CalendarRange.overlaps` |
+| A booking at 00:30 local on the first day appears, and not in the previous month | `VenueCalendarView.test.js` ("shows a 00:30 booking on the first day of the month, on that day", "does not show that 00:30 booking in the previous month") (guard), `test_a_0030_booking_on_the_first_day_is_in_that_month_and_not_the_previous[*]` (guard) | same |
+| A day view shows that day's entries only, nothing from either side | `VenueCalendarView.test.js` ("day view shows that day's entries only, nothing from either side", "stepping the day view back shows the previous day only") (guard), `test_a_day_query_returns_that_day_only_with_nothing_from_either_side` (guard) | same; `sortedByStart` needs no filter because the window is exact |
+| The window's edges are exact, in Singapore time | `test_period_ending_exactly_at_the_singapore_midnight_it_starts_from_is_outside` (guard), `::test_period_ending_one_microsecond_after_that_midnight_is_inside` (guard), `::test_period_starting_at_the_singapore_days_last_instant_is_outside` (guard), `::test_period_starting_one_microsecond_before_that_is_inside` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
+| The equipment calendar shows what it showed before (IS-47), with its workaround removed. Its boundary tests were rewritten to `+08:00`, keeping each test's intent | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded` (guard), `::test_reservation_starting_at_the_ranges_last_instant_is_excluded` (guard), `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included`, `::test_reservation_returned_in_utc_is_placed_by_its_singapore_day` (guard), `EquipmentCalendarView.test.js` ("asks for a range that covers the whole local month", guard; "a reservation on the last day of the month is marked") | `widenRange` deleted; `EquipmentCalendarView.vue` asks for exactly the month |
+| (design) Blocks use the same window as bookings | `test_blocks_use_the_same_window_as_bookings` (guard) | `venues/calendar_service.py::get_venue_calendar` |
+| (design) The tests pin UTC+8 and don't depend on the host | `VenueCalendarView.test.js` ("really is running in UTC+8"), `test_the_calendar_timezone_is_utc_plus_8_every_day_of_the_year`; run on Singapore, UTC and New York hosts | `shared/calendar.py::CALENDAR_TIMEZONE` |
+
+Not covered: a browser or venue outside UTC+8. The app assumes one timezone, and
+`CALENDAR_TIMEZONE`'s comment says what would break.
