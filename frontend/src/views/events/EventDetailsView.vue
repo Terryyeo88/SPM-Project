@@ -23,6 +23,7 @@ import {
 import CoordinatorEventReview from './CoordinatorEventReview.vue'
 import AppNavBar from '../../components/AppNavBar.vue'
 import EventChangeRequests from '../../components/EventChangeRequests.vue'
+import ClarificationThread from '../../components/ClarificationThread.vue'
 import EventLogHistory from '../../components/EventLogHistory.vue'
 import EventSessionFields from '../../components/EventSessionFields.vue'
 import SessionSummaryCard from '../../components/SessionSummaryCard.vue'
@@ -524,6 +525,10 @@ watch(() => route.params.eventId, (eventId) => {
               <template v-if="canRequestChange">To change its details, request a change below -- the coordinator reviews it first.</template>
             </p>
 
+            <!-- The coordinator's clarification requests, with the reply box while
+                 under review. Shown only once the coordinator has asked something. -->
+            <ClarificationThread v-if="isOwner" :event="event" role="organiser" />
+
             <section class="card" aria-labelledby="event-details-heading">
               <h2 id="event-details-heading" class="card-title">Event Details</h2>
               <dl>
@@ -553,6 +558,9 @@ watch(() => route.params.eventId, (eventId) => {
             />
             <EventLogHistory :event="event" :refresh-key="logRefresh" />
           </template>
+          <!-- A rejected request is editable again; its earlier clarification
+               thread stays readable underneath the form. -->
+          <ClarificationThread v-if="isOwner && canEdit && !isDraft" :event="event" role="organiser" />
         </template>
       </div>
     </main>

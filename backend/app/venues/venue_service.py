@@ -40,6 +40,8 @@ transaction:
 
 from __future__ import annotations
 
+from datetime import time
+
 from postgrest.exceptions import APIError
 
 from app.events.event_service import ACCESSIBILITY_NEEDS, EQUIPMENT
@@ -84,12 +86,16 @@ EDITABLE_FIELDS = frozenset(
         "setup_minutes",
         "turnaround_minutes",
         "tentative_hold_minutes",
+        "operating_hours_start",
+        "operating_hours_end",
     }
 )
-# Not editable here: operating_hours_start/end (IS-11). Nothing but the
-# venue calendar's note reads them, so IS-61 leaves them out of the form
-# and the API -- a new venue has no set hours (both NULL), and an edit
-# leaves a venue's existing hours as they are.
+# Operating hours (IS-11 AC5, 6 Nov): one daily window per venue, the same
+# every day. Optional -- both empty means no restriction -- but set as a
+# pair, and the window closes after it opens (no overnight windows). New
+# booking requests must fit inside it (booking_service.create_booking_request);
+# existing bookings are left as they are when the hours change.
+_HOURS_FIELDS = ("operating_hours_start", "operating_hours_end")
 
 # Sessions that leave their stage when they lose a venue booking: a session
 # can't stay confirmed, or under a safety check, without the venue it was
@@ -158,6 +164,33 @@ def _choices(record: dict, field: str, label: str, allowed) -> list[str]:
     return list(dict.fromkeys(value))
 
 
+def _clock_time(record: dict, field: str, label: str) -> time | None:
+    """A time of day ("08:00" or "08:00:00"), or None when left empty."""
+    value = record.get(field)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValidationError(f"{label} must be a time of day, like 08:00.")
+    try:
+        return time.fromisoformat(value.strip())
+    except ValueError:
+        raise ValidationError(f"{label} must be a time of day, like 08:00.") from None
+
+
+def _operating_hours(record: dict) -> dict:
+    """Both operating-hours fields, checked as a pair (see _HOURS_FIELDS)."""
+    opens = _clock_time(record, "operating_hours_start", "Opening time")
+    closes = _clock_time(record, "operating_hours_end", "Closing time")
+    if (opens is None) != (closes is None):
+        raise ValidationError("Set both an opening and a closing time, or leave both empty.")
+    if opens is not None and closes <= opens:
+        raise ValidationError("Closing time must be later than opening time.")
+    return {
+        "operating_hours_start": opens.isoformat("minutes") if opens else None,
+        "operating_hours_end": closes.isoformat("minutes") if closes else None,
+    }
+
+
 def _validated(record: dict, kept_layouts=()) -> dict:
     """Every editable field of a whole venue record, checked and cleaned.
 
@@ -196,6 +229,7 @@ def _validated(record: dict, kept_layouts=()) -> dict:
         "tentative_hold_minutes": _whole_number(
             record, "tentative_hold_minutes", "Tentative hold duration", MIN_HOLD_MINUTES, " minutes"
         ),
+        **_operating_hours(record),
     }
 
 
@@ -234,7 +268,7 @@ def create_venue(body) -> dict:
     """IS-61 AC1: Venue Staff add a venue. Name, location and capacity are
     required; everything else defaults (no facilities, available, 30-minute
     setup and turnaround, a 24h tentative hold, no operating-hours
-    restriction)."""
+    restriction unless opening and closing times are given)."""
     body = _body(body)
     missing = [field for field in _REQUIRED_ON_CREATE if body.get(field) in (None, "")]
     if missing:
@@ -246,7 +280,12 @@ def create_venue(body) -> dict:
         "tentative_hold_minutes": DEFAULT_HOLD_MINUTES,
         **body,
     }
-    row = _write(supabase.table("venues").insert(_validated(record)))
+    validated = _validated(record)
+    if validated["operating_hours_start"] is None:
+        # No hours given: leave both columns to their NULL default.
+        for field in _HOURS_FIELDS:
+            del validated[field]
+    row = _write(supabase.table("venues").insert(validated))
     if not row:
         raise ValidationError("The venue database operation did not return a venue.")
     return row
@@ -269,6 +308,9 @@ def update_venue(venue_id: str, body) -> dict:
     current = get_venue(venue_id)
     merged = _validated({**current, **body}, kept_layouts=current.get("supported_layouts") or [])
     changes = {field: merged[field] for field in body}
+    if any(field in body for field in _HOURS_FIELDS):
+        # The pair is checked together, so it is written together.
+        changes.update({field: merged[field] for field in _HOURS_FIELDS})
     row = _write(supabase.table("venues").update(changes).eq("id", venue_id))
     if not row:
         # Deleted between the read and the write: a delete racing this edit wins.

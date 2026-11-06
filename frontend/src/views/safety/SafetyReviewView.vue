@@ -286,7 +286,7 @@ onMounted(load)
                 </label>
                 <textarea id="safety-comment" v-model="comment" rows="3"
                   :placeholder="decision === 'approve'
-                    ? 'Anything the coordinator should know.'
+                    ? 'What you checked, e.g. exits clear, capacity within limits.'
                     : 'Tell the coordinator what to fix before they resubmit.'" />
                 <p v-if="decision !== 'approve'" class="muted small">
                   The session goes back to planning. The coordinator fixes it and submits it again.

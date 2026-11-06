@@ -6,20 +6,20 @@ LAYOUT_TOP_DOWN()
 
 title System Context diagram for ConnectSphere
 
-Person(organizer, "Event Organizer", "Creates, drafts and submits event requests; requests changes to submitted or confirmed events.")
-Person(coordinator, "Event Coordinator", "Reviews assigned requests; approves/rejects; moves events through planning, confirmed, completed or cancelled; requests venues; reviews change requests.")
+Person(organizer, "Event Organizer", "Creates, drafts and submits event requests; answers coordinator clarification questions; requests changes to submitted or confirmed events.")
+Person(coordinator, "Event Coordinator", "Reviews assigned requests; raises clarification questions; approves/rejects; moves events through planning, confirmed, completed or cancelled; requests venues; reviews change requests.")
 Person(lead, "Event Coordinator Lead", "Works the unassigned queue; assigns and reassigns coordinators; oversees active events.")
 Person(venueStaff, "Venue Staff", "Approves or rejects venue booking requests; views venue availability calendars and booking conflicts.")
 Person(techStaff, "Technical Support Staff", "Views equipment inventory and equipment requests; checks availability for a request's date/time.")
 Person(attendee, "Attendee", "Browses events open for registration; registers, joins the waiting list or withdraws.")
 Person(safety, "Safety Officer", "Runs the Operational Feasibility Check before an event proceeds to preparation.")
 
-System(connectSphere, "ConnectSphere", "Event planning and coordination platform: event requests, status lifecycle, coordinator assignment, venues and bookings, equipment, change requests, attendee registration and audit logs.")
+System(connectSphere, "ConnectSphere", "Event planning and coordination platform: event requests, clarification threads, status lifecycle, coordinator assignment, venues and bookings, equipment, change requests, attendee registration, in-app notifications and audit logs.")
 
 System_Ext(supabaseAuth, "Supabase Auth", "Hosted identity provider. Signs users in and issues ES256-signed JWT access tokens.")
 
-Rel(organizer, connectSphere, "Creates and tracks event requests, raises change requests")
-Rel(coordinator, connectSphere, "Reviews and manages assigned events")
+Rel(organizer, connectSphere, "Creates and tracks event requests, replies to clarifications, raises change requests")
+Rel(coordinator, connectSphere, "Reviews, clarifies and manages assigned events")
 Rel(lead, connectSphere, "Assigns and reassigns coordinators")
 Rel(venueStaff, connectSphere, "Reviews venue bookings and calendars")
 Rel(techStaff, connectSphere, "Checks equipment availability")

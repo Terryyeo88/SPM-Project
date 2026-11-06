@@ -92,13 +92,13 @@ def test_entry_starting_the_day_after_end_is_outside():
     assert calendar_range.overlaps(_at(11, 0), _at(11, 2)) is False
 
 
-def test_entry_offset_is_dropped_not_converted():
-    """Placed by the wall-clock time stored with it: 2026-12-11 01:00+08:00
-    is 2026-12-10 17:00 UTC, but it is on the 11th, so outside a range
-    ending on the 10th."""
+def test_entry_offset_is_converted_to_singapore_time():
+    """Placed by its Singapore day, whatever offset it was returned with:
+    2026-12-10 17:00 UTC is 01:00 on the 11th in Singapore, so outside a range
+    ending on the 10th, even though its UTC date is the 10th."""
     calendar_range = parse_calendar_range("2026-12-01", "2026-12-10")
-    start = datetime.fromisoformat("2026-12-11T01:00:00+08:00")
-    end = datetime.fromisoformat("2026-12-11T03:00:00+08:00")
+    start = datetime.fromisoformat("2026-12-10T17:00:00+00:00")
+    end = datetime.fromisoformat("2026-12-10T19:00:00+00:00")
 
     assert calendar_range.overlaps(start, end) is False
 

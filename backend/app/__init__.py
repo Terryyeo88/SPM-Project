@@ -2,8 +2,9 @@
 Flask application factory.
 """
 
-from flask import Flask, jsonify
+from flask import Flask, json, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException, InternalServerError
 
 from app.auth.context import register_auth_hooks
 from app.config import Config
@@ -34,11 +35,30 @@ def _register_error_handlers(app: Flask) -> None:
         response.status_code = error.status_code
         return response
 
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error: HTTPException):
+        # A client error raised by Flask/Werkzeug itself (an unknown URL, a
+        # wrong method), not a crash. The code and message come from the
+        # exception's name, never its description, which a caller of abort()
+        # can set to anything. get_response() keeps its headers, such as the
+        # Allow header a 405 must carry.
+        app.logger.info("HTTP %s on %s %r", error.code, request.method, request.path)
+        response = error.get_response()
+        response.data = json.dumps(
+            {"error": {"code": error.name.lower().replace(" ", "_"), "message": error.name}}
+        )
+        response.content_type = "application/json"
+        return response
+
+    # InternalServerError is an HTTPException, but Flask only raises it to
+    # wrap a real crash outside the view (a view returning an invalid value,
+    # say), so it belongs here and not in the handler above.
+    @app.errorhandler(InternalServerError)
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception):
         # Never leak the real exception message/type/traceback to the
-        # caller -- only our own AppError subclasses are allowed to shape
-        # a response. Full detail still goes to the server log.
+        # caller -- only our own AppError subclasses carry a message written
+        # for the caller. Full detail still goes to the server log.
         app.logger.exception("Unhandled exception")
         response = jsonify({"error": {"code": "internal_error", "message": "Internal server error"}})
         response.status_code = 500

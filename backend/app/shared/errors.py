@@ -1,9 +1,11 @@
 """
 Application error types.
 
-These are the only exceptions the JSON error handlers registered in
-app.create_app() know how to translate into a response. Anything else
-becomes a generic 500 with no detail leaked (see app/__init__.py).
+These are the only exceptions whose own message the JSON error handlers
+registered in app.create_app() send to a caller. An HTTPException from
+Flask (unknown URL, wrong method) keeps its status with a generic message,
+and anything else becomes a generic 500 with no detail leaked (see
+app/__init__.py).
 """
 
 from __future__ import annotations

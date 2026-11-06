@@ -86,11 +86,7 @@ describe('labels and tabs', () => {
 })
 
 describe('decisionCommentError', () => {
-  it('lets an approval go without a comment', () => {
-    expect(decisionCommentError('approve', '')).toBe('')
-  })
-
-  it.each(['reject', 'request_changes'])('needs a comment to %s', (key) => {
+  it.each(['approve', 'reject', 'request_changes'])('needs a comment to %s (IS-59 AC3)', (key) => {
     expect(decisionCommentError(key, '   ')).not.toBe('')
     expect(decisionCommentError(key, 'Exit B is blocked.')).toBe('')
   })

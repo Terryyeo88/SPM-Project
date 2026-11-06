@@ -85,3 +85,34 @@ describe('CoordinatorDashboard -- one card per event request', () => {
     expect(card.find('.status').text()).toBe('Under Review')
   })
 })
+
+describe('CoordinatorDashboard -- event search bar (IS-48)', () => {
+  it('shows a search bar (AC1)', async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    expect(wrapper.find('#coordinator-search').exists()).toBe(true)
+  })
+
+  it('says so when no event matches, instead of an error or a blank list (AC4)', async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    await wrapper.find('#coordinator-search').setValue('zzz')
+    expect(wrapper.text()).toContain('No events match "zzz".')
+    expect(wrapper.findAll('.request')).toHaveLength(0)
+  })
+})
+
+describe('CoordinatorDashboard -- opening a request (IS-5 AC3)', () => {
+  it("links each request to its event's full details page", async () => {
+    const wrapper = await mountWith([session({ id: 's1' })])
+    const link = wrapper.find('.request .request-header').findComponent(RouterLinkStub)
+    expect(link.props('to')).toEqual({ name: 'event-details', params: { eventId: 's1' } })
+  })
+
+  it('links each session of a multi-session request to its own details page', async () => {
+    const wrapper = await mountWith([
+      session({ id: 's1' }),
+      session({ id: 's2', preferred_start_date: '2099-03-02', preferred_end_date: '2099-03-02' }),
+    ])
+    const targets = wrapper.findAll('.session-row').map((row) => row.findComponent(RouterLinkStub).props('to').params.eventId)
+    expect(targets).toEqual(['s1', 's2'])
+  })
+})

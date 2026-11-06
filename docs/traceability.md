@@ -5,19 +5,31 @@ clarifications that followed, to the tests that prove them and the code
 that implements them. It covers every sprint, from IS-1 (User Authorisation
 and Authentication) through Sprint 4. It began in Phase 4 as IS-1's own
 table, audited criterion by criterion in Phase 5 (see "Route-level and
-plumbing"); each story added its section as it was built. References were
-last checked against the test suite on 3 Nov 2026.
+plumbing"); each story added its section as it was built.
 
 ## How to read this document
 
 Each section is one story. Its opening paragraph names the story, the test
-files, and the design notes; its table has one row per acceptance criterion:
+files, and the design notes; a `*Checked: ...*` line right after the
+heading says who last ran its tests and when, then its table has one row
+per acceptance criterion:
 
 | Column | What it holds |
 |---|---|
 | Criterion | The acceptance criterion as the ticket states it. `(design)` marks a rule the team decided while building the story, and `(IS-nn)` marks a criterion added by a later story. Where a ticket's own text isn't in this repo, the section says so and traces the criteria as the team agreed them. |
 | Test | Backend tests as `file.py::test_name`. A following `::other_test` is in the same file, and a cell that starts with `::` refers to the section's main unit-test file. `[*]` means every case of a parametrised test. Frontend tests are named by file, with the `describe`/`it` text in quotes. `(guard)` marks a guard that was mutation-tested by hand: broken, confirmed caught, then restored. |
 | Implementation | The route, function, migration or component that does the work. |
+
+**`Checked:` lines.** Every push to GitHub runs the full suite in CI before
+merge (`test`, `frontend-test`), so the person who pushed the commit that
+introduced or last touched a section's tests is treated as the one who
+checked them, on the date of that push. A section built or fixed across
+more than one PR lists each push. Where a later story's own fix touches a
+sibling section's code (e.g. IS-15's reject-reason fix, PR #81, landing
+inside IS-14's section), that push is listed there too, under the sibling
+whose tests it actually re-ran — not duplicated as its own section. These
+are derived from `git log`/PR merge history, not from a second manual
+test run on top of what CI already did.
 
 Anything not covered by an automated test is listed under a "Not covered"
 note at the end of its section, with the reason.
@@ -76,6 +88,8 @@ To run them:
 | IS-67 View events without registration | View Events Without Registration |
 | IS-68, IS-75 Contact details and preferences | User contact and preferences |
 | IS-69 Notification system | Notification System |
+| IS-73 Unknown URLs and wrong methods return 404/405 | HTTP error status codes |
+| IS-74 Calendars a day off in Singapore time | Calendar days are Singapore days |
 | Week 7 customer changes #1, #2, #4, #5, #6 | Venue Settings…; Event Coordinator Lead; Event statuses; Safety Officer |
 | Stories without a ticket number in this repo | Attendee Registration, View Event Venue, Room layouts, View Reserved Equipment, Overwrite Venue Booking |
 
@@ -170,6 +184,8 @@ flaky or environment-dependent test. It was never part of Justin's original
 coverage either, so nothing of his was lost.
 
 ## Role-based frontend and session logout (IS-27, Jo, Sprint 1)
+*Checked: 2026-09-27 by Josiah (PR #2).*
+
 
 The frontend half of IS-1: each role is routed to the views built for it,
 and an expired or idle session signs the user out. The ticket's criteria
@@ -189,6 +205,8 @@ backend half is Phase 3 and Phase 4 above.
 | Sign-in and session restore load the profile, and a failed profile load is surfaced rather than leaving a half-signed-in user | `auth.test.js` (`signIn`, `signOut`, `restoreSession`: auth_* failure clears the session, other failures set `profileLoadError`, concurrent calls share one attempt) | `stores/auth.js` |
 
 ## Create and submit an event request (IS-3, Aaralyn, Sprint 1)
+*Checked: 2026-09-18 by Aaralyn (PR #3).*
+
 
 The ticket's criteria aren't recorded in this repo; the rows trace the
 behaviour the team built and agreed. Since IS-46, a request is one or more
@@ -202,6 +220,7 @@ Frontend: `lib/eventSessions.test.js` (form validation), `router/index.test.js`
 | An Event Organiser can create an event request and submit it for review in one step | `test_event_submission.py::test_create_event_request_inserts_and_submits_every_session`, `::test_create_route_passes_the_group_body_and_returns_201`, `test_event_submission_integration.py::test_create_and_submit_event_request_against_supabase` | `POST /events` (`routes.py::create_event`), `event_service.py::create_event_request`, `CreateEventView.vue` |
 | Only an Event Organiser can create a request | `test_event_submission.py::test_create_route_denies_a_non_organizer`, `router/index.test.js` ("/create-event (organiser only)"), `roles.test.js` ("create-event is reachable by event_organizer ONLY") | `rules.py::rule_event_create`, `ROUTE_ACCESS` |
 | Required details must be given before submission, and each missing one is named | `test_event_submission.py::test_submission_rejects_each_missing_required_field`, `::test_create_event_request_requires_every_shared_field`, `::test_submit_event_route_rejects_incomplete_draft`, `::test_submission_names_the_one_missing_registration_field`, `eventSessions.test.js` (`sessionIsComplete`) | `event_service.py::validate_event_payload` / `validate_event_group(for_submission=True)` |
+| (IS-3 AC1/AC2, the page) An incomplete request can't be submitted: Submit Request stays disabled, and submitting anyway highlights each missing field and sends nothing; a highlight clears once its field is filled | `CreateEventView.test.js` (all 3) | `CreateEventView.vue` (`canSubmit`, `validateForm`), `lib/eventSessions.js::validateSession` |
 | Preferred dates are in the future and times are valid (end after start, or on a later date) | `test_event_submission.py::test_submission_rejects_today_and_past_preferred_start_dates`, `::test_submission_accepts_tomorrows_preferred_start_date`, `::test_submission_rejects_end_date_before_start_date`, `::test_submission_accepts_end_date_equal_to_start_date`, `::test_submission_accepts_event_spanning_multiple_days`, `::test_submission_rejects_end_time_before_start_time_on_the_same_date`, `::test_submission_rejects_equal_start_and_end_times`, `::test_submission_allows_end_time_before_start_time_when_end_date_is_later`, `eventSessions.test.js` ("allows an overnight session...", "reactive validation") | `event_service.py::validate_event_payload` |
 | Equipment and accessibility needs are optional, but any quantity given is valid | `test_event_submission.py::test_submission_allows_empty_accessibility_and_equipment`, `::test_submission_rejects_zero_equipment_quantity`, `::test_submission_rejects_unknown_jsonb_items`, `::test_submission_allows_empty_special_requests`, `::test_submission_rejects_malformed_fields` | `event_service.py::validate_event_payload` |
 | An invalid request writes nothing | `test_event_submission.py::test_create_event_request_writes_nothing_when_any_session_is_invalid`, `::test_create_route_returns_400_for_an_invalid_session`, `::test_submission_rejects_a_body_that_is_not_an_object` | validation runs before the single insert |
@@ -214,6 +233,8 @@ Not covered by an automated test: `CreateEventView.vue` and
 grouping logic is tested in `lib/eventSessions.js`).
 
 ## Draft event requests (IS-4, IS-32, Aaralyn, Sprint 1–2)
+*Checked: 2026-09-18 by Aaralyn (PR #3).*
+
 
 IS-4 built viewing, editing and resuming a draft; IS-32 is the "save an
 incomplete request as a draft" story, whose acceptance criteria are tested
@@ -236,6 +257,8 @@ Not covered by an automated test: IS-4's browser resume through
 `localStorage`, which lives in the page components.
 
 ## Event requests with multiple sessions (IS-46, Aaralyn, Sprint 2)
+*Checked: 2026-09-18 by Aaralyn (PR #3).*
+
 
 A request has one or more sessions; name, description and purpose are shared,
 everything else is per session; one coordinator handles the whole request.
@@ -257,6 +280,8 @@ Unit: `test_event_sessions.py`, plus the session cases in
 | Lists and dashboards show one card per request, not per session | `eventSessions.test.js` (`groupIntoRequests`), `CoordinatorDashboard.test.js` ("counts requests, not sessions...") | `lib/eventSessions.js::groupIntoRequests`, `CoordinatorDashboard.vue` |
 
 ## View Venue Availability Calendar (IS-11, Nawaz, Sprint 2)
+*Checked: 2026-10-07 by Nawaz (PR #21).*
+
 
 A venue's bookings and blocks over a day, week or month, with "tentatively
 held" (booking confirmed, event not yet confirmed) told apart from
@@ -277,8 +302,13 @@ equipment calendar). Frontend: `lib/calendar.test.js`,
 | A range must be valid (start and end given, end not before start, real dates); an unknown venue is a 404 | `test_venue_calendar_routes.py::test_route_requires_start_and_end`, `::test_route_returns_404_for_missing_venue`, `test_calendar_service.py::test_rejects_end_before_start`, `::test_rejects_malformed_date`, `test_shared_calendar.py::test_end_before_start_is_rejected`, `::test_malformed_date_is_rejected_naming_the_value` | `shared/calendar.py::parse_calendar_range` |
 | Range edges: touching periods don't overlap; the end day is inclusive | `test_shared_calendar.py` (`test_range_covers_whole_days_with_an_inclusive_end`, `test_touching_spans_do_not_overlap_either_way`, `test_entry_ending_exactly_at_range_start_is_outside`, `test_entry_starting_on_the_inclusive_end_day_is_inside`, and the rest) | `shared/calendar.py::spans_overlap` / `CalendarRange` |
 | An expired tentative hold no longer shows; a long-confirmed event's booking always does | `test_calendar_service.py::test_expired_hold_on_an_unconfirmed_event_emits_no_entry`, `::test_a_long_confirmed_event_s_booking_is_never_re_expired` | `booking_release.touch_expired_holds` (see Tentative Hold below) |
+| AC5 Periods outside the venue's operating hours are shown as unavailable (added 6 Nov) | `lib/venueHours.test.js` (closed before opening and after closing, every day of the range, one entry a day in the month grid, nothing for a venue with no set hours, 23:59 = open until midnight), `VenueCalendarView.test.js` ("operating hours (IS-11 AC5)": day view lists them in time order around bookings, month grid marks every day, no marks without hours) | `lib/venueHours.js::outsideHoursEntries`, `VenueCalendarView.vue` (`shownEntries`, "Outside operating hours" legend state) |
+| AC5 Venue Staff set, change or clear a venue's operating hours: optional, set as a pair, closing after opening (added 6 Nov, agreed with Aaralyn) | `test_venue_catalogue_crud.py::test_ac1_a_new_venue_can_be_given_operating_hours`, `::test_ac1_empty_operating_hours_mean_no_set_hours`, `::test_ac1_invalid_details_are_refused[*]` (the operating-hours cases), `::test_ac2_operating_hours_can_be_edited`, `::test_ac2_operating_hours_can_be_cleared`, `::test_ac2_clearing_only_one_operating_hours_field_is_refused`, `::test_ac2_an_edit_that_closes_before_opening_is_refused`, `test_venue_operating_hours_integration.py::test_hours_set_on_create_are_stored`, `::test_hours_can_be_edited_and_cleared`, `::test_the_database_still_refuses_half_a_window`, `venueCatalogue.test.js` (payload, form, validation, changedFields), `VenueFormView.test.js` (add and edit with hours, pair and order errors, clearing) | `venue_service.py::_operating_hours` / `update_venue`, `venueCatalogue.js`, `VenueFormView.vue` ("Operating hours" section) |
+| AC5 A new booking request outside the hours is refused, setup and turnaround included; existing bookings are left alone (added 6 Nov, agreed with Aaralyn) | `test_booking_operating_hours.py` (inside, exact fit, setup before opening, turnaround after closing, past midnight, multi-day, no hours, refusal notifies no one, an older pending request can still be confirmed), `test_venue_operating_hours_integration.py::test_a_request_outside_the_hours_is_refused_and_writes_nothing`, `::test_a_request_inside_the_hours_is_stored`, `::test_changing_the_hours_leaves_an_existing_booking_alone` | `booking_service.py::_check_operating_hours` (called by `create_booking_request` before the insert) |
 
 ## Search venues and flag unsuitable candidates (IS-12, IS-13, Nawaz, Sprint 2)
+*Checked: 2026-10-07 by Nawaz (PR #22).*
+
 
 Both are built into the coordinator's venue request page
 (`RequestVenueBookingView.vue`), with no backend change: IS-12 filters the
@@ -292,6 +322,10 @@ against the session's requirements. Frontend: `lib/venueSearch.test.js`,
 | (IS-12) Search venues by capacity, location, room layout, accessibility features and facilities | `venueSearch.test.js` (`filterVenues`: one case per criterion) | `lib/venueSearch.js::filterVenues`, filter panel in `RequestVenueBookingView.vue` |
 | (IS-12) Several criteria narrow the results together (AND, not OR) | `venueSearch.test.js` ("applies multiple criteria together (AND, not OR)", "requiring every one selected") | `lib/venueSearch.js::filterVenues` |
 | (IS-12) No match shows an explicit empty result, not an error | `venueSearch.test.js` ("returns an explicit empty array, not an error...", `hasActiveCriteria`) | `lib/venueSearch.js::hasActiveCriteria`, empty state in `RequestVenueBookingView.vue` |
+| (IS-12 AC3) Each result shows the venue's capacity, location, supported layouts, accessibility features and facilities | `RequestVenueBookingView.test.js` ("venue search results") | `RequestVenueBookingView.vue` venue cards |
+| (IS-12 AC5) Changing one criterion keeps the others applied; "Clear criteria" removes them all and shows every venue again | `RequestVenueBookingView.test.js` ("changing and clearing criteria") | `RequestVenueBookingView.vue` (`criteria`, `clearCriteria`) |
+| (IS-12 AC6) Retired or withdrawn venues don't appear in results -- since IS-61, withdrawing a venue deletes it (see `open-questions.md`) | `test_venue_catalogue_crud.py::test_ac3_a_deleted_venue_is_gone_from_the_catalogue`, `::test_a_deleted_venue_cannot_be_requested` | `venue_service.delete_venue` |
+| (IS-3 AC4, IS-13 AC1/AC3) Facility arrangements are recorded as accessibility needs (Week 2: accessibility needs include "mobility/facility arrangements") and checked against the venue's accessibility provisions, naming what's missing; general venue facilities are reported "not assessed" (see `open-questions.md`) | `venueSuitability.test.js` ("fails accessibility and names exactly what is missing", "flags accessibility as unsuitable ...", "reports accessibility as not_assessed ...") | `lib/venueSuitability.js` |
 | (IS-13) Each candidate is checked against the session's capacity, room layout, accessibility needs and facilities, and an unsuitable one says why | `venueSuitability.test.js` (`checkSuitabilityForEvent`: "flags capacity as unsuitable, naming the shortfall", "flags room layout...", "flags accessibility ... names exactly what is missing") | `lib/venueSuitability.js::checkSuitabilityForEvent`, suitability badges and breakdown in `RequestVenueBookingView.vue` |
 | (IS-13) A requirement the session didn't record is reported as "not assessed", not as a pass | `venueSuitability.test.js` ("reports capacity as not_assessed...", "...room layout as not_assessed...", "...accessibility as not_assessed...", "always reports facilities as not_assessed") | `lib/venueSuitability.js::checkSuitabilityForEvent` |
 | (IS-13) The overall verdict is unsuitable if any assessed check fails; flagging never blocks the request | `venueSuitability.test.js` (`isSuitableOverall`) | `lib/venueSuitability.js::isSuitableOverall` (advisory only) |
@@ -299,7 +333,25 @@ against the session's requirements. Frontend: `lib/venueSearch.test.js`,
 Not covered by an automated test: `RequestVenueBookingView.vue` itself
 (manual check; the logic it shows is the two tested libraries).
 
+## Event search bar (IS-48, Nawaz)
+*Checked: 2026-11-05 by Aaralyn (PR #78).*
+
+
+Every list's search is client-side over the events the page already loaded for the caller, so it can only narrow what they may see; the scoping itself is the backend's. Search matches the event name (case-insensitive); the attendee list can also be narrowed by date. Venues are shown on attendee results but not searched.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A search bar is shown on the events list | `EventsListView.test.js` ("shows a search bar"), `AttendeeDashboard.test.js` ("shows a search bar"), `CoordinatorDashboard.test.js` ("event search bar (IS-48)") | `EventsListView.vue`, `AttendeeDashboard.vue`, `CoordinatorDashboard.vue` |
+| Typing a keyword filters to events whose name matches, ignoring case; the attendee list can also filter by date | `EventsListView.test.js` ("filters by event name"), `AttendeeDashboard.test.js` ("filters by event name"), `coordinatorDashboard.test.js` (`filterBySearch`), `leadDashboard.test.js` (`filterRequests`), `registrations.test.js` (`filterSessions`, incl. date) | `EventsListView.vue` `visibleRequests`, `lib/coordinatorDashboard.js::filterBySearch`, `lib/registrations.js::filterSessions` |
+| Results only include events the user is permitted to see | Backend scoping: `test_event_list_integration.py::test_organizer_sees_only_their_own_events`, `::test_coordinator_sees_only_events_assigned_to_them`, `test_registrations.py::test_attendee_cannot_see_a_session_that_is_not_confirmed`; search only narrows that list: `EventsListView.test.js`, `AttendeeDashboard.test.js` ("only ever narrows ...") | `GET /events`, `GET /registrations/open`, then client-side filtering |
+| A search matching nothing shows an explicit empty result, not an error or a blank page | `EventsListView.test.js`, `AttendeeDashboard.test.js`, `CoordinatorDashboard.test.js` ("says so when no event matches") | the "No ... match" messages in each view |
+| Clearing the search restores the full list | `EventsListView.test.js`, `AttendeeDashboard.test.js` ("clearing the search ..."), `coordinatorDashboard.test.js` ("returns everything for a blank query") | as above |
+
+Mutation-tested by hand: making the organiser search ignore the typed term fails 4 of the 5 `EventsListView` tests; removing the attendee empty-result message fails the AC4 test.
+
 ## Venue Booking Request / Approval (IS-14, Josiah, Sprint 2)
+*Checked: 2026-10-05 by Josiah (PR #18); 2026-11-05 by Justin (PR #81).*
+
 
 Not IS-1's own criteria — the Venue Booking Request (3pt) and Venue Booking
 Approval (5pt) stories. Design reasoning for every inference below (role
@@ -323,7 +375,7 @@ customer-confirmation items are flagged in `docs/open-questions.md`.
 | Venue Staff reject, must provide a reason | `test_booking_service.py::test_reject_booking_requires_a_reason_and_leaves_status_unchanged`, `::test_reject_booking_rejects_every_blank_or_non_string_reason` | `app/venues/booking_service.py::reject_booking` |
 | Coordinator can view the rejection reason | `test_booking_service.py::test_get_booking_attaches_the_latest_rejection_reason`, `::test_get_booking_rejection_is_the_most_recent_one`, `test_venue_bookings_integration.py::test_reject_booking_records_reason_coordinator_can_then_read` | `app/venues/booking_service.py::_attach_rejection_reasons`, `app/authz/rules.py::rule_venue_booking_view` (requester OR any venue_staff) |
 | Only `venue_staff` may approve/reject, and only while the booking is still `pending` (race-proofed against a double decision) | `test_authz_venue_bookings.py::test_venue_staff_cannot_redecide_an_already_decided_booking`, `::test_requesting_coordinator_cannot_decide_their_own_booking`, `test_booking_service.py::test_second_decision_is_refused_once_no_longer_pending` | `app/authz/rules.py::rule_venue_booking_approve`/`rule_venue_booking_reject`, `app/venues/booking_service.py::_decide_booking` |
-| An approved booking should notify the Coordinator (ties to the unbuilt Notification System — print-stub only, no real plumbing exists anywhere in this codebase yet) | not independently tested — see `app/venues/booking_service.py::_notify_booking_decision`'s own docstring | `app/venues/booking_service.py::_notify_booking_decision` |
+| An approved booking notifies the Coordinator (built with the notification system, IS-69) | `test_notification_hook_booking.py`, `test_notification_service.py` (booking decision) | `booking_service` -> `notification_service` |
 | Routes wire the above up with the correct authz per role (POST/GET on the events blueprint, 4 routes on the venues blueprint, static `/bookings` paths before the dynamic `/<venue_id>`) | `test_venue_bookings_routes.py` (all cases) | `app/events/routes.py::create_venue_booking`, `get_venue_bookings_for_event`; `app/venues/routes.py::list_venue_bookings_route`, `get_venue_booking_route`, `approve_venue_booking_route`, `reject_venue_booking_route` |
 | End-to-end against a real database (migration actually applies, buffers/conflict/rejection round-trip for real) | `test_venue_bookings_integration.py` (all cases) | `supabase/migrations/20261005100000_venue_bookings.sql`, `app/venues/booking_service.py` |
 | Frontend: tab grouping, request-form validation | `frontend/src/lib/venueBookings.test.js` | `frontend/src/lib/venueBookings.js` |
@@ -339,6 +391,8 @@ this project's existing "no component tests, pure logic only" convention
 components, none of which have component tests either).
 
 ## Sprint 2 — status transitions (mechanism, IS-36, IS-38, IS-39)
+*Checked: 2026-11-05 by Justin (PR #76).*
+
 
 Unit tests: `test_transitions.py` (state machine, no DB) and `test_event_lifecycle.py` (rules + routes, no DB).
 Integration tests: `test_transitions_integration.py` (real Postgres; only what a unit test can't prove).
@@ -352,8 +406,8 @@ Integration tests: `test_transitions_integration.py` (real Postgres; only what a
 | Every successful transition leaves one history row with from/to/actor/reason | `test_transitions.py::test_every_legal_edge_is_allowed`, `test_transitions_integration.py::test_history_row_records_from_to_actor_and_reason` | `transitions.py::_db_insert_history` → `event_status_log` |
 | IS-36: "Coordinator can set planning only if current status is approved" | `test_event_lifecycle.py::test_is36_coordinator_can_set_planning_only_if_approved`, `::test_is36_start_planning_refused_unless_approved`, `::test_lifecycle_route_moves_event_and_records_actor[start-planning…]` | `rules.py::rule_event_start_planning`, `routes.py::start_planning`, edge `(approved, planning)` |
 | "Coordinator can set confirmed only from planning" (status only; field-locking NOT built) | `test_event_lifecycle.py::test_step_refused_from_any_other_status[event.confirm…]`, `::test_lifecycle_route_moves_event_and_records_actor[confirm…]` | `rules.py::rule_event_confirm`, `routes.py::confirm_event`, edge `(planning, confirmed)` |
-| IS-38: "Coordinator can set completed only from confirmed" | `test_event_lifecycle.py::test_is38_complete_refused_unless_confirmed`, `::test_lifecycle_route_moves_event_and_records_actor[complete…]` | `rules.py::rule_event_complete`, `routes.py::complete_event`, edge `(confirmed, completed)` |
-| IS-38: "completed events are read-only going forward" | `test_event_lifecycle.py::test_completed_event_refuses_edit_submit_cancel_and_reassign`, `::test_is38_reassign_route_refused_on_completed_event`, `test_transitions.py::test_completed_event_cannot_move_anywhere` | every `rule_event_*` status window excludes `completed`; `rule_event_reassign_coordinator` precondition (added); no edge out of `completed` in `ALLOWED` |
+| IS-38: "Coordinator can set completed only from confirmed" | `test_event_lifecycle.py::test_is38_complete_refused_unless_confirmed`, `::test_lifecycle_route_moves_event_and_records_actor[complete…]`; UI: `CoordinatorEventReview.test.js` "Mark as Completed (IS-38)" (offered only when confirmed, confirmation step, posts to `/complete`, refusal shown); e2e: `golden-path.spec.js` step "coordinator marks the confirmed event completed" | `rules.py::rule_event_complete`, `routes.py::complete_event`, edge `(confirmed, completed)`; UI: `CoordinatorEventReview.vue` `canComplete` / `completeEvent` |
+| IS-38: "completed events are read-only going forward" | `test_event_lifecycle.py::test_completed_event_refuses_edit_submit_cancel_and_reassign`, `::test_is38_reassign_route_refused_on_completed_event`, `test_transitions.py::test_completed_event_cannot_move_anywhere`; UI: `CoordinatorEventReview.test.js::shows a completed session read-only…`; e2e: same golden-path step (no Edit/Cancel/Complete after reload) | every `rule_event_*` status window excludes `completed`; `rule_event_reassign_coordinator` precondition (added); no edge out of `completed` in `ALLOWED` |
 | IS-39: Coordinator can cancel after approval | `test_event_lifecycle.py::test_is39_coordinator_can_cancel_after_approval`, `::test_is39_cancel_refused_before_approval_or_when_finished` | `rules.py::rule_event_cancel`, edges `(approved|planning|confirmed, cancelled)` |
 | IS-39: cancellation requires a reason | `test_transitions.py::test_cancel_without_a_reason_is_refused`, `test_event_lifecycle.py::test_is39_cancel_without_a_reason_is_400_and_changes_nothing` | `transitions.py::REASON_REQUIRED` / `_clean_reason` |
 | Approved/Rejected story: rejection requires a reason | `test_transitions.py::test_reject_without_a_reason_is_refused` | `transitions.py::REASON_REQUIRED` |
@@ -365,12 +419,22 @@ Integration tests: `test_transitions_integration.py` (real Postgres; only what a
 | Error messages shown to users contain no raw status values | `test_transitions.py::test_no_transition_error_message_contains_a_raw_status_value` | `transitions.py::label` / `_REASON_MESSAGES` |
 
 Not covered, because the feature doesn't exist: IS-39's "Organizer is
-notified of cancellation and reason" (no notification system); IS-36's
-"status gates venue/equipment search" (no venue-request-for-event route, no
-equipment); the Confirmed Status story's field-locking. All are tracked in
+notified of cancellation and reason" (no notification system); the
+Confirmed Status story's field-locking. Both are tracked in
 `docs/open-questions.md`.
 
+IS-36's venue/equipment ACs (as reworded by the team), now that both request
+routes exist:
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Venue/equipment requests are only possible while the event is in planning status | `test_authz_venue_bookings.py::test_assigned_coordinator_can_create_when_event_planning`, `test_authz_equipment_create.py::test_assigned_coordinator_can_create_when_event_planning` | `rules.py::rule_venue_booking_create`, `::rule_equipment_request_create` |
+| Status change unlocks venue/equipment request actions | `VenueBookingStatus.test.js` ("offers no venue request outside planning", and the planning cases), `EquipmentBookingStatus.test.js` ("offers Request Equipment while the event is in planning") | `VenueBookingStatus.vue`, `EquipmentBookingStatus.vue` |
+| Attempting to request a venue/equipment while not in "planning" is blocked | `test_authz_venue_bookings.py::test_assigned_coordinator_cannot_create_outside_planning[*]`, `test_authz_equipment_create.py::test_assigned_coordinator_cannot_create_outside_planning[*]`, `RequestEquipmentView.test.js` ("refuses to show the form unless the event is in planning") | same rules (403); `RequestEquipmentView.vue` (`canRequest`) |
+
 ## Sprint 2 — Check Equipment Availability (IS-18, Nawaz)
+*Checked: 2026-10-08 by Nawaz (PR #23).*
+
 
 Unit tests: `test_equipment_service.py` (the availability arithmetic), `test_authz_equipment.py` (rules), `test_equipment_routes.py` (routes), `frontend/src/lib/equipment.test.js`, `frontend/src/views/equipment/EquipmentRequestDetailView.test.js`.
 
@@ -388,6 +452,8 @@ Unit tests: `test_equipment_service.py` (the availability arithmetic), `test_aut
 Not covered, because the feature doesn't exist: recording an equipment request, accepting or rejecting one, updating a reserved quantity, and releasing equipment on cancellation (separate stories); the reservation exclusion constraint itself has no integration test (see `docs/open-questions.md`).
 
 ## Week 7 change #5 — Event Coordinator Lead
+*Checked: 2026-10-04 by Justin (PR #16).*
+
 
 Unit tests: `test_coordinator_lead.py` (rules, routes, the Lead's list), `test_coordinator_assignment.py` (Lead-chosen assignment), `frontend/src/lib/leadDashboard.test.js` (dashboard grouping).
 
@@ -404,6 +470,8 @@ assignments or reassignments occur" (no notification system — see
 `docs/open-questions.md`).
 
 ## Attendee Registration (Justin)
+*Checked: 2026-10-04 by Justin (PR #17).*
+
 
 Unit tests: `test_registrations.py` (rules, validation, service, routes), `frontend/src/lib/registrations.test.js`. Integration: `test_registrations_integration.py` (local stack). The database function was also exercised directly against Postgres 16, including 20 concurrent registrations.
 
@@ -421,6 +489,8 @@ Unit tests: `test_registrations.py` (rules, validation, service, routes), `front
 Not covered, because not built: notifications (see `docs/open-questions.md`).
 
 ## View Events Without Registration (IS-67, Justin)
+*Checked: 2026-10-24 by Justin (PR #48).*
+
 
 Story: As an Attendee, I want to see confirmed events that do not require registration alongside events that do, so that I know which events I can attend without signing up. Unit tests: `test_registrations.py`, `frontend/src/lib/registrations.test.js`.
 
@@ -434,6 +504,8 @@ Story: As an Attendee, I want to see confirmed events that do not require regist
 | No internal planning information is shown | `test_registrations.py::test_public_fields_carry_registration_needs_but_no_planning_details` | `registration_service._PUBLIC_FIELDS` |
 
 ## View Event Venue (Justin)
+*Checked: 2026-10-24 by Justin (PR #49).*
+
 
 Story: As an Attendee, I want to see the venue of each confirmed event, so that I know where to go when I attend. Unit tests: `test_registrations.py`, `frontend/src/lib/registrations.test.js`.
 
@@ -443,8 +515,36 @@ Story: As an Attendee, I want to see the venue of each confirmed event, so that 
 | The event page shows the venue name and location | `test_registrations.py::test_the_event_page_shows_its_confirmed_venues` | `registration_service.get_session`; `registrations.js::venueLines`; `AttendeeEventView.vue` |
 | An event with more than one venue shows all its confirmed venues | `test_registrations.py::test_open_sessions_show_every_confirmed_venue`, `::test_a_venue_is_listed_once_and_a_deleted_venue_keeps_its_name` | `registration_service._confirmed_venues` |
 | Only confirmed venue bookings are shown | Not unit-tested (a database filter); check manually on the local stack | `registration_service._db_confirmed_venues` (`status = confirmed`) |
-| A changed venue shows when the event is viewed again | read live on every request, nothing cached | `registration_service._db_confirmed_venues` |
+| A changed venue shows when the event is viewed again | `test_registrations.py::test_a_changed_venue_shows_the_next_time_the_event_is_viewed` (read live on every request, nothing cached) | `registration_service._db_confirmed_venues` |
 | No internal booking information is shown | `test_registrations.py::test_only_the_venue_name_and_location_are_sent` | `registration_service._venue` |
+
+## Coordinator's assigned event requests (IS-5, Justin)
+*Checked: 2026-11-05 by Justin (PR #80).*
+
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| The Event Coordinator sees a list of the submitted requests assigned to them | `test_event_list_integration.py::test_coordinator_sees_only_events_assigned_to_them`, `test_event_submission.py::test_is31_coordinator_sees_only_the_sessions_assigned_to_them` | `event_service.list_event_requests` |
+| Can filter by status | `test_event_decisions.py::test_list_status_filter_narrows_within_the_callers_events`, `test_event_list_integration.py::test_status_filter_narrows_results`, `CoordinatorDashboard.test.js` ("only shows the sessions that belong in the open tab") | `GET /events?status=`, dashboard tabs |
+| Clicking a request opens its full details | `CoordinatorDashboard.test.js` ("opening a request (IS-5 AC3)") | `CoordinatorDashboard.vue` `requestLink` / `eventLink` |
+
+## View Venue Catalogue (IS-10, Nawaz)
+*Checked: 2026-09-23 by Nawaz (PR #9); 2026-11-05 by Justin (PR #80).*
+
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Opening a venue shows its location, maximum capacity, facilities, accessibility provisions and supported layouts | `VenueDetailView.test.js` ("what a venue record shows"), `test_venues_integration.py` (list/open against the real table) | `VenueDetailView.vue` |
+| Its availability shows when it is occupied and when free | `VenueDetailView.test.js` ("links to the availability calendar"); the calendar itself: View Venue Availability Calendar (IS-11) | `VenueDetailView.vue` -> `VenueCalendarView.vue` |
+
+## Stories with no automated tests, by nature
+
+- **IS-45 Change pages to wireframe.** "Matches the wireframe" is a visual
+  check, done by hand against the wireframes; nothing to assert in code.
+- **IS-49 Reconcile migration files with the live database.** A one-off
+  process story; its evidence is `supabase/migrations/20260927000000_reconcile_events_with_live.sql`
+  (every difference found is listed in its header) and a fresh
+  `supabase db reset` applying every migration in order.
 
 ## Explicitly deferred (not tested because not built)
 
@@ -457,6 +557,8 @@ Story: As an Attendee, I want to see the venue of each confirmed event, so that 
   `docs/design-decisions.md`.
 
 ## Booking conflicts (IS-16, Terry, Sprint 2)
+*Checked: 2026-10-06 by Terry (PR #20); 2026-10-18 by Justin (PR #34).*
+
 
 IS-16's acceptance criteria aren't recorded in this repo. The rows below
 trace the criteria as the team agreed them; check them against the
@@ -481,6 +583,8 @@ the new route yet); releasing a confirmed booking when its event is
 cancelled (no booking cancellation path exists).
 
 ## Request for Event Change (IS-21, Sprint 2)
+*Checked: 2026-10-08 by Aaralyn (PR #24); 2026-11-06 by Justin (PR #87).*
+
 
 Unit tests: `test_event_change_requests.py` (rules, service, routes), `frontend/src/lib/changeRequests.test.js`, `frontend/src/components/EventChangeRequests.test.js`. Integration: `test_event_change_requests_integration.py` (local stack). Design reasoning: `docs/design-decisions.md` §Request for Event Change (IS-21).
 
@@ -500,6 +604,8 @@ request or the organiser of the decision (no notification system), and a
 `docs/open-questions.md`.
 
 ### IS-21 follow-up: impact on arrangements already made (team request, 8 Oct)
+*Checked: 2026-10-08 by Aaralyn (PR #24).*
+
 
 "Alert the coordinator before a significant change is committed, presenting which already-made arrangements it touches (venue, equipment, technical support, registration)."
 
@@ -512,7 +618,20 @@ request or the organiser of the decision (no notification system), and a
 | The coordinator sees the impacts before deciding | `::test_pending_changes_are_listed_with_their_impact`, `EventChangeRequests.test.js` (impact describe block) | `change_request_service.py::list_change_requests`, `EventChangeRequests.vue` |
 | Nothing is committed until every affected area is acknowledged, including one that appeared after the page loaded; what was acknowledged is recorded | `::test_approval_waits_until_every_affected_area_is_acknowledged`, `::test_an_impact_that_appears_after_the_page_loaded_must_be_acknowledged_too`, `::test_a_change_with_no_impact_is_approved_without_acknowledgement`, `::test_acknowledge_impacts_must_be_a_list_of_areas`, `::test_confirmed_event_changes_only_after_coordinator_approval` (409 then 200) | `change_impact.py::check_acknowledged`, `change_request_service.py::approve_change_request`, `event_change_requests.acknowledged_impacts` |
 
+### IS-21 fix: sessions with no `registration_needs` value (2026-11-06)
+*Checked: 2026-11-06 by Justin (PR #87).*
+
+
+Old sessions had NULL there, and their change-request form was refused ("registration_needs is required"). The shared project was fixed by hand on 2026-11-05; the migration puts the same fix in the repo.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Existing NULLs become false; a new row left without the field gets false | `test_events_registration_needs_integration.py::test_a_draft_saved_without_registration_needs_stores_false` | `20261106000000_events_registration_needs_not_null.sql` (backfill + `default false`) |
+| The column can't be NULL again | `::test_registration_needs_cannot_be_set_to_null` (guard) | same migration (`not null`) |
+
 ### IS-21 follow-up: event logs (what changed, who changed it, when)
+*Checked: 2026-10-08 by Aaralyn (PR #24).*
+
 
 Unit tests: `test_event_logs.py`, `frontend/src/components/EventLogHistory.test.js`. Integration: `test_event_change_requests_integration.py::test_change_request_round_trips_and_approval_writes_the_event`.
 
@@ -524,6 +643,8 @@ Unit tests: `test_event_logs.py`, `frontend/src/components/EventLogHistory.test.
 | Anyone who may view the event can read its history | `::test_log_is_the_whole_request_newest_first`, `::test_log_includes_who_made_each_change`, `::test_log_is_hidden_from_unrelated_users`, `EventLogHistory.test.js` | `GET /events/<id>/logs`, `event_log.py::list_event_logs`, `EventLogHistory.vue` |
 
 ### Room layouts managed by Venue Staff
+*Checked: 2026-10-12 by Aaralyn (direct commit, no PR).*
+
 
 Room layouts moved from the `room_layout` enum to the `room_layouts` table (`supabase/migrations/20261012000000_room_layouts.sql`). Unit tests: `test_room_layouts.py`. Integration: `test_room_layouts_integration.py`.
 
@@ -547,6 +668,8 @@ Room layouts moved from the `room_layout` enum to the `room_layouts` table (`sup
 | Submitting (or saving) a draft from a page that still shows a deleted layout is refused, telling the organiser to refresh and choose a new layout | `test_room_layouts.py::test_submitting_a_stale_draft_form_asks_to_refresh_and_choose_again`, `::test_creating_and_submitting_with_a_stale_layout_asks_to_refresh`, `::test_a_layout_name_that_no_longer_exists_asks_for_a_refresh` | `event_service.py::_check_room_layout` |
 
 ### IS-60 Venue Categories
+*Checked: 2026-10-23 by Aaralyn (direct commit, no PR).*
+
 
 Story: "As a Venue staff, I want to record what type of venues are available so that I can properly categorize the venues." Venue categories are the room layouts above (`room_layouts` table, `/room-layouts`); disabling a category is its soft delete. Ongoing events are those not completed, cancelled or rejected (rejected sessions are back with their organiser, like drafts). The tests live with the room layout tests, named by criterion (`test_ac1_*` ... `test_ac5_*`). Unit: `test_room_layouts.py`. Integration: `test_room_layouts_integration.py`.
 
@@ -559,6 +682,8 @@ Story: "As a Venue staff, I want to record what type of venues are available so 
 | AC5: Permanent delete once no ongoing event uses the disabled category | `test_room_layouts.py::test_ac5_*`, `test_room_layouts_integration.py::test_ac5_*`, `RoomLayoutsView.test.js` (shows the refusal) | `DELETE /room-layouts/<id>/permanent`, trigger `before_room_layout_delete` (23503; rejected sessions excluded and cleared, `supabase/migrations/20261023000000_rejected_sessions_release_room_layouts.sql`) |
 
 ## View Reserved Equipment (Justin, Sprint 3)
+*Checked: 2026-10-14 by Justin (direct commit, no PR).*
+
 
 Story: "As a Coordinator, I want to see the quantity and which equipment is reserved for it, so that I know exactly what's allocated to the event." Unit tests: `test_equipment_service.py` (`list_requests_for_event`), `test_event_equipment_requests_routes.py` (route + authz), `frontend/src/lib/equipment.test.js`, `frontend/src/components/EquipmentBookingStatus.test.js`. Integration: `test_equipment_requests_for_event_integration.py`.
 
@@ -573,6 +698,8 @@ Story: "As a Coordinator, I want to see the quantity and which equipment is rese
 Not covered here: actually releasing the units when an event is cancelled (deleting its reservation rows) -- that is the separate "release equipment on cancel" story. Reservation rows are still written only by `backend/seed.py` until "Accept an equipment request" is built (see `docs/design-decisions.md` §View Reserved Equipment for the conventions this relies on).
 
 ## Release Equipment on Cancel (IS-44, Justin, Sprint 3)
+*Checked: 2026-10-14 by Justin (PR #27).*
+
 
 Story: "As a Technical Staff member, I want reserved equipment to be released automatically when an event is cancelled, so that the stock becomes available again for other events." Unit tests: `test_reservation_release.py`, `test_event_lifecycle.py` (when the route releases). Integration: `test_reservation_release_integration.py`. Both guards below were mutation-tested by hand (broken, caught, restored).
 
@@ -585,6 +712,8 @@ Story: "As a Technical Staff member, I want reserved equipment to be released au
 | (design) The assigned coordinator can cancel a session from the event page, with a reason, and is told how many units were released | `frontend/src/views/events/CoordinatorEventReview.test.js` (offered only for approved / planning / confirmed; reason required; posts the reason; reports released units; keeps the panel open on error) | `CoordinatorEventReview.vue` "Cancel Event" (calls IS-39's `POST /events/<id>/cancel`) |
 
 ## Reassignment is Lead-only (IS-64, Week 9 clarification, Justin, Sprint 3)
+*Checked: 2026-10-14 by Justin (PRs #28, #29).*
+
 
 Week 9 (Sreya): "Is the reassignment of coordinators now handled by Event Coordinator Lead role instead of offline agreement by coordinators?" — "yes, it is now manually assigned by the lead". This **supersedes** the Sprint 1 story "Coordinator needs reassignment" ("As an Event Coordinator, I want to reassign an associated event...") and the Week 4 answer it was built on. Its other criteria (one coordinator at a time; the new one takes over; the previous one is unassigned) still hold, now for the Lead's reassignment — `coordinator_service.reassign_coordinator` is unchanged.
 
@@ -593,11 +722,36 @@ Week 9 (Sreya): "Is the reassignment of coordinators now handled by Event Coordi
 | Only the Event Coordinator Lead can reassign; the event's coordinator and organiser get 403, anyone else 404 | `test_coordinator_lead.py::test_only_the_lead_reassigns_week_9`, `test_authz_policy.py::test_coordinator_denied_reassign_even_when_currently_assigned`, `test_events_routes.py::test_reassign_route_refuses_the_events_own_coordinator`, `::test_reassign_route_succeeds_for_the_lead` | `rules.py::rule_event_reassign_coordinator`, `routes.py::reassign_coordinator_route` (`requested_by=None`) |
 | The Lead can reassign after venue and technical arrangements are confirmed (Week 9, Shanise); not once completed (IS-38) | `test_coordinator_lead.py::test_lead_may_reassign_after_arrangements_are_confirmed`, `test_event_lifecycle.py::test_reassign_still_allowed_before_completion`, `::test_is38_reassign_route_refused_on_completed_event` | `rule_event_reassign_coordinator` |
 | Coordinators no longer list other coordinators (only the Lead picks) | `test_coordinator_lead.py::test_coordinators_no_longer_list_other_coordinators`, `test_event_decisions.py::test_coordinator_list_rule_allows_only_the_lead`, `::test_coordinators_route_lists_for_lead` | `rules.py::rule_coordinator_list` |
+| IS-7: "the previous coordinator retains view access after reassignment but cannot edit" -- **superseded by IS-64**: access follows the current assignment, so the previous coordinator loses access (see `open-questions.md` §Reassignment is Lead-only) | `test_authz_policy.py::test_coordinator_reassigned_away_loses_view_of_the_event`, `::test_coordinator_reassigned_away_denied_view_clarifications` | `rules.py::rule_event_view` (current `coordinator_id` only) |
+| IS-7: "the new Coordinator must accept" the reassignment -- **superseded** (Week 4: no acceptance step; Week 9: the Lead reassigns) | `test_coordinator_lead.py::test_only_the_lead_reassigns_week_9` | `coordinator_service.reassign_coordinator` (no accept step) |
 | No Reassign in the coordinator's UI | `frontend/src/views/events/CoordinatorEventReview.test.js` ("no Reassign"), `frontend/src/router/index.test.js` ("the old coordinator-only /events/reassign page is gone"), `frontend/src/lib/roles.test.js` | Reassign panel removed from `CoordinatorEventReview.vue`; `ReassignCoordinatorView.vue`, its route and `ROUTE_ACCESS` entry deleted |
 
 The rule change was mutation-tested by hand: restoring the "current coordinator may reassign" branch fails the three coordinator-denied tests above.
 
+## Clarification thread (IS-30, IS-76, Event Review and Approval, Justin)
+*Checked: 2026-11-01 by Justin (PR #56).*
+
+
+Two stories: the coordinator's "Request Clarification on an Event Request" and the organiser's "Reply to a Clarification Request". Week 9: the conversation "is happening offline but the system should have a means for recording the comments for tracking"; Week 4: no separate status. Decisions in `design-decisions.md` ("Clarification thread").
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| The coordinator can select "Request Clarification" and enter free-text comments (assigned coordinator, under review only) | `test_authz_policy.py::test_coordinator_allowed_request_clarification_under_review` and the two denials beside it, `test_clarification_service.py::test_coordinator_message_is_recorded_against_the_request`, `::test_route_coordinator_asks_and_organizer_answers`, `CoordinatorEventReview.test.js` ("Request Clarification"), `ClarificationThread.test.js` ("lets the coordinator write the first question") | `rule_event_request_clarification`, `routes.py::request_clarification`, `CoordinatorEventReview.vue` (button focuses the chat), `ClarificationThread.vue` |
+| A message can't be blank or over 1000 characters | `test_clarification_service.py::test_blank_message_refused`, `::test_message_at_limit_accepted`, `::test_message_over_limit_refused`, `::test_limit_counts_the_trimmed_message`, `::test_route_blank_message_is_400`, `lib/clarifications.test.js` ("messageError") | `clarification_service._clean_message`, `event_clarifications_message_check` (migration), `lib/clarifications.js::messageError` |
+| The status stays "under review" | `test_clarification_service.py::test_posting_never_touches_the_event`, `::test_route_coordinator_asks_and_organizer_answers`, `CoordinatorEventReview.test.js` ("sends from the Conversation box without changing the status") | `post_clarification` writes only `event_clarifications` |
+| The organiser is notified of a clarification request; the coordinator of a reply | `test_clarification_service.py::test_coordinator_message_notifies_the_organizer_side`, `::test_organizer_reply_notifies_the_coordinator_side`, `::test_clarification_request_notification_goes_to_the_organizer`, `::test_clarification_reply_notification_goes_to_the_coordinator` | `notification_service.clarification_posted` |
+| The organiser can see the comments and answer them while under review | `test_authz_policy.py::test_organiser_allowed_reply_to_clarification_on_own_event_under_review`, `::test_organiser_denied_reply_to_clarification_on_another_organisers_event`, `test_clarification_service.py::test_organizer_can_reply_once_coordinator_has_asked`, `ClarificationThread.test.js` ("the organiser replies") | `rule_event_clarification_reply`, `routes.py::reply_to_clarification`, `EventDetailsView.vue` |
+| The organiser can't start a thread (they use Request Change) | `test_clarification_service.py::test_organizer_cannot_start_a_thread`, `::test_route_organizer_reply_before_any_question_is_400`, `ClarificationThread.test.js` ("hidden from the organiser until the coordinator has asked") | `clarification_service._coordinator_has_asked` |
+| Replying doesn't let the organiser edit; only the coordinator can change the request | `test_authz_policy.py::test_organiser_denied_edit_after_submission` (unchanged), `::test_route_organizer_cannot_post_as_coordinator` | `rule_event_edit` (untouched) |
+| More than one message each way | `test_clarification_service.py::test_thread_can_go_back_and_forth`, `ClarificationThread.test.js` ("follow-ups") | append-only table |
+| Who sent each message and when, in order; never edited or deleted | `test_clarification_service.py::test_thread_lists_oldest_first_with_author_names`, `ClarificationThread.test.js` ("shows every message oldest first") | `list_clarifications`, no update/delete route |
+| One thread per event request, shared by every session | `test_clarification_service.py::test_sessions_of_one_request_share_a_thread`, `::test_thread_of_other_request_excluded`, `::test_legacy_event_without_shared_id_is_its_own_thread` | keyed on `shared_event_id` (`event_log.group_id`) |
+| Only the owning organiser and the assigned coordinator can view it (not the Lead; a reassigned-away coordinator loses access) | `test_authz_policy.py::test_organiser_allowed_view_clarifications_on_own_event`, `::test_assigned_coordinator_allowed_view_clarifications`, `::test_coordinator_reassigned_away_denied_view_clarifications`, `::test_lead_denied_view_clarifications_but_told_403_not_404`, `::test_other_organiser_denied_view_clarifications`, `test_clarification_service.py::test_route_stranger_gets_404`, `::test_route_lead_cannot_read_the_thread` | `rule_event_clarification_view`, `routes.py::get_clarifications` |
+| Once the request leaves "under review": no new messages, the thread stays readable | `test_authz_policy.py::test_organiser_denied_reply_to_clarification_once_not_under_review`, `::test_clarifications_stay_viewable_after_request_leaves_under_review`, `test_clarification_service.py::test_route_no_new_messages_once_approved_but_thread_still_readable`, `ClarificationThread.test.js` ("no reply box once the request has left under review") | `under_review` checks in both posting rules; `rule_event_clarification_view` has no status check |
+
 ## Update Event Information During Planning (IS-9, Sprint 3)
+*Checked: 2026-10-18 by Justin (PR #36); 2026-10-19 by Aaralyn (PR #44).*
+
 
 Unit tests: `test_event_update.py` (one section per criterion), `test_venue_booking_cancel.py` (AC9: service, rule, route), `test_event_logs.py` ("which session each entry is about"), `frontend/src/lib/eventUpdates.test.js`, `frontend/src/views/events/CoordinatorEventReview.test.js` ("Edit Details (IS-9)"), `frontend/src/components/VenueBookingStatus.test.js`, `frontend/src/views/events/EventDetailsView.test.js` (AC5), `frontend/src/lib/venueBookings.test.js`, `frontend/src/components/EventLogHistory.test.js`. Integration (local Supabase): `test_is9_integration.py`, `test_event_change_requests_integration.py`. Design reasoning: `docs/design-decisions.md` §Update Event Information During Planning (IS-9).
 
@@ -616,23 +770,27 @@ Unit tests: `test_event_update.py` (one section per criterion), `test_venue_book
 | Cancelling a venue booking of a confirmed event reverts it to planning (2026-10-26; answers the open question) | `test_venue_booking_cancel.py::test_cancelling_a_booking_of_a_confirmed_event_reverts_it_to_planning[*]`, `::test_an_event_that_is_not_confirmed_keeps_its_status[*]`, `::test_the_cancellation_stands_if_the_event_moved_on_since_it_was_loaded`, `::test_the_route_reverts_a_confirmed_event_to_planning`, `VenueBookingStatus.test.js` ("warns, then refreshes the event...", "does not refresh the event when it was not reverted") | `booking_service.py::cancel_booking` / `_revert_confirmed_event` (`confirmed -> planning` via `transitions.transition`, `event_reverted_to_planning` in the response); warning and event refresh in `VenueBookingStatus.vue`, `@updated` in `EventDetailsView.vue` |
 
 ## View Equipment Availability Calendar (IS-47, Sprint 3)
+*Checked: 2026-10-17 by Terry (PR #33).*
 
-Unit tests: `test_equipment_calendar_service.py` (service, including the boundary cases), `test_equipment_calendar_routes.py` (route), `test_authz_equipment_calendar.py` (rule); integration: `test_equipment_calendar_integration.py` (the reservation -> request -> event join against local Postgres); frontend: `EquipmentCalendarView.test.js`, `lib/calendar.test.js` (`monthCells` with `spanDays`, `widenRange`), `lib/roles.test.js` and `router/index.test.js` (route access).
+
+Unit tests: `test_equipment_calendar_service.py` (service, including the boundary cases), `test_equipment_calendar_routes.py` (route), `test_authz_equipment_calendar.py` (rule); integration: `test_equipment_calendar_integration.py` (the reservation -> request -> event join against local Postgres); frontend: `EquipmentCalendarView.test.js`, `lib/calendar.test.js` (`monthCells` with `spanDays`), `lib/roles.test.js` and `router/index.test.js` (route access).
 
 | Criterion | Test | Implementation |
 |---|---|---|
 | AC1 Technical Support Staff can open a unit and see its reservation calendar | `test_equipment_calendar_routes.py::test_route_succeeds_for_technical_staff`, `test_authz_equipment_calendar.py::test_technical_staff_allowed_calendar_view`, `router/index.test.js` ("technical_support_staff reaches /equipment/unit-1/calendar"), `EquipmentCalendarView.test.js` | `GET /equipment/<id>/calendar` (`equipment/calendar_routes.py::get_equipment_calendar_route`), `equipment/calendar_service.py::get_equipment_calendar`, `EquipmentCalendarView.vue` (route `equipment-calendar`), link on `EquipmentDetailView.vue` (pending Nawaz's sign-off; without it the page is reached by URL only) |
 | AC2 Page shows asset tag, type, description/notes, location and current status | `test_equipment_calendar_service.py::test_response_carries_the_unit_profile_and_the_range`, `EquipmentCalendarView.test.js` ("shows the asset tag, type, status pill and the profile") | `calendar_service.py` resource block; profile block and status pill in `EquipmentCalendarView.vue`. **Location is not shown: `equipment_units` has no location column** (docs/open-questions.md) |
 | AC3 One month at a time, with previous/next | `EquipmentCalendarView.test.js` ("shows one month, and previous/next fetch the neighbouring months"), `lib/calendar.test.js` (`stepAnchor`, `rangeFor`) | `useCalendarRange('month')`, `AvailabilityCalendar` with `view="month"` |
-| AC4 Every day with a confirmed reservation is marked with the event's name | `test_equipment_calendar_service.py::test_reservation_within_range_is_an_entry_naming_its_event`, `::test_reservations_outside_the_range_are_excluded`, `test_equipment_calendar_integration.py::test_calendar_entries_name_the_event_through_the_real_join`, `EquipmentCalendarView.test.js` ("marks every day...", "a reservation on the last day of the month is marked", "asks for a range that covers the whole local month") | `equipment_service.get_equipment` (occupancy with event name), `calendar_service.py` (`CalendarRange.overlaps`), `widenRange` in `lib/calendar.js` |
+| AC4 Every day with a confirmed reservation is marked with the event's name | `test_equipment_calendar_service.py::test_reservation_within_range_is_an_entry_naming_its_event`, `::test_reservations_outside_the_range_are_excluded`, `test_equipment_calendar_integration.py::test_calendar_entries_name_the_event_through_the_real_join`, `EquipmentCalendarView.test.js` ("marks every day...", "a reservation on the last day of the month is marked", "asks for a range that covers the whole local month") | `equipment_service.get_equipment` (occupancy with event name), `calendar_service.py` (`CalendarRange.overlaps`) |
 | AC5 A multi-day reservation is marked on every day it covers | `test_equipment_calendar_service.py::test_multi_day_reservation_is_one_entry_with_its_whole_period`, `::test_multi_day_reservation_starting_before_the_range_is_included`, `lib/calendar.test.js` ("monthCells with spanDays"), `EquipmentCalendarView.test.js` ("marks every day of a multi-day reservation") | `monthCells(range, entries, { spanDays: true })`, `AvailabilityCalendar` `span-days` prop |
 | AC6 Only Technical Support Staff; anyone else gets the same response as an unknown unit | `test_authz_equipment_calendar.py::test_every_other_role_denied_calendar_view[*]`, `::test_denial_is_a_404_not_a_403[*]`, `test_equipment_calendar_routes.py::test_route_is_404_for_every_other_role`, `::test_a_hidden_unit_and_an_unknown_unit_get_the_same_response`, `lib/roles.test.js` (equipment calendar), `router/index.test.js` (non-staff redirected) | `rules.py::rule_equipment_calendar_view` (`DENY_NOT_FOUND`), `calendar_routes.py::load_unit` (same 404 message as `authorise()`), `ROUTE_ACCESS` `equipment-calendar` |
 | AC7 Unknown unit -> 404; missing or malformed dates -> 400 | `test_equipment_calendar_routes.py::test_route_returns_404_for_an_unknown_unit`, `::test_route_requires_start_and_end`, `::test_route_rejects_malformed_dates_and_end_before_start`, `test_equipment_calendar_service.py::test_rejects_end_before_start`, `::test_rejects_malformed_date[*]`, `test_equipment_calendar_routes.py::test_route_rejects_unauthenticated` (401) | `calendar_routes.py::load_unit`, route's missing-parameter check, `shared/calendar.py::parse_calendar_range` |
-| Range edges (not an AC; DoD boundary tests) | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded`, `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_starting_at_the_ranges_last_instant_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
+| Range edges (not an AC; DoD boundary tests) | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded`, `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_starting_at_the_ranges_last_instant_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included` (edges at `+08:00` since IS-74), `::test_reservation_returned_in_utc_is_placed_by_its_singapore_day` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
 
 Not built, so not tested: a "pending" state and dated maintenance periods on the calendar, and the unit's location (see `docs/open-questions.md`).
 
 ## Event statuses: a defined set (Event Status Management), plus `safety_review` (Week 7 #6)
+*Checked: 2026-10-18 by Justin (direct commit, no PR).*
+
 
 Story: "As an Event Coordinator, I want the system to support a defined set of event statuses, so that everyone uses a consistent, shared vocabulary for where an event stands." AC2 reworded from "each event request" to "each event session": every session of a multi-session request is its own `events` row and moves through the statuses on its own (see `docs/design-decisions.md`).
 
@@ -646,6 +804,8 @@ Story: "As an Event Coordinator, I want the system to support a defined set of e
 The Safety Officer role, its queue and its decisions were built afterwards -- see "Safety Officer: Operational Feasibility Check" below.
 
 ## Safety Officer: Operational Feasibility Check (Week 7 #6, Justin, Sprint 3)
+*Checked: 2026-10-18 by Justin (PR #37).*
+
 
 Source: Week 7 Customer Changes #6, plus the Week 9 answers (Sreya, Jin
 Hong). Unit tests: `test_safety_service.py` (service), `test_authz_safety_reviews.py`
@@ -661,7 +821,7 @@ marked (guard) were mutation-tested by hand (broken, caught, restored).
 | "After the venue and technical arrangements have been confirmed, the Safety Officer must conduct an Operational Safety Check" -- the coordinator submits once the arrangements are confirmed | `test_safety_service.py::test_submit_writes_a_pending_review_and_moves_the_session_to_safety_review`, `::test_submit_refused_when_arrangements_are_not_ready` (guard), the `arrangement_problems` tests, `test_safety_routes.py` (submit), `test_safety_reviews_integration.py::test_submit_writes_a_pending_review_the_officer_sees_with_its_session`, `SafetyCheckStatus.test.js` | `POST /events/<id>/safety-review`, `safety_service.submit_for_safety_check` / `arrangement_problems`, `rule_safety_review_submit`, edge `planning -> safety_review`, `SafetyCheckStatus.vue` |
 | Week 9: "The safety officer role will pick up the event request" -- the officer's queue | `test_safety_service.py::test_list_embeds_each_session_and_hides_pending_reviews_of_sessions_that_moved_on`, `::test_list_is_empty_for_anyone_but_a_safety_officer`, `test_safety_routes.py` (list), `safetyReviews.test.js` (tabs, rows) | `GET /safety-reviews`, `safety_service.list_reviews`, `SafetyOfficerDashboard.vue` (Check Safety / Checked) |
 | "The review considers ... expected attendance, venue capacity and layout, ... accessibility requirements, equipment placement ..." | `test_safety_reviews_integration.py::test_approval_opens_confirmation_and_the_detail_shows_the_venue`, `SafetyReviewView.test.js` ("shows what to check") | `GET /safety-reviews/<id>`, `safety_service.review_detail`, `SafetyReviewView.vue` (+ `checkSuitability`) |
-| "The Safety Officer may approve the event, reject the safety arrangement, or request changes" -- with a comment (Week 9) | `test_safety_service.py` (decide tests), `test_safety_routes.py::test_each_decision_route_passes_its_status_and_the_comment`, `SafetyReviewView.test.js` | `POST /safety-reviews/<id>/approve`, `/reject`, `/request-changes`, `safety_service.decide_review`, `rule_safety_review_*` |
+| "The Safety Officer may approve the event, reject the safety arrangement, or request changes" -- with a comment (Week 9; IS-59 AC3: required for all three, approving included) | `test_safety_service.py` (decide tests, incl. `::test_every_decision_needs_a_comment` (guard)), `test_safety_routes.py::test_each_decision_route_passes_its_status_and_the_comment`, `safetyReviews.test.js` (`decisionCommentError`), `SafetyReviewView.test.js` ("will not approve without a comment") | `POST /safety-reviews/<id>/approve`, `/reject`, `/request-changes`, `safety_service.decide_review`, `rule_safety_review_*` |
 | "If changes are required, the event returns to the relevant earlier planning stage" (Week 9: back to planning) | `test_safety_service.py::test_reject_or_request_changes_sends_the_session_back_to_planning_with_the_comment`, `test_safety_reviews_integration.py::test_changes_requested_goes_back_to_planning_and_a_resubmission_is_a_new_review` | edge `safety_review -> planning`, `decide_review` |
 | "The event cannot proceed to preparation until the Safety Officer has approved it" -- confirm only once approved, and nothing skips the check | `test_event_lifecycle.py::test_confirm_refused_until_the_safety_officer_approves` (guard), `::test_confirm_from_planning_is_refused`, `test_transitions.py::test_representative_illegal_edges_are_refused` (`planning -> confirmed`), `test_authz_safety_reviews.py::test_confirm_is_from_safety_review_only`, `SafetyCheckStatus.test.js` ("confirms an approved session") | `confirm_event` + `safety_service.is_approved`, `rule_event_confirm` (from `safety_review`), no `planning -> confirmed` edge |
 | (design) One pending review per session; two decisions can't both land | `test_safety_reviews_integration.py::test_the_database_allows_only_one_pending_review_per_session`, `test_safety_service.py::test_a_second_pending_review_is_refused_clearly`, `::test_a_second_decision_racing_the_first_is_refused` (guard) | unique index `safety_reviews_one_pending_per_event`; conditional update in `decide_review` |
@@ -673,6 +833,8 @@ resetting a check when a session is edited during it (see
 `docs/open-questions.md`, "Safety Officer").
 
 ## Venue Settings, Venue Becomes Unavailable, Tentative Hold Expiry (Week 7 #1/#2/#4, Josiah, Sprint 3, 2026-10-19)
+*Checked: 2026-11-02 by Josiah (PR #45).*
+
 
 Source: Week 7 Customer Changes #1, #2, #4; Aaralyn's agreed tentative-hold
 flow (unchanged, already implemented by IS-11/IS-16 -- see
@@ -695,6 +857,8 @@ with the `test_venue_catalogue_crud.py` tests cited below. The frontend's
 `lib/venues.js::updateVenueSettings` still names the old route, but no page calls it.
 
 ### IS-58: Request Venue Booking with Setup and Turnaround Time
+*Checked: 2026-11-02 by Josiah (PR #45).*
+
 
 | Criterion | Test | Implementation |
 |---|---|---|
@@ -704,6 +868,8 @@ with the `test_venue_catalogue_crud.py` tests cited below. The frontend's
 | Existing bookings never change when a venue's settings are edited later ("existing bookings that become problematic ... identified, not silently removed" -- satisfied by construction, see design-decisions.md) | `test_venue_settings_blocking_hold_integration.py::test_editing_venue_settings_does_not_change_existing_booking`, `::test_update_venue_settings_rejects_a_non_positive_value_for_real` | `booking_service.create_booking_request` / `confirm_booking` read venue settings once, at creation/confirm time only; `venue_bookings.setup_minutes`/`turnaround_minutes`/`hold_minutes` are snapshots |
 
 ### Venue Becomes Unavailable After Booking
+*Checked: 2026-11-02 by Josiah (PR #45).*
+
 
 | Criterion | Test | Implementation |
 |---|---|---|
@@ -716,6 +882,8 @@ with the `test_venue_catalogue_crud.py` tests cited below. The frontend's
 | The blocked period is surfaced to Venue Staff reviewing a booking | `VenueBookingReviewView.vue` ("Venue blocked" suitability row, manual check -- no component tests for this file) | `get_booking` sets `booking["blocked"]` |
 
 ### Venue Availability Calendar Tentative Hold
+*Checked: 2026-11-02 by Josiah (PR #45).*
+
 
 | Criterion | Test | Implementation |
 |---|---|---|
@@ -727,6 +895,8 @@ with the `test_venue_catalogue_crud.py` tests cited below. The frontend's
 | Existing bookings that become problematic under the new setup/turnaround rule are identified, not silently removed | same as IS-58's snapshot-immutability row above | same |
 
 ### Expiry wired into every call site that trusts `confirmed == genuinely holding the venue`
+*Checked: 2026-11-02 by Josiah (PR #45).*
+
 
 | Location | Test |
 |---|---|
@@ -745,6 +915,8 @@ eventually confirmed against a venue's now-stale settings (see
 `docs/open-questions.md`).
 
 ## Sprint 3 — Record Equipment Request for Event (IS-17, Nawaz)
+*Checked: 2026-10-19 by Nawaz (PR #39).*
+
 
 Source: IS-17's AC, plus Aaralyn's IS-9 note that equipment requests need
 planning. Unit tests: `test_equipment_create_request.py` (service),
@@ -768,6 +940,8 @@ planning. Unit tests: `test_equipment_create_request.py` (service),
 | (design) Coordinators can read the type catalogue | `test_authz_equipment_create.py` (type list), `test_equipment_create_routes.py` (types) | `GET /equipment/types`, `rule_equipment_type_list` |
 
 ## Sprint 3 — Accept an Equipment Request and Reserve Stock (IS-19, Nawaz)
+*Checked: 2026-10-19 by Nawaz (PR #40).*
+
 
 Source: the Reservation story's first AC. Unit tests:
 `test_equipment_accept.py` (service), `test_authz_equipment_accept.py`
@@ -787,6 +961,8 @@ real database.
 | Technical Support can accept from the request page and sees what was reserved | `EquipmentRequestDetailView.test.js` ("accepting the request": enabled/disabled button, no decision once decided, accepts and lists units, shows the server error) | `EquipmentRequestDetailView.vue` "Your decision" and "Reserved for this event" |
 
 ## Sprint 3 — Get Warned and Reject When Requested Quantity Exceeds Availability (IS-41, Nawaz)
+*Checked: 2026-10-19 by Nawaz (PR #41).*
+
 
 Source: the Reservation story's second sub-story. Unit tests:
 `test_equipment_reject.py` (service), `test_authz_equipment_reject.py`
@@ -808,6 +984,8 @@ database.
 | (design) Rejecting reserves/releases nothing | `test_equipment_reject.py::test_reject_reserves_nothing` | pending requests hold no stock |
 
 ## Sprint 3 — Update Quantity on an Existing Equipment Reservation (IS-43, Nawaz)
+*Checked: 2026-10-19 by Nawaz (PR #42).*
+
 
 Source: the Reservation story's third sub-story. Unit tests:
 `test_equipment_change.py` (service), `test_authz_equipment_change.py`
@@ -832,6 +1010,8 @@ database.
 | Technical Support can find asks waiting | `EquipmentRequestsView.test.js`, `test_equipment_change_routes.py::test_technical_staff_see_the_pending_queue_and_a_coordinator_does_not` | `GET /equipment/change-requests`, "Quantity changes waiting" on the queue |
 
 ### IS-61 CRUD in Venue Catalogue
+*Checked: 2026-10-26 by Aaralyn (PR #51); 2026-11-03 by Aaralyn (PR #70).*
+
 
 Story: "As a Venue staff, I want to add, edit and delete venues so that I can easily manage what venues ConnectSphere currently has." Built on the existing `venues` table. Deleting a venue removes its row; every booking of it keeps the venue's name as text (revised 3 Nov, `20261103000000_venue_hard_delete.sql`: deleting was first a soft delete followed by a separate permanent delete). Ongoing events are those not completed, cancelled or rejected. Unit: `test_venue_catalogue_crud.py` (named by criterion, `test_ac1_*` ... `test_ac4_*`, plus `test_route_*`). Integration: `test_venue_catalogue_crud_integration.py`. Frontend: `lib/venueCatalogue.test.js`, `lib/venueBookings.test.js` (`unreplacedVenueReleases`), `VenueFormView.test.js`, `VenueDetailView.test.js`, `VenueRemovedAlert.test.js`, `VenueBookingStatus.test.js`.
 
@@ -854,6 +1034,8 @@ Story: "As a Venue staff, I want to add, edit and delete venues so that I can ea
 Each guard above was mutation-tested by hand once (broken, confirmed caught, restored), against the original soft delete: the `delete_venue()` grant, the deleted-venue trigger, `delete_venue()`'s event-status and booking-status filters, `venues_buffers_non_negative`, the not-deleted condition on edits, the pending condition on withdrawing a safety review, `expected_from` on the revert to planning, the catalogue's deleted filter, the backend's deleted-venue check on booking requests, and the alert's "newer booking" check. The 3 Nov revision removed the not-deleted condition and the deleted filter (there is no soft-deleted row left to filter); its integration tests have not yet been run against a local Supabase.
 
 ## Sprint 4 — Notification System (IS-69)
+*Checked: 2026-10-29 by Terry (PR #52); 2026-10-31 by Terry (PR #53).*
+
 
 The ticket's acceptance criteria aren't in the repo; the criteria below are
 our working reading, flagged in `docs/open-questions.md`.
@@ -895,6 +1077,8 @@ notifications no hook existed for (see `docs/open-questions.md`).
 
 
 ## Sprint 4 — User contact and preferences (IS-68, IS-75)
+*Checked: 2026-10-31 by Terry (PR #54); 2026-10-31 by Justin (PR #55).*
+
 
 Criteria from the ticket: phone number, organisation (optional) and
 communication preferences (email, SMS), per the Edit Profile wireframe; a
@@ -943,6 +1127,12 @@ every profile directly through the existing RLS policy
 
 
 ## Sprint 4 — Notification (Attendees) (IS-22, Justin)
+*Checked: 2026-11-01 by Justin (PR #56); 2026-11-03 by Justin (PR #67).*
+
+
+Numbering: the ACs below are numbered as built, not as in Jira. Jira's IS-22
+AC2 = AC1 here, AC3 = AC2, AC4 = AC3/AC4, AC5 = AC5-AC7, AC6 = AC8, AC7 =
+AC9/AC10. Jira's AC1 (bookmarks) is not built -- see design-decisions.md.
 
 Jira ticket IS-22. Committed and merged as IS-76 by mistake (branch
 `feat/IS-76-attendee-notifications`, PR #56); the history is left as is.
@@ -979,6 +1169,8 @@ request tells nobody; a venue swap is told and rebooking the same venue is
 not, against real `venue_bookings` / `venue_booking_status_log`.
 
 ## Sprint 4 — Withdrawal of Equipment Booking (IS-66, Nawaz)
+*Checked: 2026-11-03 by Nawaz (PR #57).*
+
 
 Source: IS-66's one acceptance criterion ("Allow for deletion of equipment
 booking request when it is pending and once it has been accepted"), plus a
@@ -1006,6 +1198,8 @@ database.
 | Cancelled requests are visible, not hidden | `equipment.test.js` (Cancelled tab), `EquipmentBookingStatus.test.js::offers no Cancel for a rejected or already cancelled request` | `REQUEST_TABS`, `.status-cancelled` |
 
 ## Sprint 4 — Receive Technical Support Notifications (IS-26, Nawaz)
+*Checked: 2026-11-03 by Nawaz (PR #58).*
+
 
 Source: IS-26 "Receive Technical Support Notifications" (the Sprint 1 user
 stories document): "As Technical Support Staff, I want to receive
@@ -1047,6 +1241,8 @@ not yet run** (see open-questions): they need a local Supabase stack.
 | IS-66 | `cancelled` is a real enum value; cancelling frees units so another request can be accepted; a waiting change is rejected; a cancelled request cannot be cancelled again | `test_cancelling_a_confirmed_request_frees_its_units_for_another_request`, `test_cancelling_a_pending_request_marks_it_cancelled`, `test_cancelling_rejects_a_change_still_waiting_on_the_request`, `test_a_request_that_is_already_cancelled_cannot_be_cancelled_again` |
 
 ## Sprint 4 — Notification (Event Organizer) (IS-23, Nawaz)
+*Checked: 2026-11-03 by Nawaz (PR #59).*
+
 
 Source: IS-23 "Notification (Event Organizer)" (the Sprint 1 user stories
 document): "As an Event Organizer, I want to receive notifications about
@@ -1059,7 +1255,7 @@ tests): `test_notification_organizer_integration.py`. No migration.
 | Acceptance criterion | Test | Implementation |
 |---|---|---|
 | The request is submitted: the organizer receives a submission notification | `test_notification_organizer.py::test_the_organizer_is_told_each_milestone_of_their_request[submitted]`, `test_the_organizer_is_told_of_their_own_submission`, `test_notification_hook_organizer.py::test_submitting_triggers_one_notification_with_the_organizer_as_the_actor` | `_submit_sessions` -> `organizer_event_news("submitted")` |
-| The coordinator requests clarification or amendment: notified | none | **not built**: no such request exists (open-questions) |
+| The coordinator requests clarification or amendment: notified | `test_clarification_service.py::test_coordinator_message_notifies_the_organizer_side`, `::test_clarification_request_notification_goes_to_the_organizer` | `clarification_service.post_clarification` -> `notification_service.clarification_posted("coordinator")` (see "Clarification thread") |
 | The coordinator approves or rejects: the organizer is notified of the decision | `[approved]`, `[rejected]` in `test_the_organizer_is_told_each_milestone_of_their_request`, `test_approving_triggers_one_notification_for_the_whole_request`, `test_rejecting_triggers_one_notification_for_the_whole_request` | `_decide` -> `organizer_event_news("approved" / "rejected")` |
 | The event becomes confirmed: a confirmation notification | `[confirmed]`, `test_confirming_a_session_triggers_the_hook` | `confirm_event` route |
 | The event is cancelled: a cancellation notification | `[cancelled]`, `test_cancelling_a_session_triggers_the_hook` | `cancel_event` route |
@@ -1069,6 +1265,8 @@ tests): `test_notification_organizer_integration.py`. No migration.
 | (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
 
 ## Sprint 4 — Notification (Event Coordinator) (IS-24, Nawaz)
+*Checked: 2026-11-03 by Nawaz (PR #60).*
+
 
 Source: IS-24 "Notification (Event Coordinator)" (the Sprint 1 user stories
 document): "As an Event Coordinator, I want to receive notifications about
@@ -1093,6 +1291,8 @@ Integration (real Supabase, 2 tests):
 | (design) A failed notification never undoes the action | `test_a_failed_write_is_logged_and_swallowed` | `_best_effort` |
 
 ## Sprint 4 — Notification (Venue Staff) (IS-25, Nawaz)
+*Checked: 2026-11-03 by Nawaz (PR #61).*
+
 
 Source: IS-25 "Notification (Venue Staff)" (the Sprint 1 user stories
 document): "As Venue Staff, I want to receive notifications about
@@ -1117,6 +1317,8 @@ appropriate venue arrangements for events." Unit tests:
 | (design) The notification opens the booking | `notifications.test.js::links a venue booking notification ...` | `ENTITY_ROUTES.venue_booking` |
 
 ## Overwrite Venue Booking (Josiah, 2026-11-03)
+*Checked: 2026-11-03 by Josiah (PR #62); 2026-11-03 by Josiah (PR #65).*
+
 
 Source: "As a Venue Staff, I want to overwrite the previously approved venue
 booking, so that the event will not have an unsuitable venue." Found marked
@@ -1143,3 +1345,80 @@ Not built, so not tested: the same revert-from-`safety_review` question for
 unchanged by this story, flagged in `docs/open-questions.md` as worth its
 own team decision; any per-venue-staff ownership/assignment restriction
 (none exists anywhere in this codebase).
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+*Checked: 2026-11-06 by Justin (PR #82).*
+
+
+Bug: unknown URLs and wrong HTTP methods returned 500 and were logged as
+crashes, because Werkzeug's `NotFound` and `MethodNotAllowed` reached the
+catch-all `@app.errorhandler(Exception)`. The ticket's own text isn't in this
+repo, so this traces the criteria as agreed for the fix. Unit tests:
+`test_http_errors.py`. Design notes: `docs/design-decisions.md` and
+`docs/open-questions.md` (IS-73). Guards marked (guard) were mutation-tested by
+hand (Terry Yeo, 2026-11-06): removing the `HTTPException` handler fails the 404
+and 405 tests; dropping the `InternalServerError` registration fails the
+crash-outside-the-view test; logging via `logger.exception` fails the 404 and 405
+tests; sending `error.description` fails the 404, 405 and description tests.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| An unknown path returns 404 in the `{"error": {"code", "message"}}` envelope, with the stable code `not_found` | `test_unknown_path_is_a_404_in_the_envelope` (guard) | `app/__init__.py::handle_http_exception` |
+| A known path with the wrong method returns 405 in the same envelope, with the stable code `method_not_allowed` and an `Allow` header | `test_wrong_method_is_a_405_in_the_envelope` (guard) | `handle_http_exception` (`error.get_response()` keeps the header) |
+| An `HTTPException` is not logged via `logger.exception`; it is a routine client error, logged at INFO | `test_unknown_path_is_a_404_in_the_envelope` (guard), `test_wrong_method_is_a_405_in_the_envelope` (guard) | `handle_http_exception` |
+| A genuine unhandled exception still returns 500 `internal_error`, logs full detail server-side, and leaks nothing to the caller | `test_exception_in_a_view_is_a_generic_500_with_full_detail_logged` | `app/__init__.py::handle_unexpected_error` |
+| (design) A crash outside the view, which Flask wraps in `InternalServerError` (itself an `HTTPException`), stays on that 500 path | `test_crash_outside_the_view_is_a_generic_500_not_an_http_error` (guard) | `@app.errorhandler(InternalServerError)` on `handle_unexpected_error` |
+| (design) An `HTTPException`'s `description` is never sent to the caller | `test_http_exception_description_is_never_sent_to_the_caller` (guard) | `handle_http_exception` (code and message come from `error.name`) |
+| `AppError` subclasses keep their behaviour; the deliberate 404s from `app.authz` still come out of the `AppError` path with code `not_found`, unchanged | `test_authz_404_still_comes_from_the_app_error_path`, plus the existing `test_authz_policy.py::test_404_not_403_when_no_relationship_exists`, `test_authz_decorators.py::test_require_loaders_own_not_found_propagates_unchanged` | `app/__init__.py::handle_app_error` (`AppError` is not an `HTTPException`, so Flask's handler lookup still picks it) |
+| (design) The auth hook is unchanged: an unknown path is a 404 for an anonymous caller too, and a known protected route is still a 401 | `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one`, `test_known_protected_route_still_401s_for_an_anonymous_caller` | `app/auth/context.py::register_auth_hooks` (unchanged; flagged in `docs/open-questions.md`) |
+
+## Calendar days are Singapore days (IS-74, Terry, 2026-11-06)
+*Checked: 2026-11-06 by Justin (PR #84).*
+
+
+Bug: the venue calendar showed bookings a day off in Singapore (UTC+8). The
+ticket's own text isn't in this repo, so this traces the criteria as agreed for
+the fix. Unit tests: `test_calendar_singapore_window.py` (venue service and exact
+edges, values in UTC), `test_equipment_calendar_service.py`,
+`test_shared_calendar.py`. Frontend: `VenueCalendarView.test.js`, which pins
+`TZ=Asia/Singapore` and asserts the pin took effect, `EquipmentCalendarView.test.js`,
+`lib/calendar.test.js`. Design notes: `docs/design-decisions.md`, "Calendar days
+are Singapore days (IS-74)".
+
+Each change was mutation-tested by hand (Terry Yeo, 2026-11-06): broken, confirmed
+caught, then restored.
+
+- `toISODate` back to `toISOString().slice(0, 10)`: 5 red on a UTC host, all in
+  `VenueCalendarView.test.js` ("asks for exactly the local month", "shows a 23:00
+  booking on the last day", "does not show that 00:30 booking in the previous
+  month", "day view shows that day's entries only", "stepping the day view back").
+  On a Singapore host 7 are red, adding `calendar.test.js` (`rangeQuery`) and
+  `EquipmentCalendarView.test.js` ("asks for a range"). "shows a 00:30 booking on
+  the first day" stays green: the shifted window starts a day early, so it still
+  contains that booking.
+- Singapore conversion removed from `overlaps()`: 10 red. 8 are in
+  `test_calendar_singapore_window.py`, plus
+  `test_shared_calendar.py::test_entry_offset_is_converted_to_singapore_time` and
+  `test_reservation_returned_in_utc_is_placed_by_its_singapore_day`. That last one
+  was added because the rewritten IS-47 boundary tests stay green here: a `+08:00`
+  input already has Singapore wall-clock time, so they can't see the conversion.
+- `a_start < b_end` flipped to `<=`: `test_period_starting_at_the_singapore_days_last_instant_is_outside`,
+  `test_reservation_starting_at_the_ranges_last_instant_is_excluded`,
+  `test_touching_spans_do_not_overlap_either_way`.
+- `b_start < a_end` flipped to `<=`: `test_period_ending_exactly_at_the_singapore_midnight_it_starts_from_is_outside`,
+  `test_reservation_ending_exactly_at_the_range_start_is_excluded`,
+  `test_touching_spans_do_not_overlap_either_way`,
+  `test_entry_ending_exactly_at_range_start_is_outside`.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| A booking at 23:00 local on the last day of the displayed month appears in the venue month view | `VenueCalendarView.test.js` ("shows a 23:00 booking on the last day of the month, on that day") (guard), `test_a_2300_booking_on_the_last_day_is_in_that_month_and_day[*]` | `lib/calendar.js::toISODate`, `shared/calendar.py::CalendarRange.overlaps` |
+| A booking at 00:30 local on the first day appears, and not in the previous month | `VenueCalendarView.test.js` ("shows a 00:30 booking on the first day of the month, on that day", "does not show that 00:30 booking in the previous month") (guard), `test_a_0030_booking_on_the_first_day_is_in_that_month_and_not_the_previous[*]` (guard) | same |
+| A day view shows that day's entries only, nothing from either side | `VenueCalendarView.test.js` ("day view shows that day's entries only, nothing from either side", "stepping the day view back shows the previous day only") (guard), `test_a_day_query_returns_that_day_only_with_nothing_from_either_side` (guard) | same; `sortedByStart` needs no filter because the window is exact |
+| The window's edges are exact, in Singapore time | `test_period_ending_exactly_at_the_singapore_midnight_it_starts_from_is_outside` (guard), `::test_period_ending_one_microsecond_after_that_midnight_is_inside` (guard), `::test_period_starting_at_the_singapore_days_last_instant_is_outside` (guard), `::test_period_starting_one_microsecond_before_that_is_inside` | `shared/calendar.py::spans_overlap` via `CalendarRange.overlaps` |
+| The equipment calendar shows what it showed before (IS-47), with its workaround removed. Its boundary tests were rewritten to `+08:00`, keeping each test's intent | `test_equipment_calendar_service.py::test_reservation_ending_exactly_at_the_range_start_is_excluded` (guard), `::test_reservation_starting_at_the_ranges_last_instant_is_excluded` (guard), `::test_reservation_starting_exactly_at_the_range_end_is_excluded`, `::test_reservation_covering_the_range_exactly_is_included`, `::test_reservations_just_inside_each_edge_are_included`, `::test_reservation_returned_in_utc_is_placed_by_its_singapore_day` (guard), `EquipmentCalendarView.test.js` ("asks for a range that covers the whole local month", guard; "a reservation on the last day of the month is marked") | `widenRange` deleted; `EquipmentCalendarView.vue` asks for exactly the month |
+| (design) Blocks use the same window as bookings | `test_blocks_use_the_same_window_as_bookings` (guard) | `venues/calendar_service.py::get_venue_calendar` |
+| (design) The tests pin UTC+8 and don't depend on the host | `VenueCalendarView.test.js` ("really is running in UTC+8"), `test_the_calendar_timezone_is_utc_plus_8_every_day_of_the_year`; run on Singapore, UTC and New York hosts | `shared/calendar.py::CALENDAR_TIMEZONE` |
+
+Not covered: a browser or venue outside UTC+8. The app assumes one timezone, and
+`CALENDAR_TIMEZONE`'s comment says what would break.

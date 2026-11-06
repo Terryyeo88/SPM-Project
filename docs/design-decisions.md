@@ -1190,9 +1190,10 @@ specification and pass unchanged.
     day, so `end` is an inclusive day.
   - `spans_overlap(a_start, a_end, b_start, b_end)`: half-open overlap.
   - `CalendarRange.overlaps(entry_start, entry_end)`: the calendar's own
-    use of it. It drops the entry's UTC offset and compares wall-clock time
-    with the naive range, exactly as the inline check in
-    `get_venue_calendar` did.
+    use of it. At extraction it dropped the entry's UTC offset and compared
+    wall-clock time with the naive range, exactly as the inline check in
+    `get_venue_calendar` did. IS-74 changed it to convert to Singapore time
+    first.
   - `calendar_envelope(resource_key, resource, range, entries)`: the
     `{<resource_key>: {...}, range: {start, end}, entries: [...]}` shape.
     The key is a parameter, because the venue response's key is `venue`
@@ -1232,7 +1233,7 @@ The two pairs differ, so both stay:
 | | venue calendar | `equipment_service` |
 |---|---|---|
 | timestamp parsing | `"Z"` -> `+00:00`; a value with no offset stays naive | same, but a value with no offset is read as UTC |
-| overlap | offsets dropped; wall-clock time compared with a naive day range | aware datetimes compared as instants |
+| overlap | converted to Singapore time (since IS-74) and compared with a naive Singapore day range | aware datetimes compared as instants |
 | boundary | strict `<` both sides (half-open) | strict `<` both sides (half-open) |
 
 The boundary rule is the same, but timezone and null-offset handling are
@@ -1314,8 +1315,8 @@ coordinator + venue staff pair. Every other role gets `DENY_NOT_FOUND`, a
 
 - **The calendar** (`calendar_service.py`) filters with
   `app.shared.calendar.CalendarRange.overlaps`, the venue calendar's test.
-  It drops each timestamp's offset and compares wall-clock time with whole
-  days.
+  It converts each timestamp to Singapore time and compares it with whole
+  Singapore days (IS-74).
 - **The availability check** (`equipment_service.check_availability`)
   keeps its own `_spans_overlap` over timezone-aware instants, with
   `_parse_timestamptz` reading an offset-less value as UTC. It compares two
@@ -1332,14 +1333,10 @@ half-open with strict `<`.
   through its request item and request to the event's name. The loaded
   unit is passed to the calendar service, which filters its occupancy. There
   is no second query and no second round trip.
-- **The page asks for a day more than the month on each side**
-  (`widenRange`). The shared `rangeQuery` sends UTC dates, and the backend
-  compares stored UTC times against whole days. Asking for exactly the
-  month in Singapore misses the month's last day after 08:00, and fixing
-  only the dates would instead miss the first day before 08:00. The extra
-  day each side covers both, and `monthCells` places entries by local day
-  and draws only this month's days. The venue calendar has the same defect
-  and does not use this yet (docs/open-questions.md).
+- **The page asks for exactly the month.** It first asked for a day more on
+  each side (`widenRange`) to work around the UTC+8 range defect. IS-74 fixed
+  that defect in the shared code and deleted the workaround (see "Calendar days
+  are Singapore days (IS-74)").
 - **Multi-day reservations** are marked on every day they cover through a
   `spanDays` option on the shared `monthCells`. It is off by default, so the
   venue calendar renders exactly as before (re-checked against PR #32's
@@ -2618,7 +2615,8 @@ cancel event, approve change).
 Source: IS-23's criteria (see `traceability.md`): the organizer is told when
 their request is submitted, when the coordinator approves or rejects it, when
 it is confirmed, and when it is cancelled (and when a coordinator asks for
-clarification or amendment: not built, see open-questions). Built on IS-69's
+clarification or amendment: added later with the clarification thread, see
+"Clarification thread"). Built on IS-69's
 notification service. No table, no migration.
 
 ### One notification per decision, one per session for confirm and cancel
@@ -2848,3 +2846,247 @@ isolated with a `transition` spy specifically because removing it is
 otherwise silently masked by `transition()`'s own `expected_from` race-guard
 producing the same observable outcome -- genuine defense-in-depth, not a
 single point of correctness.
+
+## Clarification thread (Event Review and Approval, Justin)
+
+Source: Event Review and Approval ("request for clarification or
+amendments ... enter comments and submit it for the Event Organizer to
+view"; "the Event Organizer is able to answer to the Event Coordinator"),
+Week 9 ("happening offline but the system should have a means for
+recording the comments for tracking") and Week 4 ("No separate status
+required"). Criteria and tests: `traceability.md` "Clarification thread".
+
+**An append-only comment log, not a live chat.** Week 9 says the
+conversation itself happens offline; what the system owes is the record.
+So there are no websockets or polling: the thread loads with the page and
+after each send. Messages are never edited or deleted (no `updated_at`, no
+delete route).
+
+**One thread per event request (`shared_event_id`), not per session.**
+Approve and reject already act on every session of a request together
+(`event_service._decide`), so the conversation about it is one too.
+`event_id` records which session's page a message was sent from, for
+reference only.
+
+**`author_role` is stored with each message, not derived.** Comparing
+`author_id` with `events.coordinator_id` would mislabel a previous
+coordinator's messages after a reassignment.
+
+**The coordinator asks; the organizer only answers.** The organizer can't
+open a thread: to change details themselves they already have Request
+Change (IS-21), and a second way in would split the same conversation
+across two places. The "coordinator has asked something" check needs a
+database read, so it is in `clarification_service` (400), not in the pure
+authz rule, which only checks role, ownership and status.
+
+**Two POST routes, one per side** (`/clarifications/request`,
+`/clarifications/reply`), each an ordinary `@require`, rather than one
+route that works out the caller's side itself. Which side a message is
+posted as comes from the route called, never from the request body.
+
+**Open only while under review; readable afterwards.** Matches the story
+("Given that an event request is under review") and Week 4. Changes after
+approval go through Request Change and the coordinator's own edits.
+Widening it later is a one-line change to the two posting rules.
+
+**Visible to the owning organizer and the current assigned coordinator
+only** -- not the Lead (agreed scope). Access follows the current
+assignment, so a reassigned-away coordinator loses it and the new one sees
+the whole thread.
+
+**RLS on with a single deny-all policy** (`using (false)`). Stricter on
+purpose than the placeholder "any authenticated user" policies on older
+tables: only Flask's service-role key touches `event_clarifications`. The
+policy behaves the same as having none; it states the intent and meets the
+Definition of Done's "RLS enabled with at least a placeholder policy". This works because the
+frontend uses Supabase only to sign in and reads everything through the
+API.
+
+**Notifications are generic** ("The Event Coordinator sent a
+clarification request about ..."), like every other notification; the
+message itself stays on the event page.
+
+**UI: one chat box for both sides.** The coordinator's "Request
+Clarification" button (the story's wording) sits next to Approve/Reject
+and moves the cursor into the Conversation chat box, where the first
+question and every follow-up are written. The organizer's page shows the
+same chat box once the coordinator has asked something.
+
+## Completed Status -- coordinator UI (IS-38, Aaralyn)
+
+The IS-38 backend already existed (Terry, Sprint 2), but no page called
+`POST /events/<id>/complete`, so a coordinator couldn't complete an event
+and the e2e golden path had a `test.fixme` waiting for it. This adds a
+"Mark as Completed" button to `CoordinatorEventReview.vue`. No backend
+change.
+
+**Shown only when the session is `confirmed`.** `canComplete` mirrors
+`rule_event_complete` exactly, so the button never offers something the
+backend will refuse. The backend is still the authority: if the status
+changed underneath (a 409 from `transition()`), the error is shown and the
+panel stays open.
+
+**A confirmation step, not a one-click button.** No edge leaves
+`completed`, so a slip can't be undone. Approve and Start Planning are
+one-click because they're reversible in practice (edits, cancel);
+completion isn't, so it gets the same two-step pattern as Cancel Event,
+without a reason field because the story asks for none.
+
+**Read-only is shown, not just enforced.** The AC "completed events are
+read-only going forward" was already enforced by every `rule_event_*`
+status window. The UI already hid Edit Details and Cancel Event for
+`completed` (canEdit / canCancel), and the venue, equipment and safety
+panels already gate on status. What was missing was telling the
+coordinator *why* the buttons are gone, so a completed session now shows a
+"read-only" notice.
+
+**Not date-gated.** The story text says "after it has taken place"; the
+ACs don't, and the merged backend doesn't check dates. Adding a date check
+only in the UI would just hide a button the API still accepts, so we left
+it out of both and flagged it in `docs/open-questions.md` rather than
+changing another story's route.
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+
+**Codes come from the exception's name.** `NotFound` gives `not_found` and
+`MethodNotAllowed` gives `method_not_allowed`, so any other `HTTPException` is
+covered without a table to maintain. A routing 404 and an authz 404 share
+`not_found`: the frontend treats them alike, and a caller gains nothing from
+telling them apart.
+
+**The message is the name too, never the description.** A caller of `abort()`
+can put anything in `description`, and the catch-all's rule is that nothing
+unplanned reaches the caller.
+
+**`InternalServerError` stays on the 500 path.** It is an `HTTPException`, but
+Flask raises it to wrap a real crash outside the view, such as a view returning
+an invalid value. Left to the `HTTPException` handler it would have come out as
+`internal_server_error` with no `logger.exception`. It's registered on the
+catch-all instead, so that path behaves exactly as it did.
+
+**Client errors log at INFO.** They aren't crashes, and INFO is below the
+production log level, so a scanner can't flood the error log. The path is logged
+with `%r` so a `%0A` in a URL can't forge a log line.
+
+## Calendar days are Singapore days (IS-74, Terry, 2026-11-06)
+
+**Both ends had to change.** The frontend sent UTC dates, so a local month's
+window started and ended a day early. Sending local dates alone wasn't enough:
+the backend compared stored UTC times with whole days as if those days were UTC,
+so a booking at 00:30 on the 1st (16:30 UTC the day before) fell out of its month
+and appeared on the previous day's view. `toISODate` now returns the local date,
+and `CalendarRange.overlaps` converts entries to Singapore time.
+
+**`widenRange` is deleted.** It existed only to compensate for this defect. It
+did no visible harm on the equipment calendar, which is month-only and whose grid
+draws only that month's days, but keeping it would have left a workaround beside
+the fix. No day or week view filtering was needed: the window is now exact, so
+`sortedByStart` only ever receives that range's entries.
+
+**A fixed offset, not `zoneinfo`.** Singapore has been UTC+8 with no daylight
+saving since 1982, so there is no transition to get wrong on any date a booking
+can have. It had other offsets before 1982, none of which a booking can fall on.
+`CALENDAR_TIMEZONE` in `app/shared/calendar.py` says what would break with a
+second timezone: a caller's dates are read as Singapore days, while the frontend
+sends and groups by the browser's local day, so a venue or user outside UTC+8
+would see the two disagree.
+
+**The IS-47 boundary tests moved to `+08:00`.** They used `+00:00` instants at
+UTC midnight, which assumed days were UTC. At `+00:00` they would be 8 hours off
+the edges they name, and one would still pass without testing its edge. Because
+a `+08:00` input already has Singapore wall-clock time, those tests can't detect
+the conversion being removed, so one new test uses a UTC value, as real rows do.
+
+## E2E tests run against a local Supabase (Justin, 2026-11-06)
+
+The Playwright suite used to run against whatever `backend/.env` and
+`frontend/.env` pointed at, which on every machine is the shared project the
+team demos from. Each run creates real events, bookings and registrations
+there, so a teammate flagged it as unsafe. Every run now goes to a local
+Supabase in Docker (`npx supabase start`), the same place the backend's
+integration tests already write to.
+
+**One settings file, `.env.e2e`, overriding both servers.** Playwright loads it
+(`frontend/e2e/support/env.js`) and starts the backend and Vite with its values
+in the environment. Neither `.env` file has to change: python-dotenv and Vite
+both leave an already-set variable alone, so the e2e values win only for that
+run, and manual testing keeps using the shared project.
+
+**Refuse, don't warn.** `assertSafeTarget` stops the run before any test unless
+`SUPABASE_URL` and `VITE_SUPABASE_URL` are the same local (localhost /
+loopback) URL. A remote project needs an exact opt-in value, as the integration
+tests do, and the shared project's ref is refused even with it. Both the config
+and the API setup helper (`support/api.js`) call it, so neither the browser
+nor the setup calls can reach the shared project.
+
+**Playwright never reuses running servers.** It used to attach to servers
+already running on 5000 and 5173, which are the dev servers pointing at the
+shared project, so the safety check on `.env.e2e` would not have mattered. It
+now always starts its own and stops with "port is already used" if yours are
+up. The frontend has to stay on 5173 because that is the only origin the
+backend's CORS allows.
+
+**A local ES256 signing key.** `app/auth/jwt.py` verifies tokens only against
+the project's JWKS (asymmetric keys, no HS256 fallback). Local Supabase signs
+with the legacy shared secret unless given a key, so the backend would reject
+every local login. `supabase/config.toml` now sets `signing_keys_path`, and
+each developer generates the (gitignored) key once with
+`npx supabase gen signing-key --algorithm ES256`.
+
+**Seed data comes from `supabase/seed.sql`**, which `npx supabase db reset`
+loads, with the same accounts and `Password123!` as `backend/seed.py`. No
+script has to run against the local database.
+
+## Operating hours (IS-11 AC5, Nawaz, 6 Nov)
+
+IS-11 AC5 ("periods outside the venue's operating hours are shown as
+unavailable on the calendar") was still open: the hours were stored and
+shown as a note, nothing more, and Venue Staff couldn't set them (IS-61
+left them out on purpose, because nothing relied on them). Aaralyn, as
+product owner, asked for both halves on 6 Nov and added that bookings
+outside the hours must be refused. Her answers are recorded in
+docs/open-questions.md.
+
+- **No migration.** `venues.operating_hours_start/end` (`time`, both or
+  neither) already exist from `20261007000000_venue_calendar.sql`. The
+  backend now accepts them through the same `create_venue`/`update_venue`
+  path as every other venue field (`venue_service._operating_hours`), and
+  writes the pair together whenever either is sent, so a check made on the
+  pair is never undone by writing only half of it.
+- **The booking check lives in `booking_service.create_booking_request`,
+  next to the setup/turnaround maths**, using the venue row it already
+  reads, before the insert -- so a refused request writes nothing and
+  notifies no one. It is a service check, not a database rule, like the
+  existing confirm-time checks (`_confirmed_overlap_exists`,
+  `_blocked_period_exists`): the hours only change when Venue Staff edit
+  the venue, so a race between the two isn't worth a trigger.
+- **Only new requests are checked.** `confirm_booking` doesn't re-check the
+  hours, which keeps the existing invariant that editing a venue never
+  changes what an existing booking may do (`venue_service`'s module
+  docstring).
+- **The calendar works the closed periods out in the browser**
+  (`lib/venueHours.js`) rather than having the backend return them:
+  they follow directly from two values the calendar response already
+  carries, and the backend's entries stay "things stored in the database".
+  They are written as UTC ISO strings, like the backend's timestamps, so
+  the day/week list still sorts by time.
+- **Month grid: one entry a day ("Open 08:00-20:00 only")**, because the
+  grid has no hour axis to shade. The shared `AvailabilityCalendar` grid
+  columns became `minmax(0, 1fr)` so a long label is cut short instead of
+  widening its column (it pushed Saturday off the page); this changes
+  nothing for the equipment calendar except that.
+- **Mutation-tested by hand (6 Nov).** Each guard was broken in turn and the
+  tests run; every change was caught:
+
+  | Change | Caught by |
+  |---|---|
+  | Booking check: drop `start.date() == end.date()` | `test_a_booking_running_past_midnight_is_refused`, `test_a_multi_day_session_is_refused_at_a_venue_with_hours` |
+  | Booking check: `opens <= start` becomes `opens < start` | `test_a_request_filling_the_hours_exactly_is_accepted` |
+  | Booking check: `end <= closes` becomes `end < closes` | `test_a_request_filling_the_hours_exactly_is_accepted` |
+  | Booking check: compare the session times, not the padded booking | `test_setup_time_before_opening_is_refused`, `test_turnaround_time_after_closing_is_refused` |
+  | Booking check: not called | every refusal test in `test_booking_operating_hours.py` |
+  | Venue form: allow half a pair | `test_ac1_invalid_details_are_refused[change14/15]`, `test_ac2_clearing_only_one_operating_hours_field_is_refused` |
+  | Venue form: allow closing == opening (`<` instead of `<=`) | `test_ac1_invalid_details_are_refused[change17]` |
+  | `update_venue`: write only the field sent | `test_ac2_operating_hours_can_be_edited` |
+  | Calendar: no evening entry | `venueHours.test.js` ("marks the time before opening and after closing" and three more), `VenueCalendarView.test.js` ("day view lists the closed periods") |
+

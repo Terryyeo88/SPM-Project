@@ -17,8 +17,12 @@ export function startOfDay(d) {
   return copy
 }
 
+// The LOCAL calendar date. Not toISOString(), which is UTC: in UTC+8, local
+// midnight is still the previous day there.
 export function toISODate(d) {
-  return d.toISOString().slice(0, 10)
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
 }
 
 export function addDays(d, n) {
@@ -56,18 +60,6 @@ export function rangeLabel(view, range) {
 // exclusive day-after boundary used here.
 export function rangeQuery(range) {
   return `start=${toISODate(range.start)}&end=${toISODate(addDays(range.end, -1))}`
-}
-
-// `range` widened by `days` on each side. rangeQuery() sends UTC dates
-// (toISOString), and the backend compares stored UTC wall-clock times
-// against whole days, so in UTC+8 the query for a local month misses the
-// last local day after 08:00 (see docs/open-questions.md, "Calendar range
-// is a day off in UTC+8"). Asking for a day more on each side and letting
-// the grid place entries by LOCAL day (monthCells) shows every entry of
-// the month. Used by the equipment calendar; the venue calendar does not
-// use it yet.
-export function widenRange(range, days = 1) {
-  return { start: addDays(range.start, -days), end: addDays(range.end, days) }
 }
 
 export function stepAnchor(view, anchor, delta) {

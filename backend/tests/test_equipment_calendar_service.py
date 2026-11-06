@@ -148,21 +148,23 @@ def test_rejects_malformed_date(start, end):
 
 
 # -- boundaries -----------------------------------------------------------
-# The range is whole days: 2026-12-10 .. 2026-12-12 runs from 12-10 00:00 to
-# the last instant of 12-12, i.e. it ends where 12-13 00:00 begins.
+# The range is whole Singapore days: 2026-12-10 .. 2026-12-12 runs from 12-10
+# 00:00 to the last instant of 12-12 at +08:00, i.e. it ends where 12-13 00:00
+# +08:00 begins. The edges are written at +08:00 because that is where they now
+# are (IS-74); the same instants at +00:00 would sit 8 hours away from them.
 
 RANGE = ("2026-12-10", "2026-12-12")
 
 
 def test_reservation_ending_exactly_at_the_range_start_is_excluded():
-    unit = _unit(_reservation("2026-12-09T20:00:00+00:00", "2026-12-10T00:00:00+00:00"))
+    unit = _unit(_reservation("2026-12-09T20:00:00+08:00", "2026-12-10T00:00:00+08:00"))
 
     assert get_equipment_calendar(unit, *RANGE)["entries"] == []
 
 
 def test_reservation_starting_exactly_at_the_range_end_is_excluded():
     """Starts at 12-13 00:00, the instant after the range's last one."""
-    unit = _unit(_reservation("2026-12-13T00:00:00+00:00", "2026-12-13T04:00:00+00:00"))
+    unit = _unit(_reservation("2026-12-13T00:00:00+08:00", "2026-12-13T04:00:00+08:00"))
 
     assert get_equipment_calendar(unit, *RANGE)["entries"] == []
 
@@ -172,23 +174,33 @@ def test_reservation_starting_at_the_ranges_last_instant_is_excluded():
     the comparison against it is strict -- this is the edge the predicate
     really tests, one microsecond before the midnight above. A `<=` there
     would let this in."""
-    unit = _unit(_reservation("2026-12-12T23:59:59.999999+00:00", "2026-12-13T04:00:00+00:00"))
+    unit = _unit(_reservation("2026-12-12T23:59:59.999999+08:00", "2026-12-13T04:00:00+08:00"))
 
     assert get_equipment_calendar(unit, *RANGE)["entries"] == []
 
 
 def test_reservation_covering_the_range_exactly_is_included():
-    unit = _unit(_reservation("2026-12-10T00:00:00+00:00", "2026-12-13T00:00:00+00:00"))
+    unit = _unit(_reservation("2026-12-10T00:00:00+08:00", "2026-12-13T00:00:00+08:00"))
 
     assert len(get_equipment_calendar(unit, *RANGE)["entries"]) == 1
 
 
 def test_reservations_just_inside_each_edge_are_included():
     unit = _unit(
-        _reservation("2026-12-09T20:00:00+00:00", "2026-12-10T00:00:01+00:00", event_name="Into the start"),
-        _reservation("2026-12-12T23:59:59+00:00", "2026-12-13T04:00:00+00:00", event_name="From the end"),
+        _reservation("2026-12-09T20:00:00+08:00", "2026-12-10T00:00:01+08:00", event_name="Into the start"),
+        _reservation("2026-12-12T23:59:59+08:00", "2026-12-13T04:00:00+08:00", event_name="From the end"),
     )
 
     names = [entry["event_name"] for entry in get_equipment_calendar(unit, *RANGE)["entries"]]
 
     assert names == ["Into the start", "From the end"]
+
+
+def test_reservation_returned_in_utc_is_placed_by_its_singapore_day():
+    """Rows come back from PostgREST in UTC. The +08:00 edges above can't tell
+    whether the conversion happens at all, since their wall-clock time is already
+    Singapore's; this one can. 12-09 16:30 UTC is 12-10 00:30 in Singapore."""
+    unit = _unit(_reservation("2026-12-09T16:30:00+00:00", "2026-12-09T17:30:00+00:00"))
+
+    assert len(get_equipment_calendar(unit, *RANGE)["entries"]) == 1
+    assert get_equipment_calendar(unit, "2026-12-09", "2026-12-09")["entries"] == []

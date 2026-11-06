@@ -9,11 +9,10 @@ vi.mock('../../components/AppNavBar.vue', () => ({ default: { template: '<div />
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { equipmentId: 'unit-1' } }) }))
 
 import EquipmentCalendarView from './EquipmentCalendarView.vue'
-import { rangeFor, rangeQuery, widenRange } from '../../lib/calendar'
+import { rangeFor, rangeQuery } from '../../lib/calendar'
 
-// What the view should ask for when showing the month containing `day`:
-// the month widened by a day each side (see widenRange for why).
-const queryFor = (day) => `/equipment/unit-1/calendar?${rangeQuery(widenRange(rangeFor('month', day)))}`
+// What the view should ask for when showing the month containing `day`.
+const queryFor = (day) => `/equipment/unit-1/calendar?${rangeQuery(rangeFor('month', day))}`
 
 // Local-time instants, like the calendar itself (it groups by the browser's day).
 const at = (month, d, h) => new Date(2026, month - 1, d, h).toISOString()
@@ -104,10 +103,9 @@ describe('EquipmentCalendarView', () => {
     mountView()
     await flushPromises()
     const query = new URLSearchParams(apiGet.mock.calls[0][0].split('?')[1])
-    // The backend compares UTC wall-clock times against these whole days.
-    // Local November runs from 2026-10-31T16:00Z to 2026-11-30T16:00Z.
-    expect(query.get('start') <= new Date(2026, 10, 1).toISOString().slice(0, 10)).toBe(true)
-    expect(query.get('end') >= new Date(2026, 11, 1).toISOString().slice(0, 10)).toBe(true)
+    // Exactly the month: the backend reads these as whole Singapore days.
+    expect(query.get('start')).toBe('2026-11-01')
+    expect(query.get('end')).toBe('2026-11-30')
   })
 
   it('a reservation on the last day of the month is marked (AC4)', async () => {

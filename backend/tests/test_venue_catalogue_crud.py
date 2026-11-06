@@ -163,7 +163,15 @@ def test_ac1_a_missing_required_detail_is_refused(db):
         ({"turnaround_minutes": 0}, "Turnaround time must be at least 5 minutes"),
         ({"tentative_hold_minutes": 0}, "Tentative hold duration must be at least 1 minutes"),
         ({"rating": 5}, "Unknown venue fields: rating"),
-        ({"operating_hours_start": "08:00"}, "Unknown venue fields: operating_hours_start"),
+        # IS-11 AC5 (6 Nov): operating hours are optional, but set as a pair
+        # and closing after opening.
+        ({"operating_hours_start": "08:00"}, "Set both an opening and a closing time"),
+        ({"operating_hours_end": "20:00"}, "Set both an opening and a closing time"),
+        ({"operating_hours_start": "20:00", "operating_hours_end": "08:00"}, "Closing time must be later"),
+        ({"operating_hours_start": "08:00", "operating_hours_end": "08:00"}, "Closing time must be later"),
+        ({"operating_hours_start": "8am", "operating_hours_end": "20:00"}, "Opening time must be a time of day"),
+        ({"operating_hours_start": "08:00", "operating_hours_end": 20}, "Closing time must be a time of day"),
+        ({"operating_hours_start": "25:00", "operating_hours_end": "26:00"}, "Opening time must be a time of day"),
     ],
 )
 def test_ac1_invalid_details_are_refused(db, change, message):
@@ -239,9 +247,47 @@ def test_ac2_an_edit_leaves_existing_operating_hours_alone(db):
     assert (edited["operating_hours_start"], edited["operating_hours_end"]) == ("07:00:00", "23:59:00")
 
 
-def test_ac2_operating_hours_cannot_be_edited(db):
-    with pytest.raises(ValidationError, match="Unknown venue fields: operating_hours_end"):
-        service.update_venue("venue-1", {"operating_hours_end": "22:00"})
+def test_ac1_a_new_venue_can_be_given_operating_hours(db):
+    """IS-11 AC5 (6 Nov): Venue Staff may set the hours when adding a venue."""
+    created = service.create_venue({**_NEW_VENUE, "operating_hours_start": "08:00", "operating_hours_end": "20:00"})
+
+    assert (created["operating_hours_start"], created["operating_hours_end"]) == ("08:00", "20:00")
+
+
+def test_ac1_empty_operating_hours_mean_no_set_hours(db):
+    service.create_venue({**_NEW_VENUE, "operating_hours_start": "", "operating_hours_end": None})
+
+    [write] = [call for call in db.calls if call["op"] == "insert"]
+    assert "operating_hours_start" not in write["payload"]
+    assert "operating_hours_end" not in write["payload"]
+
+
+def test_ac2_operating_hours_can_be_edited(db):
+    """IS-11 AC5 (6 Nov): replaces the IS-61 test that refused this. Seconds
+    are dropped, and both fields are written together."""
+    edited = service.update_venue("venue-1", {"operating_hours_end": "22:00:00"})
+
+    assert (edited["operating_hours_start"], edited["operating_hours_end"]) == ("07:00", "22:00")
+    [write] = [call for call in db.calls if call["op"] == "update"]
+    assert write["payload"] == {"operating_hours_start": "07:00", "operating_hours_end": "22:00"}
+
+
+def test_ac2_operating_hours_can_be_cleared(db):
+    edited = service.update_venue("venue-1", {"operating_hours_start": "", "operating_hours_end": ""})
+
+    assert (edited["operating_hours_start"], edited["operating_hours_end"]) == (None, None)
+
+
+def test_ac2_clearing_only_one_operating_hours_field_is_refused(db):
+    with pytest.raises(ValidationError, match="Set both an opening and a closing time"):
+        service.update_venue("venue-1", {"operating_hours_end": None})
+    assert _stored(db)["operating_hours_end"] == "23:59:00"
+
+
+def test_ac2_an_edit_that_closes_before_opening_is_refused(db):
+    # Checked against the venue's current opening time (07:00).
+    with pytest.raises(ValidationError, match="Closing time must be later than opening time"):
+        service.update_venue("venue-1", {"operating_hours_end": "06:00"})
 
 
 def test_ac2_a_venue_keeps_a_layout_listed_before_it_was_soft_deleted(db):
@@ -565,7 +611,11 @@ def test_a_booking_racing_the_delete_is_a_400_not_a_500(monkeypatch):
         return query
 
     monkeypatch.setattr(fake, "table", refusing_table)
-    event = SimpleNamespace(id="e-1", preferred_start_date="2026-12-01")
+    # Inside the venue's operating hours (07:00-23:59), so the request
+    # reaches the insert (IS-11 AC5).
+    event = SimpleNamespace(
+        id="e-1", preferred_start_date="2026-12-01", preferred_start_time="10:00", preferred_end_time="12:00"
+    )
 
     with pytest.raises(ValidationError, match="does not reference an existing venue"):
         booking_service.create_booking_request(event, "venue-1", "coordinator-1")

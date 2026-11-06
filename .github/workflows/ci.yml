@@ -123,6 +123,9 @@ jobs:
       VITE_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
       VITE_API_BASE_URL: http://127.0.0.1:5000
+      # The E2E_* secrets must be a dedicated test project (the shared one
+      # is refused regardless -- frontend/e2e/support/env.js).
+      E2E_WRITE_TO_REMOTE_SUPABASE: yes-write-test-data-to-a-dedicated-test-project
       CI: true
 
     steps:

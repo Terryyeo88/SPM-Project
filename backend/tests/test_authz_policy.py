@@ -39,6 +39,18 @@ def test_coordinator_allowed_view_on_assigned_event():
     assert can(user, actions.EVENT_VIEW, event) is True
 
 
+def test_coordinator_reassigned_away_loses_view_of_the_event():
+    """IS-7's "the previous coordinator retains view access" is superseded
+    by IS-64 (Week 9: only the Lead reassigns): access follows the CURRENT
+    assignment, so once the Lead moves the event to coord-2, coord-1 can no
+    longer see it at all -- a 404, like any event not theirs."""
+    previous = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-2", status="planning")
+    assert can(previous, actions.EVENT_VIEW, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(previous, actions.EVENT_VIEW, event)
+
+
 # -- event.edit -----------------------------------------------------------
 
 
@@ -228,6 +240,96 @@ def test_coordinator_denied_request_clarification_from_status_other_than_under_r
         authorise(user, actions.EVENT_REQUEST_CLARIFICATION, event)
 
 
+# -- event.clarification_reply --------------------------------------------
+
+
+def test_organiser_allowed_reply_to_clarification_on_own_event_under_review():
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_REPLY, event) is True
+
+
+def test_organiser_denied_reply_to_clarification_on_another_organisers_event():
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-2", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_REPLY, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(user, actions.EVENT_CLARIFICATION_REPLY, event)
+
+
+@pytest.mark.parametrize("status", ["submitted", "approved", "rejected", "planning", "confirmed", "cancelled"])
+def test_organiser_denied_reply_to_clarification_once_not_under_review(status):
+    """AC: once the request leaves under_review, no new messages."""
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status=status)
+    assert can(user, actions.EVENT_CLARIFICATION_REPLY, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_CLARIFICATION_REPLY, event)
+
+
+def test_coordinator_denied_reply_action_posts_through_request_clarification_instead():
+    """The coordinator's own messages go through event.request_clarification;
+    the reply action is the organiser's alone."""
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_REPLY, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_CLARIFICATION_REPLY, event)
+
+
+# -- event.clarification_view ---------------------------------------------
+
+
+def test_organiser_allowed_view_clarifications_on_own_event():
+    user = make_user(["event_organizer"], user_id="org-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_VIEW, event) is True
+
+
+def test_assigned_coordinator_allowed_view_clarifications():
+    user = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_VIEW, event) is True
+
+
+@pytest.mark.parametrize("status", ["approved", "rejected", "confirmed", "completed", "cancelled"])
+def test_clarifications_stay_viewable_after_request_leaves_under_review(status):
+    """AC: the thread can still be viewed once no new messages can be sent."""
+    organiser = make_user(["event_organizer"], user_id="org-1")
+    coordinator = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status=status)
+    assert can(organiser, actions.EVENT_CLARIFICATION_VIEW, event) is True
+    assert can(coordinator, actions.EVENT_CLARIFICATION_VIEW, event) is True
+
+
+def test_coordinator_reassigned_away_denied_view_clarifications():
+    """Access follows the CURRENT assignment: after reassignment the new
+    coordinator sees the thread and the previous one no longer does."""
+    previous = make_user(["event_coordinator"], user_id="coord-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-2", status="under_review")
+    assert can(previous, actions.EVENT_CLARIFICATION_VIEW, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(previous, actions.EVENT_CLARIFICATION_VIEW, event)
+
+
+def test_lead_denied_view_clarifications_but_told_403_not_404():
+    """Agreed scope: the thread is between the organiser and the assigned
+    coordinator only. The Lead can see the event itself, so a 403."""
+    user = make_user(["event_coordinator_lead"], user_id="lead-1")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_VIEW, event) is False
+    with pytest.raises(AuthorisationError):
+        authorise(user, actions.EVENT_CLARIFICATION_VIEW, event)
+
+
+def test_other_organiser_denied_view_clarifications():
+    user = make_user(["event_organizer"], user_id="org-2")
+    event = FakeEvent(organizer_id="org-1", coordinator_id="coord-1", status="under_review")
+    assert can(user, actions.EVENT_CLARIFICATION_VIEW, event) is False
+    with pytest.raises(NotFoundError):
+        authorise(user, actions.EVENT_CLARIFICATION_VIEW, event)
+
+
 # -- event.cancel ---------------------------------------------------------
 
 
@@ -357,6 +459,8 @@ def test_attendee_denied_every_internal_action():
         actions.EVENT_APPROVE,
         actions.EVENT_REJECT,
         actions.EVENT_REQUEST_CLARIFICATION,
+        actions.EVENT_CLARIFICATION_REPLY,
+        actions.EVENT_CLARIFICATION_VIEW,
         actions.EVENT_CANCEL,
         actions.EVENT_REASSIGN_COORDINATOR,
     ]

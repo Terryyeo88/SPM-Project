@@ -164,12 +164,30 @@ decisions worth double-checking.
   undefined. It needs its own ticket and a definition of which changes are
   permitted.
 
-- **IS-36: "status gates venue/equipment search" could not be gated.** No
-  route requests a venue *for an event*. The venue catalogue is read-only
-  and per-venue, so there's nothing event-scoped to put a status check on,
-  and equipment doesn't exist at all. Once the Venue Booking Request story
-  adds a request-a-venue-for-this-event route, its rule should require
-  status `planning`.
+- **IS-36: venue/equipment requests are tied to planning (updated
+  2026-11-06).** When this was first written there was no venue-request
+  route and no equipment, so the original "status gates venue/equipment
+  search" couldn't be built. Both exist now, and the team reworded the ACs
+  to be about requests:
+  - *AC1, "planning" only from "approved"*: met (`rule_event_start_planning`).
+  - *AC2 and AC4, requests only while in planning; requesting otherwise is
+    blocked*: met. `rule_venue_booking_create` and
+    `rule_equipment_request_create` refuse (403) unless the event is in
+    `planning`, whatever page or tool sends the request.
+  - *AC3, planning unlocks the request actions*: met. "Request Venue
+    Booking" and "Request Equipment" are offered on the event page only in
+    `planning`.
+
+  Browsing the venue list (`/venues`) and the equipment calendar is not
+  gated. They aren't tied to any one event (a coordinator usually has events
+  in several statuses at once, so there's no single status to check), and
+  Venue Staff and Technical Support use them too.
+
+  Small difference, not an AC gap: the equipment request page hides its form
+  outside planning, while the venue request page
+  (`/events/<id>/request-venue-booking`), if opened directly by URL, still
+  shows its form and only refuses on submit. Hiding it would match the two;
+  please say if that's wanted.
 
 - **Should reassignment also be refused for `cancelled` / `rejected`
   events?** IS-38 made reassignment refuse `completed` events ("completed
@@ -249,11 +267,20 @@ decisions worth double-checking.
   organiser/coordinator views of who registered. (Attendee notifications:
   IS-22.)
 
-- **Organiser "discretion" and manual closing.** Week 4 says organisers have
-  discretion over registration and close it manually. Here the window the
-  organiser sets per session is what opens and closes registration; closing
-  early would be moving the close time. Organisers can't yet edit a
-  confirmed event (field-locking for confirmed events isn't built either).
+- **Organiser "discretion" and manual closing (IS-20 AC6, AC8) --
+  justified by the clarifications.** Week 4: "At the moment closure is
+  based on Organiser discretion and manually close the registration. **The
+  team may propose other better approach.**" Our proposal: the organiser
+  sets each session's registration window (opens / closes) when creating
+  the request, and that window is what opens and closes registration --
+  closing early means moving the close time. Week 2 frames the discretion
+  as over the *conditions*, not over individual attendees: "Waiting list
+  operates on a first-come, first-served priority ... **Organisers have
+  discretion over registration/withdrawal conditions.**" Organisers set
+  those conditions (registration needed or not, the window, the session's
+  expected attendance as its capacity); places are then first-come,
+  first-served with a waiting list, as stated. There is no hand-picking of
+  attendees. Please confirm this proposal is acceptable.
 
 - **No confirmed events exist the normal way yet.** Confirming needs venue
   and equipment work that isn't built, so the seed creates a confirmed
@@ -361,14 +388,11 @@ decisions worth double-checking.
   stricter reading. Same role pair as `VENUE_VIEW`/`VENUE_LIST`, flagged
   the same way those were in Sprint 1.
 
-- **Operating hours are stored but not yet rendered hour-by-hour.**
-  `venues.operating_hours_start/end` exist and are returned by the API,
-  and the calendar page shows them as a text note, but nothing yet
-  visually marks out-of-hours time within a day/week view (AC:
-  "periods outside the venue's operating hours are shown as
-  unavailable"). The wireframe itself doesn't show this either -- its
-  month grid has no hour axis to mark. A real hour-level day/week grid
-  is a reasonable follow-up, not done here.
+- **Resolved (6 Nov): operating hours are now marked on the calendar.**
+  Previously only a text note. The time outside a venue's hours is now
+  shown as unavailable (day and week views list the closed periods; the
+  month grid shows the hours on every day) -- see "Operating hours
+  (IS-11 AC5)" below.
 
 ## Venue Search and Suitability Checking (IS-12 / IS-13, Nawaz, 7 Oct)
 
@@ -391,15 +415,19 @@ decisions worth double-checking.
   screen for a requirement it was never asked to meet. Two functions,
   not one, is deliberate here.
 
-- **Facilities can never actually be assessed for IS-13.** The AC says to
-  check "required facilities recorded for the event," but no story has
-  ever added a required-facilities field to `events` -- only
-  `equipment_needed`, which is a different (Technical Support Staff)
-  concept. Every suitability check currently reports Facilities as
-  "not assessed," which is an honest use of the AC's own "requirements
-  that have not yet been recorded" clause, not a shortcut -- but if a
-  future story adds a real venue-facilities-required field to events,
-  this check should start reading it.
+- **"Facility arrangements" are part of accessibility needs -- effectively
+  met (IS-3 AC4, IS-13 AC1/AC3).** Week 2: "Accessibility needs refer to
+  wheelchair access, special physical seating, or **mobility/facility
+  arrangements**." So the facility arrangements an organiser records go in
+  the request's accessibility needs, and IS-13 checks those against the
+  venue's accessibility provisions (flags what's missing, by name --
+  `venueSuitability.test.js`, accessibility cases). What stays "not
+  assessed" is the separate *Facilities* row: the general facilities a
+  venue lists (stage, projector screen, ...) have no matching "required
+  facilities" field on events, and nothing in the clarifications asks for
+  one. That row is an honest use of the AC's own "requirements that have
+  not yet been recorded" clause; if a future story adds such a field, the
+  check should start reading it.
 
 - **Empty accessibility_needs is treated as "not recorded," not "none
   needed."** The schema can't tell the two apart (both are just an empty
@@ -408,11 +436,14 @@ decisions worth double-checking.
   need nothing extra" from "I haven't filled this in," that's a schema
   change this check should then read.
 
-- **"Retired or withdrawn" venues don't exist as a concept.** IS-12's AC
-  says they should be excluded from results. `venues.status` only has
-  available/occupied/maintenance -- nothing means retired. Nothing is
-  silently excluded because nothing can be retired yet; flagged rather
-  than assumed irrelevant.
+- **~~"Retired or withdrawn" venues don't exist as a concept.~~ Resolved
+  by IS-61 (effectively met).** IS-12 AC6 says retired or withdrawn venues
+  must not appear in results. When this note was written nothing could
+  retire a venue; since IS-61, withdrawing a venue from the catalogue
+  deletes it, so it can't appear in search results or be booked
+  (`test_venue_catalogue_crud.py::test_ac3_a_deleted_venue_is_gone_from_the_catalogue`,
+  `::test_a_deleted_venue_cannot_be_requested`). There is still no
+  separate "retired but kept" status; say if one is wanted.
 
 ## Request for Event Change (IS-21, 8 Oct)
 
@@ -683,6 +714,19 @@ Lead-only. Judgement calls made while applying it, for confirmation:
   takes over, the previous one is unassigned) still hold for the Lead's
   reassignment. Please confirm the backlog marks it accordingly.
 
+- **IS-7's "the previous coordinator retains view access but cannot
+  edit" is superseded, not built.** With the Lead doing every
+  reassignment, access follows the current assignment
+  (`rule_event_view` checks the current `coordinator_id` only): once an
+  event is moved to another coordinator, the previous one can no longer
+  open it at all -- the same 404 as any event that isn't theirs
+  (`test_authz_policy.py::test_coordinator_reassigned_away_loses_view_of_the_event`).
+  Hand-over context lives with the event itself (status history, event
+  logs, the clarification thread), which the new coordinator sees in
+  full. If the customer wants the previous coordinator to keep read-only
+  access, that needs a record of past assignments (there is none today)
+  and a change to `rule_event_view` -- a new story. Please confirm.
+
 ## Update Event Information During Planning (IS-9, 15 Oct)
 
 The calls below were made because the story didn't say. Each is written up
@@ -817,22 +861,23 @@ in docs/design-decisions.md; please confirm or correct:
   ruled out schema changes. AC2 is met except for location. Should units
   get a location (free text, or a venue reference)?
 
-- **Calendar range is a day off in UTC+8 -- the venue calendar is
-  affected now.** `lib/calendar.js::toISODate` uses `toISOString()`, so
-  local midnight in Singapore becomes the previous UTC date. The venue
-  calendar's November query is `2026-10-31..2026-11-29`. The backend
-  (`CalendarRange.overlaps`) compares the UTC times PostgREST returns
-  against those days, so on the venue calendar:
-  - a booking on the last day of the month after 08:00 SGT is missing
+- ~~**Calendar range is a day off in UTC+8 -- the venue calendar is
+  affected now.**~~ **Fixed by IS-74 (Terry, 6 Nov), pending Nawaz's sign-off
+  on the venue calendar behaviour.** `lib/calendar.js::toISODate` now returns
+  the local date, `app/shared/calendar.py::CalendarRange.overlaps` converts
+  entries to Singapore time, and `widenRange` is deleted. See "Calendar days
+  are Singapore days (IS-74)" in `docs/design-decisions.md`. The defect was:
+  `toISODate` used `toISOString()`, so local midnight in Singapore became the
+  previous UTC date. The venue calendar's November query was
+  `2026-10-31..2026-11-29`, and the backend compared the UTC times PostgREST
+  returns against those days, so on the venue calendar:
+  - a booking on the last day of the month after 08:00 SGT was missing
     from the month view;
-  - in the day view, a booking after 08:00 on the chosen day is missing,
-    and the previous day's late bookings are shown instead.
+  - in the day view, a booking after 08:00 on the chosen day was missing,
+    and the previous day's late bookings were shown instead.
 
-  Fixing only the dates moves the gap to the first day's 00:00-08:00. The
-  equipment calendar works around it by asking for a day more on each side
-  (`widenRange`). The real fix is in the shared code: interpret calendar
-  days as Singapore days on the backend, and send local dates from the
-  frontend. That changes the venue calendar, so it needs Nawaz's sign-off.
+  Fixing only the dates would have moved the gap to the first day's
+  00:00-08:00, which is why the backend had to change too.
 
 - **Mutation test result.** Each `<` in `spans_overlap` (the comparison
   the equipment calendar filters with) was flipped to `<=` in turn, and
@@ -862,8 +907,9 @@ in docs/design-decisions.md; please confirm or correct:
     calendar. The wireframe shows only previous/next.
   - **A multi-day reservation is marked on every day it covers, with its
     end exclusive:** one ending at midnight does not mark the next day.
-  - **The page asks for one day more than the month on each side**
-    (`widenRange`), to work around the UTC+8 range defect above.
+  - ~~**The page asks for one day more than the month on each side**
+    (`widenRange`), to work around the UTC+8 range defect above.~~ Removed by
+    IS-74: the page now asks for exactly the month.
   - **The calendar route is its own blueprint**
     (`app/equipment/calendar_routes.py`), so IS-18's `routes.py` is
     untouched.
@@ -908,9 +954,11 @@ Decisions made where Week 7 and Week 9 were silent (reasoning in
   booking, and no venue booking or equipment request still pending.
   Equipment is optional (a session may need none, and equipment requests
   can't be created in the app yet). Rejected bookings/requests don't block.
-- **The comment is required to reject or request changes, optional to
-  approve.** Week 9 says the officer updates the status "with a comment";
-  read as "a comment where one is needed to act on".
+- **A comment is required for every decision, approving included**
+  (IS-59 AC3). Week 9 says the officer updates the status "with a comment".
+  It was first built optional for approvals and made required on
+  2026-11-06 to match the AC: rejecting or requesting changes, the comment
+  says what to fix; approving, it records what was checked.
 - **The coordinator confirms an approved session** ("Confirm Event"); safety
   approval doesn't confirm it automatically. Week 9: "The co-ordinator will
   decide on the subsequent action." Confirming is refused (400) unless the
@@ -1229,10 +1277,9 @@ Catalogue (IS-61)".
 - **Edits don't re-check existing bookings.** Lowering capacity or removing
   a layout or accessibility provision from a venue leaves its bookings as
   they are. Please confirm.
-- **Venue Staff can't set operating hours.** They're left out of the add
-  and edit form because nothing else in the app relies on them (the venue
-  calendar only shows them as a note). New venues have no set hours. Please
-  confirm, or say if Venue Staff need to manage them.
+- **Resolved (6 Nov, Aaralyn): Venue Staff can set operating hours.** They
+  are now on the add and edit form, optional, as one daily window -- see
+  "Operating hours (IS-11 AC5)" below.
 - **New venues are always "available".** The form has no status field, so
   a venue is added as available and an edit never changes its status.
   Please confirm, or say if Venue Staff need to set it (e.g. a venue added
@@ -1265,10 +1312,17 @@ step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
   user; own list, newest first, with an unread count; mark one or all read;
   never anyone else's; a failure never undoes the action). Please confirm
   or replace them with the ticket's own.
-- **In-app only; email and SMS are deferred.** No mail or SMS provider
-  exists, and registrations' `notify_email` / `notify_sms` choices aren't
-  read yet. Please confirm in-app is enough for now, or say which
-  notifications must also go by email or SMS.
+- **In-app only; email and SMS are deferred (IS-69 AC2) -- justified by
+  the clarifications.** Week 2 (Justin): "The notification delivery
+  channel is up to your implementation (**can be in-app or external**)."
+  In-app is our channel. No mail or SMS provider exists, so the email/SMS
+  preferences users set (registration form, profile -- IS-68/IS-75) are
+  stored but don't send anything yet. AC2's "delivered according to the
+  user's communication preferences" is therefore only half met: the
+  preferences are recorded and kept, ready for when an external channel
+  is added. Proposed AC2 rewording: "notifications are delivered in-app;
+  users' email/SMS preferences are recorded for a later external
+  channel." Please confirm.
 - **Decisions go to the session's current coordinator**, not whoever made
   the request, since a reassigned session's new coordinator is the one who
   acts. Please confirm.
@@ -1384,6 +1438,8 @@ Decided and built; worth confirming with the customer:
   can't be opened any more.
 - **In-app only.** The email/SMS preferences collected at registration and
   on the profile (IS-68) are stored but not used to send anything yet.
+  Allowed by Week 2: the delivery channel "can be in-app or external"
+  (see Notification System, IS-69).
 
 ## Withdrawal of Equipment Booking (IS-66, Nawaz, Sprint 4)
 
@@ -1446,8 +1502,11 @@ Notifications"). Please confirm:
   have nothing to fire from. When a story adds a way to take a unit out of
   service (or to dated unavailability), the hook is one call to
   `technical_support_event_news`-style code: find the live requests holding
-  that unit and tell Technical Support. Please confirm that belongs to a
-  later story, or say where unit status is meant to change.
+  that unit and tell Technical Support. **Justified by Week 4:**
+  "Technical Support Staff maintain equipment status. **Maintenance
+  workflow is not core at the moment.**" Taking a unit out of service is
+  that maintenance workflow, so this criterion waits for it. Please
+  confirm that belongs to a later story.
 - **Rescheduling is only news if equipment is arranged.** A change to the
   date or time of a session with no `pending` or `confirmed` request tells
   nobody. A change to the equipment list or room layout is told too (with
@@ -1474,7 +1533,11 @@ Notifications"). Please confirm:
 Reasoning is in `design-decisions.md` ("Notification (Event Organizer)").
 Please confirm:
 
-- **"Clarification or amendment" is NOT built.** The criterion says "Given an
+- **~~"Clarification or amendment" is NOT built.~~ Resolved: built as the
+  clarification thread** (`app/events/clarification_service.py`; see
+  `design-decisions.md` "Clarification thread"). The organizer is now
+  notified when the coordinator sends a clarification request. Original
+  note, kept for the record: The criterion says "Given an
   Event Coordinator requests clarification or amendment, when the request is
   made, then the Event Organizer receives a notification". There is no such
   request in the app: the coordinator can approve or reject (rejection needs a
@@ -1512,9 +1575,14 @@ Please confirm:
   the criterion says. Say if the coordinator should hear about every request.
 - **"Change the booking" is read as a venue block.** If Venue Staff are meant
   to be able to move a booking some other way, that way does not exist yet.
-- **An expired tentative hold is not notified.** The system releases it
-  silently (`release_expired_hold`), and the criterion does not list it. It
-  reads like it should be; say if it is wanted.
+- **An expired tentative hold is not notified (IS-24 AC7, NOT built).**
+  Jira's IS-24 lists it ("Event Coordinator should be informed before or
+  when the tentatively held venue for an event expires"), but the system
+  releases an expired hold silently (`release_expired_hold`). Telling the
+  coordinator "before" it expires needs a scheduled job, like the
+  reminders above; telling them "when" it expires could hook into
+  `release_expired_hold`. Not built yet -- please confirm whether it's
+  wanted for this release.
 
 ## Notification (Venue Staff) (IS-25, Nawaz, Sprint 4)
 
@@ -1567,3 +1635,106 @@ narrowly on purpose. Please confirm:
   exists anywhere in this codebase).
 - **The Jira board had this story marked "Done" with nothing built.**
   Flagged separately to the team; not something this entry can fix.
+
+## Clarification thread (Event Review and Approval, Justin, 4 Nov)
+
+Built; reasoning in `docs/design-decisions.md` ("Clarification thread").
+Interpretive calls the story text didn't settle -- please confirm:
+
+- **Open only while "under review".** The story says "Given that an event
+  request is under review" and Week 4 puts clarification inside review, so
+  no new messages can be sent once the request is approved or rejected
+  (the thread stays readable). Changes after approval go through Request
+  Change. Say if the conversation should stay open later (e.g. until
+  completed/cancelled) -- a one-line change to the two posting rules.
+- **The organiser can only reply, never start a thread.** They already
+  have Request Change for anything they want changed. Confirm they don't
+  need to open a conversation of their own.
+- **The Event Coordinator Lead can't see the thread.** Only the owning
+  organiser and the current assigned coordinator. A coordinator the
+  request was reassigned away from loses access; the new one sees the
+  whole history. Say if the Lead should be able to read it.
+- **One thread per event request, not per session.** Every session of a
+  request shares the conversation, matching how approve/reject decide the
+  whole request.
+- **1000-character limit per message.** Not in the story; chosen as a
+  sensible cap. Say if a different limit is wanted.
+
+## Completed Status -- coordinator UI (IS-38, Aaralyn, 5 Nov)
+
+The backend for IS-38 (`rule_event_complete`, `POST /events/<id>/complete`,
+the `(confirmed, completed)` edge, read-only rules) shipped in Sprint 2.
+This adds the coordinator's "Mark as Completed" button so the story can
+actually be used. Reasoning in `docs/design-decisions.md` ("Completed
+Status -- coordinator UI"). Please confirm:
+
+- **"After it has taken place" is not enforced.** The story says the
+  coordinator marks an event completed "after it has taken place", but
+  neither AC says it, and the backend accepts any confirmed session,
+  including one dated next year. We kept that behaviour (the button
+  appears as soon as a session is confirmed, and the confirmation prompt
+  tells the coordinator to only do this once it has taken place) rather
+  than changing the merged route. If completion should be refused until
+  the session's end date/time has passed, that's a small rule/route change
+  plus the matching UI gate. Note the e2e golden path completes a
+  far-future session, so it would need a past-dated fixture instead.
+- **Per session, not per request.** "Mark as Completed" completes the
+  session being viewed, the same as Cancel Event and the route itself.
+  Approve / Reject / Start Planning act on the whole request. Sessions of
+  one request happen on different days, so completing each as it finishes
+  seemed right. Say if one click should complete every confirmed session
+  of the request.
+- **No reason is asked for and nobody is notified.** The story asks for
+  neither. The status change is still recorded with its actor in the
+  event's status history. Say if the organiser or attendees should be
+  notified.
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+
+- **Anonymous callers can tell real routes from unknown ones.** Flask matches
+  the URL before the auth hook runs, and the hook skips a request that matched
+  no route, so without a token a real protected route gives 401, an unknown path
+  gives 404, and a wrong method gives 405 with an `Allow` header. This isn't new:
+  before IS-73 the same probe gave 401 against 500. IS-73 leaves the hook alone.
+  Closing the gap means requiring a token on unmatched requests in
+  `app/auth/context.py`, so anonymous callers get 401 everywhere but `@public`
+  routes, at the cost of a token check and database reads on every authenticated
+  404. Say if that's wanted; it would be its own change.
+  `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one` pins today's
+  behaviour and would need updating.
+
+## Operating hours (IS-11 AC5, Nawaz, 6 Nov)
+
+Agreed with Aaralyn (product owner) on 6 Nov: hours are optional, one window
+per venue that is the same every day; a new booking request outside them is
+refused; existing bookings stay as they are when the hours change; done
+under IS-11. These are the calls made beyond that:
+
+- **The whole booked period must fit, setup and turnaround included.**
+  Staff are at the venue during setup and turnaround too. Asked on 6 Nov,
+  not yet answered; built this way. If only the event's own times should
+  count, `_check_operating_hours` is given the session window instead.
+- **A booking that runs past midnight is outside the hours, and so is a
+  multi-day session.** With one window per day, the venue is closed
+  overnight, so a session from 1 Nov 09:00 to 2 Nov 17:00 is refused at a
+  venue with set hours (a venue with no set hours still takes it). Please
+  confirm, or say if a multi-day session should be read as "these hours on
+  each day".
+- **A closing time of 23:59 is "open until midnight" on the calendar**, so
+  no one-minute "closed" entry is shown. A booking still has to end by
+  23:59, because the booking check compares the exact time.
+- **No overnight windows.** Closing must be later than opening, so a venue
+  open 20:00-02:00 can't be entered. Not asked for; please say if needed.
+- **An older pending request outside new hours can still be approved.**
+  "Existing bookings stay the same" is read as covering requests made
+  before the hours changed, not only confirmed ones; only a new request is
+  checked.
+- **The coordinator's suitability check doesn't warn about hours yet.** A
+  request outside the hours is refused with the venue's hours and the
+  booked period in the message, but the venue cards on the request page
+  (IS-13) don't flag it before submitting. A reasonable follow-up.
+- **The database doesn't check the order of the two times.** It already
+  refuses half a window (`venues_operating_hours_consistent`); closing after
+  opening is checked by the backend and the form only, so no migration was
+  needed.
+

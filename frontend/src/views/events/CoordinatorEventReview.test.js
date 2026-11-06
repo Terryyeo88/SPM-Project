@@ -354,3 +354,130 @@ describe('CoordinatorEventReview -- no Reassign (Week 9: only the Lead reassigns
     expect(wrapper.find('#reassign-to').exists()).toBe(false)
   })
 })
+
+describe('CoordinatorEventReview -- Request Clarification', () => {
+  const clarifyButton = (wrapper) => wrapper.findAll('button').find((b) => b.text() === 'Request Clarification')
+
+  it('offers Request Clarification next to Approve and Reject while under review', () => {
+    expect(clarifyButton(mountWith('under_review'))).toBeTruthy()
+  })
+
+  it.each(['approved', 'planning', 'confirmed', 'rejected'])('offers no Request Clarification when %s', (status) => {
+    expect(clarifyButton(mountWith(status))).toBeUndefined()
+  })
+
+  it('jumps to the Conversation box and puts the cursor in it', async () => {
+    const { apiGet } = await import('../../lib/api')
+    apiGet.mockResolvedValue([])
+    Element.prototype.scrollIntoView ??= () => {}
+    const wrapper = mount(CoordinatorEventReview, {
+      props: { event: event('under_review'), sessions: [] },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    await clarifyButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(document.activeElement).toBe(wrapper.find('#clarification-message').element)
+    expect(apiPost).not.toHaveBeenCalled() // nothing is sent until the coordinator writes and sends
+    wrapper.unmount()
+  })
+
+  it('sends from the Conversation box without changing the status', async () => {
+    const { apiGet } = await import('../../lib/api')
+    apiGet.mockResolvedValue([])
+    apiPost.mockResolvedValueOnce({
+      clarification_id: 'c1', author_role: 'coordinator', author_name: 'Alice Tan',
+      message: 'Is the date flexible?', created_at: '2026-11-04T07:00:00Z',
+    })
+    const wrapper = mountWith('under_review')
+    await flushPromises()
+
+    await wrapper.find('#clarification-message').setValue('Is the date flexible?')
+    await wrapper.find('#clarification-message').element.form.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/events/session-1/clarifications/request', { message: 'Is the date flexible?' })
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.findAll('li.message')).toHaveLength(1)
+  })
+})
+
+describe('CoordinatorEventReview -- Mark as Completed (IS-38)', () => {
+  function completeButton(wrapper) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Mark as Completed')
+  }
+  function editButton(wrapper) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Edit Details')
+  }
+
+  // AC: "Coordinator can change status to completed only from confirmed".
+  it('offers Mark as Completed on a confirmed session', () => {
+    expect(completeButton(mountWith('confirmed'))).toBeTruthy()
+  })
+
+  it.each(['draft', 'submitted', 'under_review', 'approved', 'planning', 'safety_review', 'completed', 'cancelled', 'rejected'])(
+    'does not offer it when %s',
+    (status) => {
+      expect(completeButton(mountWith(status))).toBeUndefined()
+    },
+  )
+
+  it('asks for confirmation before completing, and "Not Yet" backs out without a request', async () => {
+    const wrapper = mountWith('confirmed')
+    await completeButton(wrapper).trigger('click')
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('.panel-complete').text()).toContain("can't be undone")
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Not Yet').trigger('click')
+    expect(wrapper.find('.panel-complete').exists()).toBe(false)
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('completes the session and passes the updated row up', async () => {
+    const updated = { ...event('completed') }
+    apiPost.mockResolvedValue(updated)
+    const wrapper = mountWith('confirmed')
+
+    await completeButton(wrapper).trigger('click')
+    await wrapper.find('.panel-complete').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/events/session-1/complete', {})
+    expect(wrapper.emitted('updated')[0]).toEqual([updated])
+    expect(wrapper.find('[role="status"]').text()).toBe('Session marked as completed. Its record is now read-only.')
+    expect(wrapper.find('.panel-complete').exists()).toBe(false)
+  })
+
+  it('shows the error and keeps the panel open if the backend refuses', async () => {
+    apiPost.mockRejectedValue(new Error('This event is no longer Confirmed'))
+    const wrapper = mountWith('confirmed')
+
+    await completeButton(wrapper).trigger('click')
+    await wrapper.find('.panel-complete').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').text()).toBe('This event is no longer Confirmed')
+    expect(wrapper.find('.panel-complete').exists()).toBe(true)
+    expect(wrapper.emitted('updated')).toBeUndefined()
+  })
+
+  // AC: "Completed events are read-only going forward".
+  it('shows a completed session read-only: no edit, cancel or complete, and says why', () => {
+    const wrapper = mountWith('completed')
+
+    expect(editButton(wrapper)).toBeUndefined()
+    expect(cancelButton(wrapper)).toBeUndefined()
+    expect(completeButton(wrapper)).toBeUndefined()
+    expect(wrapper.find('[data-test="read-only-notice"]').text()).toContain('read-only')
+  })
+
+  it('a confirmed session is still editable before it is completed', () => {
+    const wrapper = mountWith('confirmed')
+    expect(editButton(wrapper)).toBeTruthy()
+    expect(wrapper.find('[data-test="read-only-notice"]').exists()).toBe(false)
+  })
+})
