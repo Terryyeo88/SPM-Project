@@ -23,8 +23,12 @@ def _world(fixtures):  # noqa: F811
     coordinator = fixtures.create_user("Venue Notify Coordinator", "event_coordinator")
     staff_a = fixtures.create_user("Venue Notify Staff A", "venue_staff")
     staff_b = fixtures.create_user("Venue Notify Staff B", "venue_staff")
+    # events.organizer_id is required, like every other test using this helper.
+    organizer = fixtures.create_user("Venue Notify Organizer", "event_organizer")
     venue = fixtures.create_venue()
-    event = fixtures.create_event(coordinator_id=coordinator["id"], status="planning")
+    event = fixtures.create_event(
+        organizer_id=organizer["id"], coordinator_id=coordinator["id"], status="planning"
+    )
     return coordinator["id"], staff_a["id"], staff_b["id"], venue, event
 
 
