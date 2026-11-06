@@ -228,7 +228,9 @@ onMounted(load)
               {{ shownError('operating_hours') }}
             </p>
             <p class="hint">
-              The same every day. Leave both empty if the venue has no set hours. New bookings must fit inside these
+              The same every day. A closing time earlier than the opening time means the venue closes the next day
+              (e.g. 20:00 to 01:00, or 08:00 to 00:00 for open until midnight). Leave both empty if the venue has no
+              set hours. New bookings must fit inside these
               hours, setup and turnaround included; existing bookings are not changed.
             </p>
           </section>

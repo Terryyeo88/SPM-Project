@@ -92,6 +92,66 @@ def test_a_booking_running_past_midnight_is_refused(fake_db):  # noqa: F811
         _request(fake_db, preferred_start_time="22:00", preferred_end_time="23:30")
 
 
+def test_a_venue_open_until_midnight_takes_a_booking_ending_at_midnight(fake_db):  # noqa: F811
+    """08:00-00:00 is "open until midnight": turnaround may end at 00:00."""
+    fake_db.tables["venues"] = [_hours(opens="08:00:00", closes="00:00:00")]
+
+    booking = _request(fake_db, preferred_start_time="22:00", preferred_end_time="23:30")
+
+    assert booking["booking_end"] == "2026-11-02T00:00:00+08:00"
+
+
+def test_an_overnight_venue_takes_a_booking_running_past_midnight(fake_db):  # noqa: F811
+    """20:00-01:00: a 21:00-00:30 session plus 30 minutes either side is
+    20:30 to 01:00 the next day, inside the window."""
+    fake_db.tables["venues"] = [_hours(opens="20:00:00", closes="01:00:00")]
+
+    booking = _request(
+        fake_db,
+        preferred_start_date="2026-11-01",
+        preferred_end_date="2026-11-02",
+        preferred_start_time="21:00",
+        preferred_end_time="00:30",
+    )
+
+    assert (booking["booking_start"], booking["booking_end"]) == (
+        "2026-11-01T20:30:00+08:00",
+        "2026-11-02T01:00:00+08:00",
+    )
+
+
+def test_an_overnight_venue_takes_a_booking_after_midnight(fake_db):  # noqa: F811
+    """The window that opened at 20:00 the night before is still open at 00:30."""
+    fake_db.tables["venues"] = [_hours(opens="20:00:00", closes="02:00:00")]
+
+    booking = _request(fake_db, preferred_start_time="00:30", preferred_end_time="01:00")
+
+    assert booking["status"] == "pending"
+
+
+def test_an_overnight_venue_refuses_a_booking_past_closing(fake_db):  # noqa: F811
+    fake_db.tables["venues"] = [_hours(opens="20:00:00", closes="01:00:00")]
+
+    with pytest.raises(ValidationError) as refused:
+        _request(
+            fake_db,
+            preferred_start_date="2026-11-01",
+            preferred_end_date="2026-11-02",
+            preferred_start_time="22:00",
+            preferred_end_time="01:00",
+        )
+
+    assert str(refused.value).startswith("Test Venue is open 20:00-01:00 (next day) daily.")
+    assert _booking_rows(fake_db) == []
+
+
+def test_an_overnight_venue_refuses_a_booking_in_its_daytime_gap(fake_db):  # noqa: F811
+    fake_db.tables["venues"] = [_hours(opens="20:00:00", closes="01:00:00")]
+
+    with pytest.raises(ValidationError, match="outside those hours"):
+        _request(fake_db, preferred_start_time="12:00", preferred_end_time="14:00")
+
+
 def test_a_multi_day_session_is_refused_at_a_venue_with_hours(fake_db):  # noqa: F811
     """One window per day: a session running over several days would be in
     the venue overnight. See docs/open-questions.md."""

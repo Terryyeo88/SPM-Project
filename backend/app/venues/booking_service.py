@@ -178,20 +178,30 @@ def _check_operating_hours(venue: dict, booking_start: datetime, booking_end: da
     included, because staff are at the venue for those too. A venue with no
     hours set takes any time.
 
-    The hours are one window per day, so a booked period that runs past
-    midnight (including a multi-day session) is outside them. Only new
-    requests are checked: existing bookings stay as they are when the hours
-    change."""
+    The hours are one window per day. A closing time earlier than the
+    opening time closes the next day (20:00-01:00, or 08:00-00:00 for "until
+    midnight"), so a booking may run past midnight when the window does. The
+    booked period must still fit inside one window, so a multi-day session
+    is outside them. Only new requests are checked: existing bookings stay
+    as they are when the hours change."""
     opens = _parse_time(venue.get("operating_hours_start"))
     closes = _parse_time(venue.get("operating_hours_end"))
     if opens is None or closes is None:
         return
     start = booking_start.astimezone(SINGAPORE_TZ)
     end = booking_end.astimezone(SINGAPORE_TZ)
-    if start.date() == end.date() and opens <= start.time() and end.time() <= closes:
-        return
+    overnight = closes <= opens
+    # The window the booking starts in opened either that day or, for an
+    # overnight window, the day before.
+    for opened_on in (start.date() - timedelta(days=1), start.date()):
+        window_start = datetime.combine(opened_on, opens, tzinfo=SINGAPORE_TZ)
+        closed_on = opened_on + timedelta(days=1) if overnight else opened_on
+        window_end = datetime.combine(closed_on, closes, tzinfo=SINGAPORE_TZ)
+        if window_start <= start and end <= window_end:
+            return
+    next_day = " (next day)" if overnight else ""
     raise ValidationError(
-        f"{venue['name']} is open {opens:%H:%M}-{closes:%H:%M} daily. This booking, including "
+        f"{venue['name']} is open {opens:%H:%M}-{closes:%H:%M}{next_day} daily. This booking, including "
         f"{venue['setup_minutes']} minutes of setup and {venue['turnaround_minutes']} minutes of "
         f"turnaround, runs from {start:%d %b %H:%M} to {end:%d %b %H:%M}, which is outside those hours."
     )

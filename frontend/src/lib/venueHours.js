@@ -3,7 +3,9 @@
  * are shown as unavailable" on the venue availability calendar.
  *
  * The hours are one window per venue, the same every day
- * (venues.operating_hours_start/end, set on the venue form). They aren't
+ * (venues.operating_hours_start/end, set on the venue form). A closing time
+ * earlier than the opening time closes the next day (20:00-01:00), so the
+ * venue is closed in the middle of the day instead: 01:00-20:00. They aren't
  * entries the backend stores, so the calendar works them out here, for each
  * day of the visible range, and shows them next to the bookings and blocks.
  *
@@ -34,7 +36,8 @@ function at(day, hhmm) {
  * [range.start, range.end): none when the venue has no set hours.
  *
  * Day and week views list the closed periods themselves (before opening,
- * after closing). The month grid has no hour axis, so it gets one entry a
+ * after closing; for an overnight window, the one gap between closing and
+ * opening). The month grid has no hour axis, so it gets one entry a
  * day giving the hours instead.
  */
 export function outsideHoursEntries(range, start, end, view) {
@@ -47,6 +50,14 @@ export function outsideHoursEntries(range, start, end, view) {
     const base = { type: 'outside_hours', state: OUTSIDE_HOURS_STATE, opens, closes }
     if (view === 'month') {
       entries.push({ ...base, period: 'day', start: at(day, '00:00'), end: at(addDays(day, 1), '00:00') })
+      continue
+    }
+    if (closes <= opens) {
+      // Overnight: open from `opens` until `closes` the next morning, so the
+      // closed time each day is closes -> opens. Closing at 00:00 is "open
+      // until midnight": that gap is simply the time before opening.
+      const period = closes === '00:00' ? 'before_opening' : 'closed_between'
+      entries.push({ ...base, period, start: at(day, closes), end: at(day, opens) })
       continue
     }
     if (opens > '00:00') {
@@ -63,6 +74,7 @@ export function outsideHoursEntries(range, start, end, view) {
 export function outsideHoursLabel(entry) {
   if (entry.period === 'before_opening') return `Closed until ${entry.opens}`
   if (entry.period === 'after_closing') return `Closed from ${entry.closes}`
+  if (entry.period === 'closed_between') return `Closed ${entry.closes}–${entry.opens}`
   // Short enough for a month-grid cell; the legend says it's unavailable time.
   return `Open ${entry.opens}–${entry.closes} only`
 }
