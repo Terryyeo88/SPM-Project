@@ -388,14 +388,11 @@ decisions worth double-checking.
   stricter reading. Same role pair as `VENUE_VIEW`/`VENUE_LIST`, flagged
   the same way those were in Sprint 1.
 
-- **Operating hours are stored but not yet rendered hour-by-hour.**
-  `venues.operating_hours_start/end` exist and are returned by the API,
-  and the calendar page shows them as a text note, but nothing yet
-  visually marks out-of-hours time within a day/week view (AC:
-  "periods outside the venue's operating hours are shown as
-  unavailable"). The wireframe itself doesn't show this either -- its
-  month grid has no hour axis to mark. A real hour-level day/week grid
-  is a reasonable follow-up, not done here.
+- **Resolved (6 Nov): operating hours are now marked on the calendar.**
+  Previously only a text note. The time outside a venue's hours is now
+  shown as unavailable (day and week views list the closed periods; the
+  month grid shows the hours on every day) -- see "Operating hours
+  (IS-11 AC5)" below.
 
 ## Venue Search and Suitability Checking (IS-12 / IS-13, Nawaz, 7 Oct)
 
@@ -1280,10 +1277,9 @@ Catalogue (IS-61)".
 - **Edits don't re-check existing bookings.** Lowering capacity or removing
   a layout or accessibility provision from a venue leaves its bookings as
   they are. Please confirm.
-- **Venue Staff can't set operating hours.** They're left out of the add
-  and edit form because nothing else in the app relies on them (the venue
-  calendar only shows them as a note). New venues have no set hours. Please
-  confirm, or say if Venue Staff need to manage them.
+- **Resolved (6 Nov, Aaralyn): Venue Staff can set operating hours.** They
+  are now on the add and edit form, optional, as one daily window -- see
+  "Operating hours (IS-11 AC5)" below.
 - **New venues are always "available".** The form has no status field, so
   a venue is added as available and an edit never changes its status.
   Please confirm, or say if Venue Staff need to set it (e.g. a venue added
@@ -1706,3 +1702,39 @@ Status -- coordinator UI"). Please confirm:
   404. Say if that's wanted; it would be its own change.
   `test_anonymous_caller_gets_the_same_404_as_an_authenticated_one` pins today's
   behaviour and would need updating.
+
+## Operating hours (IS-11 AC5, Nawaz, 6 Nov)
+
+Agreed with Aaralyn (product owner) on 6 Nov: hours are optional, one window
+per venue that is the same every day; a new booking request outside them is
+refused; existing bookings stay as they are when the hours change; done
+under IS-11. These are the calls made beyond that:
+
+- **The whole booked period must fit, setup and turnaround included.**
+  Staff are at the venue during setup and turnaround too. Asked on 6 Nov,
+  not yet answered; built this way. If only the event's own times should
+  count, `_check_operating_hours` is given the session window instead.
+- **A booking that runs past midnight is outside the hours, and so is a
+  multi-day session.** With one window per day, the venue is closed
+  overnight, so a session from 1 Nov 09:00 to 2 Nov 17:00 is refused at a
+  venue with set hours (a venue with no set hours still takes it). Please
+  confirm, or say if a multi-day session should be read as "these hours on
+  each day".
+- **A closing time of 23:59 is "open until midnight" on the calendar**, so
+  no one-minute "closed" entry is shown. A booking still has to end by
+  23:59, because the booking check compares the exact time.
+- **No overnight windows.** Closing must be later than opening, so a venue
+  open 20:00-02:00 can't be entered. Not asked for; please say if needed.
+- **An older pending request outside new hours can still be approved.**
+  "Existing bookings stay the same" is read as covering requests made
+  before the hours changed, not only confirmed ones; only a new request is
+  checked.
+- **The coordinator's suitability check doesn't warn about hours yet.** A
+  request outside the hours is refused with the venue's hours and the
+  booked period in the message, but the venue cards on the request page
+  (IS-13) don't flag it before submitting. A reasonable follow-up.
+- **The database doesn't check the order of the two times.** It already
+  refuses half a window (`venues_operating_hours_consistent`); closing after
+  opening is checked by the backend and the form only, so no migration was
+  needed.
+

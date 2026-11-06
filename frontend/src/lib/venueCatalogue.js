@@ -10,8 +10,11 @@
  * and the suitability checks compare the two value for value, and the
  * backend refuses anything else.
  *
- * Operating hours (IS-11) aren't part of the form: only the venue calendar's
- * note reads them. A new venue has no set hours; an edit leaves them alone.
+ * Operating hours (IS-11 AC5, added to the form 6 Nov): one opening and
+ * closing time per venue, the same every day. Optional -- both empty means
+ * no set hours -- but set as a pair, closing after opening. The venue
+ * calendar shows the time outside them as unavailable, and a new booking
+ * request must fit inside them (app.venues.booking_service).
  *
  * tentative_hold_minutes (Sprint 3, Josiah, "Venue Availability Calendar
  * Tentative Hold") is edited here too, alongside setup/turnaround -- folded
@@ -52,6 +55,8 @@ export function emptyVenueForm() {
     setup_minutes: 30,
     turnaround_minutes: 30,
     tentative_hold_minutes: DEFAULT_HOLD_MINUTES,
+    operating_hours_start: '',
+    operating_hours_end: '',
   }
 }
 
@@ -67,6 +72,9 @@ export function venueToForm(venue) {
     setup_minutes: venue.setup_minutes ?? 30,
     turnaround_minutes: venue.turnaround_minutes ?? 30,
     tentative_hold_minutes: venue.tentative_hold_minutes ?? DEFAULT_HOLD_MINUTES,
+    // "HH:MM:SS" from the database, "HH:MM" for <input type="time">.
+    operating_hours_start: timeValue(venue.operating_hours_start),
+    operating_hours_end: timeValue(venue.operating_hours_end),
   }
 }
 
@@ -77,7 +85,8 @@ function wholeNumber(value) {
 }
 
 /**
- * The form as the backend's venue body; numbers are sent as numbers.
+ * The form as the backend's venue body; numbers are sent as numbers, and
+ * empty operating hours as null (no set hours).
  */
 export function venuePayload(form) {
   return {
@@ -90,6 +99,8 @@ export function venuePayload(form) {
     setup_minutes: wholeNumber(form.setup_minutes),
     turnaround_minutes: wholeNumber(form.turnaround_minutes),
     tentative_hold_minutes: wholeNumber(form.tentative_hold_minutes),
+    operating_hours_start: form.operating_hours_start || null,
+    operating_hours_end: form.operating_hours_end || null,
   }
 }
 
@@ -119,10 +130,18 @@ export function validateVenueForm(form) {
   if (!(payload.tentative_hold_minutes >= MIN_HOLD_MINUTES)) {
     errors.tentative_hold_minutes = `Tentative hold duration must be a whole number of at least ${MIN_HOLD_MINUTES} minute.`
   }
+  const opens = payload.operating_hours_start
+  const closes = payload.operating_hours_end
+  if (Boolean(opens) !== Boolean(closes)) {
+    errors.operating_hours = 'Set both an opening and a closing time, or leave both empty.'
+  } else if (opens && closes <= opens) {
+    // "HH:MM" strings compare in time order.
+    errors.operating_hours = 'Closing time must be later than opening time.'
+  }
   return errors
 }
 
-/** A venue's existing hours, read-only: "07:00 - 23:59 daily" or "No set hours". */
+/** A venue's hours for display: "07:00 - 23:59 daily" or "No set hours". */
 export function formatOperatingHours(start, end) {
   if (!start || !end) return 'No set hours'
   return `${timeValue(start)} - ${timeValue(end)} daily`

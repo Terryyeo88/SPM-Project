@@ -47,7 +47,7 @@ function validForm(overrides = {}) {
 }
 
 describe('venuePayload', () => {
-  it('trims text, sends numbers as numbers, and never sends operating hours or status', () => {
+  it('trims text, sends numbers as numbers, empty operating hours as null, and never the status', () => {
     expect(venuePayload(validForm({ name: '  Annex ', setup_minutes: '0' }))).toEqual({
       name: 'Annex',
       location: 'East Campus',
@@ -58,7 +58,14 @@ describe('venuePayload', () => {
       setup_minutes: 0,
       turnaround_minutes: 30,
       tentative_hold_minutes: 1440,
+      operating_hours_start: null,
+      operating_hours_end: null,
     })
+  })
+
+  it('sends set operating hours as "HH:MM" (IS-11 AC5)', () => {
+    const payload = venuePayload(validForm({ operating_hours_start: '08:00', operating_hours_end: '20:00' }))
+    expect([payload.operating_hours_start, payload.operating_hours_end]).toEqual(['08:00', '20:00'])
   })
 })
 
@@ -69,9 +76,15 @@ describe('newVenuePayload', () => {
 })
 
 describe('venueToForm', () => {
-  it('leaves operating hours and status out of the form', () => {
-    expect(venueToForm(venue)).not.toHaveProperty('operating_hours_start')
-    expect(venueToForm(venue)).not.toHaveProperty('status')
+  it('shows operating hours as "HH:MM" and leaves the status out (IS-11 AC5)', () => {
+    const form = venueToForm(venue)
+    expect([form.operating_hours_start, form.operating_hours_end]).toEqual(['07:00', '23:59'])
+    expect(form).not.toHaveProperty('status')
+  })
+
+  it('shows a venue with no set hours as two empty times', () => {
+    const form = venueToForm({ ...venue, operating_hours_start: null, operating_hours_end: null })
+    expect([form.operating_hours_start, form.operating_hours_end]).toEqual(['', ''])
   })
 
   it('copies the lists so editing the form never changes the venue', () => {
@@ -114,6 +127,20 @@ describe('validateVenueForm (IS-61 AC1/AC2)', () => {
     expect(validateVenueForm(validForm({ tentative_hold_minutes: '' })).tentative_hold_minutes).toBeTruthy()
     expect(validateVenueForm(validForm({ tentative_hold_minutes: '1' }))).toEqual({})
   })
+
+  it('takes operating hours as an optional pair, closing after opening (IS-11 AC5)', () => {
+    expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '20:00' }))).toEqual({})
+    expect(validateVenueForm(validForm({ operating_hours_start: '08:00' })).operating_hours).toBe(
+      'Set both an opening and a closing time, or leave both empty.',
+    )
+    expect(validateVenueForm(validForm({ operating_hours_end: '20:00' })).operating_hours).toBeTruthy()
+    expect(validateVenueForm(validForm({ operating_hours_start: '20:00', operating_hours_end: '08:00' })).operating_hours).toBe(
+      'Closing time must be later than opening time.',
+    )
+    expect(validateVenueForm(validForm({ operating_hours_start: '08:00', operating_hours_end: '08:00' })).operating_hours).toBeTruthy()
+    // "09:00" < "10:00" but "9:00" > "10:00" as text: <input type="time"> always pads.
+    expect(validateVenueForm(validForm({ operating_hours_start: '09:00', operating_hours_end: '10:00' }))).toEqual({})
+  })
 })
 
 describe('formatOperatingHours', () => {
@@ -131,6 +158,11 @@ describe('changedFields (IS-61 AC2)', () => {
   it('lists only what changed', () => {
     const form = { ...venueToForm(venue), capacity: '250', facilities: ['wifi'] }
     expect(changedFields(venue, form)).toEqual({ capacity: 250, facilities: ['wifi'] })
+  })
+
+  it('does not count "07:00:00" read back as "07:00" as a change', () => {
+    const form = { ...venueToForm(venue), operating_hours_end: '22:00' }
+    expect(changedFields(venue, form)).toEqual({ operating_hours_end: '22:00' })
   })
 
   it('lists tentative_hold_minutes when only it changed (Sprint 3)', () => {

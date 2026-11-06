@@ -153,3 +153,58 @@ describe('VenueCalendarView at UTC+8 day boundaries (IS-74)', () => {
     expect(listed(wrapper)).toEqual(['31 Oct 23:00'])
   })
 })
+
+describe('VenueCalendarView operating hours (IS-11 AC5)', () => {
+  const originalTz = process.env.TZ
+  const HOURS = { ...VENUE, operating_hours_start: '08:00:00', operating_hours_end: '20:00:00' }
+  // 1 Nov 09:00-10:00 Singapore time, stored in UTC.
+  const MORNING = booking('Morning talk', '2026-11-01T01:00', '2026-11-01T02:00')
+
+  beforeAll(() => {
+    process.env.TZ = 'Asia/Singapore'
+  })
+
+  afterAll(() => {
+    if (originalTz === undefined) delete process.env.TZ
+    else process.env.TZ = originalTz
+  })
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-01T10:00:00+08:00'))
+    apiGet.mockReset()
+    apiGet.mockResolvedValue({ venue: HOURS, range: {}, entries: [MORNING] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('day view lists the closed periods around the bookings, in time order', async () => {
+    const wrapper = await mountView()
+    await openDayView(wrapper)
+
+    expect(wrapper.findAll('.list-main').map((row) => row.text())).toEqual([
+      'Closed until 08:00',
+      'Morning talk',
+      'Closed from 20:00',
+    ])
+    expect(wrapper.text()).toContain('Outside operating hours')
+  })
+
+  it('the month grid marks every day as closed outside the hours', async () => {
+    const wrapper = await mountView()
+
+    expect(cellDaysWith(wrapper, 'Open 08:00–20:00 only')).toHaveLength(30)
+    expect(wrapper.find('.hours-note').text()).toContain('08:00 - 20:00 daily')
+  })
+
+  it('marks nothing for a venue with no set hours', async () => {
+    apiGet.mockResolvedValue({ venue: VENUE, range: {}, entries: [MORNING] })
+    const wrapper = await mountView()
+    await openDayView(wrapper)
+
+    expect(wrapper.findAll('.list-main').map((row) => row.text())).toEqual(['Morning talk'])
+    expect(wrapper.find('.hours-note').exists()).toBe(false)
+  })
+})
