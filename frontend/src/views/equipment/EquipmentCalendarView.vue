@@ -14,7 +14,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiGet } from '../../lib/api'
-import { rangeQuery, useCalendarRange, widenRange } from '../../lib/calendar'
+import { rangeQuery, useCalendarRange } from '../../lib/calendar'
 import { unitStatusLabel } from '../../lib/equipment'
 import AppNavBar from '../../components/AppNavBar.vue'
 import AvailabilityCalendar from '../../components/AvailabilityCalendar.vue'
@@ -33,11 +33,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    // A day wider than the month on each side: the query's dates are UTC
-    // and the backend compares UTC times, so an exact month misses the last
-    // local day after 08:00 in Singapore (see widenRange). The grid only
-    // draws this month's days, placed by local time.
-    const data = await apiGet(`/equipment/${equipmentId}/calendar?${rangeQuery(widenRange(range.value))}`)
+    const data = await apiGet(`/equipment/${equipmentId}/calendar?${rangeQuery(range.value)}`)
     unit.value = data.equipment
     entries.value = data.entries
   } catch (requestError) {

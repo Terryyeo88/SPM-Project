@@ -25,8 +25,8 @@ unit is passed in here, so the calendar costs no second round trip.
 
 Two overlap tests now live side by side in the equipment package. This
 module filters with app.shared.calendar's CalendarRange.overlaps (the
-calendar's: offsets dropped, wall-clock time against whole days, as the
-venue calendar does). equipment_service.check_availability keeps its own
+calendar's: Singapore time against whole Singapore days, as the venue
+calendar does). equipment_service.check_availability keeps its own
 _spans_overlap over timezone-aware instants, because it compares two
 booked periods, not a period with a calendar page. See
 docs/design-decisions.md.

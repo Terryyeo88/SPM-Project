@@ -1190,9 +1190,10 @@ specification and pass unchanged.
     day, so `end` is an inclusive day.
   - `spans_overlap(a_start, a_end, b_start, b_end)`: half-open overlap.
   - `CalendarRange.overlaps(entry_start, entry_end)`: the calendar's own
-    use of it. It drops the entry's UTC offset and compares wall-clock time
-    with the naive range, exactly as the inline check in
-    `get_venue_calendar` did.
+    use of it. At extraction it dropped the entry's UTC offset and compared
+    wall-clock time with the naive range, exactly as the inline check in
+    `get_venue_calendar` did. IS-74 changed it to convert to Singapore time
+    first.
   - `calendar_envelope(resource_key, resource, range, entries)`: the
     `{<resource_key>: {...}, range: {start, end}, entries: [...]}` shape.
     The key is a parameter, because the venue response's key is `venue`
@@ -1232,7 +1233,7 @@ The two pairs differ, so both stay:
 | | venue calendar | `equipment_service` |
 |---|---|---|
 | timestamp parsing | `"Z"` -> `+00:00`; a value with no offset stays naive | same, but a value with no offset is read as UTC |
-| overlap | offsets dropped; wall-clock time compared with a naive day range | aware datetimes compared as instants |
+| overlap | converted to Singapore time (since IS-74) and compared with a naive Singapore day range | aware datetimes compared as instants |
 | boundary | strict `<` both sides (half-open) | strict `<` both sides (half-open) |
 
 The boundary rule is the same, but timezone and null-offset handling are
@@ -1314,8 +1315,8 @@ coordinator + venue staff pair. Every other role gets `DENY_NOT_FOUND`, a
 
 - **The calendar** (`calendar_service.py`) filters with
   `app.shared.calendar.CalendarRange.overlaps`, the venue calendar's test.
-  It drops each timestamp's offset and compares wall-clock time with whole
-  days.
+  It converts each timestamp to Singapore time and compares it with whole
+  Singapore days (IS-74).
 - **The availability check** (`equipment_service.check_availability`)
   keeps its own `_spans_overlap` over timezone-aware instants, with
   `_parse_timestamptz` reading an offset-less value as UTC. It compares two
@@ -1332,14 +1333,10 @@ half-open with strict `<`.
   through its request item and request to the event's name. The loaded
   unit is passed to the calendar service, which filters its occupancy. There
   is no second query and no second round trip.
-- **The page asks for a day more than the month on each side**
-  (`widenRange`). The shared `rangeQuery` sends UTC dates, and the backend
-  compares stored UTC times against whole days. Asking for exactly the
-  month in Singapore misses the month's last day after 08:00, and fixing
-  only the dates would instead miss the first day before 08:00. The extra
-  day each side covers both, and `monthCells` places entries by local day
-  and draws only this month's days. The venue calendar has the same defect
-  and does not use this yet (docs/open-questions.md).
+- **The page asks for exactly the month.** It first asked for a day more on
+  each side (`widenRange`) to work around the UTC+8 range defect. IS-74 fixed
+  that defect in the shared code and deleted the workaround (see "Calendar days
+  are Singapore days (IS-74)").
 - **Multi-day reservations** are marked on every day they cover through a
   `spanDays` option on the shared `monthCells`. It is off by default, so the
   venue calendar renders exactly as before (re-checked against PR #32's
@@ -2970,3 +2967,32 @@ catch-all instead, so that path behaves exactly as it did.
 **Client errors log at INFO.** They aren't crashes, and INFO is below the
 production log level, so a scanner can't flood the error log. The path is logged
 with `%r` so a `%0A` in a URL can't forge a log line.
+
+## Calendar days are Singapore days (IS-74, Terry, 2026-11-06)
+
+**Both ends had to change.** The frontend sent UTC dates, so a local month's
+window started and ended a day early. Sending local dates alone wasn't enough:
+the backend compared stored UTC times with whole days as if those days were UTC,
+so a booking at 00:30 on the 1st (16:30 UTC the day before) fell out of its month
+and appeared on the previous day's view. `toISODate` now returns the local date,
+and `CalendarRange.overlaps` converts entries to Singapore time.
+
+**`widenRange` is deleted.** It existed only to compensate for this defect. It
+did no visible harm on the equipment calendar, which is month-only and whose grid
+draws only that month's days, but keeping it would have left a workaround beside
+the fix. No day or week view filtering was needed: the window is now exact, so
+`sortedByStart` only ever receives that range's entries.
+
+**A fixed offset, not `zoneinfo`.** Singapore has been UTC+8 with no daylight
+saving since 1982, so there is no transition to get wrong on any date a booking
+can have. It had other offsets before 1982, none of which a booking can fall on.
+`CALENDAR_TIMEZONE` in `app/shared/calendar.py` says what would break with a
+second timezone: a caller's dates are read as Singapore days, while the frontend
+sends and groups by the browser's local day, so a venue or user outside UTC+8
+would see the two disagree.
+
+**The IS-47 boundary tests moved to `+08:00`.** They used `+00:00` instants at
+UTC midnight, which assumed days were UTC. At `+00:00` they would be 8 hours off
+the edges they name, and one would still pass without testing its edge. Because
+a `+08:00` input already has Singapore wall-clock time, those tests can't detect
+the conversion being removed, so one new test uses a UTC value, as real rows do.

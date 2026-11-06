@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addDays,
   monthCells,
   rangeFor,
   rangeQuery,
   sortedByStart,
   stepAnchor,
   useCalendarRange,
-  widenRange,
 } from './calendar'
 
 // Local-time dates throughout, like the calendar itself.
@@ -30,10 +28,8 @@ describe('rangeFor', () => {
 
 describe('rangeQuery', () => {
   it('sends the last included day as end, not the exclusive boundary', () => {
-    const range = { start: new Date(Date.UTC(2026, 9, 1)), end: new Date(Date.UTC(2026, 10, 1)) }
-    expect(rangeQuery(range)).toBe(
-      `start=2026-10-01&end=${addDays(range.end, -1).toISOString().slice(0, 10)}`,
-    )
+    const range = { start: day(2026, 10, 1), end: day(2026, 11, 1) }
+    expect(rangeQuery(range)).toBe('start=2026-10-01&end=2026-10-31')
   })
 })
 
@@ -118,13 +114,5 @@ describe('useCalendarRange', () => {
 
     calendar.view.value = 'month'
     expect(calendar.label.value).toBe(day(2026, 10, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))
-  })
-})
-
-describe('widenRange', () => {
-  it('adds a day on each side without changing the input', () => {
-    const range = rangeFor('month', day(2026, 11, 1))
-    expect(widenRange(range)).toEqual({ start: day(2026, 10, 31), end: day(2026, 12, 2) })
-    expect(range).toEqual({ start: day(2026, 11, 1), end: day(2026, 12, 1) })
   })
 })
