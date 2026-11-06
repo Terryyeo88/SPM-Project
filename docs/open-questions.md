@@ -249,11 +249,20 @@ decisions worth double-checking.
   organiser/coordinator views of who registered. (Attendee notifications:
   IS-22.)
 
-- **Organiser "discretion" and manual closing.** Week 4 says organisers have
-  discretion over registration and close it manually. Here the window the
-  organiser sets per session is what opens and closes registration; closing
-  early would be moving the close time. Organisers can't yet edit a
-  confirmed event (field-locking for confirmed events isn't built either).
+- **Organiser "discretion" and manual closing (IS-20 AC6, AC8) --
+  justified by the clarifications.** Week 4: "At the moment closure is
+  based on Organiser discretion and manually close the registration. **The
+  team may propose other better approach.**" Our proposal: the organiser
+  sets each session's registration window (opens / closes) when creating
+  the request, and that window is what opens and closes registration --
+  closing early means moving the close time. Week 2 frames the discretion
+  as over the *conditions*, not over individual attendees: "Waiting list
+  operates on a first-come, first-served priority ... **Organisers have
+  discretion over registration/withdrawal conditions.**" Organisers set
+  those conditions (registration needed or not, the window, the session's
+  expected attendance as its capacity); places are then first-come,
+  first-served with a waiting list, as stated. There is no hand-picking of
+  attendees. Please confirm this proposal is acceptable.
 
 - **No confirmed events exist the normal way yet.** Confirming needs venue
   and equipment work that isn't built, so the seed creates a confirmed
@@ -391,15 +400,19 @@ decisions worth double-checking.
   screen for a requirement it was never asked to meet. Two functions,
   not one, is deliberate here.
 
-- **Facilities can never actually be assessed for IS-13.** The AC says to
-  check "required facilities recorded for the event," but no story has
-  ever added a required-facilities field to `events` -- only
-  `equipment_needed`, which is a different (Technical Support Staff)
-  concept. Every suitability check currently reports Facilities as
-  "not assessed," which is an honest use of the AC's own "requirements
-  that have not yet been recorded" clause, not a shortcut -- but if a
-  future story adds a real venue-facilities-required field to events,
-  this check should start reading it.
+- **"Facility arrangements" are part of accessibility needs -- effectively
+  met (IS-3 AC4, IS-13 AC1/AC3).** Week 2: "Accessibility needs refer to
+  wheelchair access, special physical seating, or **mobility/facility
+  arrangements**." So the facility arrangements an organiser records go in
+  the request's accessibility needs, and IS-13 checks those against the
+  venue's accessibility provisions (flags what's missing, by name --
+  `venueSuitability.test.js`, accessibility cases). What stays "not
+  assessed" is the separate *Facilities* row: the general facilities a
+  venue lists (stage, projector screen, ...) have no matching "required
+  facilities" field on events, and nothing in the clarifications asks for
+  one. That row is an honest use of the AC's own "requirements that have
+  not yet been recorded" clause; if a future story adds such a field, the
+  check should start reading it.
 
 - **Empty accessibility_needs is treated as "not recorded," not "none
   needed."** The schema can't tell the two apart (both are just an empty
@@ -408,11 +421,14 @@ decisions worth double-checking.
   need nothing extra" from "I haven't filled this in," that's a schema
   change this check should then read.
 
-- **"Retired or withdrawn" venues don't exist as a concept.** IS-12's AC
-  says they should be excluded from results. `venues.status` only has
-  available/occupied/maintenance -- nothing means retired. Nothing is
-  silently excluded because nothing can be retired yet; flagged rather
-  than assumed irrelevant.
+- **~~"Retired or withdrawn" venues don't exist as a concept.~~ Resolved
+  by IS-61 (effectively met).** IS-12 AC6 says retired or withdrawn venues
+  must not appear in results. When this note was written nothing could
+  retire a venue; since IS-61, withdrawing a venue from the catalogue
+  deletes it, so it can't appear in search results or be booked
+  (`test_venue_catalogue_crud.py::test_ac3_a_deleted_venue_is_gone_from_the_catalogue`,
+  `::test_a_deleted_venue_cannot_be_requested`). There is still no
+  separate "retired but kept" status; say if one is wanted.
 
 ## Request for Event Change (IS-21, 8 Oct)
 
@@ -1278,10 +1294,17 @@ step (`20261103000000_venue_hard_delete.sql`; see design-decisions.md,
   user; own list, newest first, with an unread count; mark one or all read;
   never anyone else's; a failure never undoes the action). Please confirm
   or replace them with the ticket's own.
-- **In-app only; email and SMS are deferred.** No mail or SMS provider
-  exists, and registrations' `notify_email` / `notify_sms` choices aren't
-  read yet. Please confirm in-app is enough for now, or say which
-  notifications must also go by email or SMS.
+- **In-app only; email and SMS are deferred (IS-69 AC2) -- justified by
+  the clarifications.** Week 2 (Justin): "The notification delivery
+  channel is up to your implementation (**can be in-app or external**)."
+  In-app is our channel. No mail or SMS provider exists, so the email/SMS
+  preferences users set (registration form, profile -- IS-68/IS-75) are
+  stored but don't send anything yet. AC2's "delivered according to the
+  user's communication preferences" is therefore only half met: the
+  preferences are recorded and kept, ready for when an external channel
+  is added. Proposed AC2 rewording: "notifications are delivered in-app;
+  users' email/SMS preferences are recorded for a later external
+  channel." Please confirm.
 - **Decisions go to the session's current coordinator**, not whoever made
   the request, since a reassigned session's new coordinator is the one who
   acts. Please confirm.
@@ -1397,6 +1420,8 @@ Decided and built; worth confirming with the customer:
   can't be opened any more.
 - **In-app only.** The email/SMS preferences collected at registration and
   on the profile (IS-68) are stored but not used to send anything yet.
+  Allowed by Week 2: the delivery channel "can be in-app or external"
+  (see Notification System, IS-69).
 
 ## Withdrawal of Equipment Booking (IS-66, Nawaz, Sprint 4)
 
@@ -1459,8 +1484,11 @@ Notifications"). Please confirm:
   have nothing to fire from. When a story adds a way to take a unit out of
   service (or to dated unavailability), the hook is one call to
   `technical_support_event_news`-style code: find the live requests holding
-  that unit and tell Technical Support. Please confirm that belongs to a
-  later story, or say where unit status is meant to change.
+  that unit and tell Technical Support. **Justified by Week 4:**
+  "Technical Support Staff maintain equipment status. **Maintenance
+  workflow is not core at the moment.**" Taking a unit out of service is
+  that maintenance workflow, so this criterion waits for it. Please
+  confirm that belongs to a later story.
 - **Rescheduling is only news if equipment is arranged.** A change to the
   date or time of a session with no `pending` or `confirmed` request tells
   nobody. A change to the equipment list or room layout is told too (with
