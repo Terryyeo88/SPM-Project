@@ -168,6 +168,7 @@ test.describe('Golden path: from event request to registration', () => {
       await officer.page.goto('/')
       await officer.page.getByRole('link').filter({ hasText: name }).first().click()
       await officer.page.getByRole('button', { name: 'Approve', exact: true }).click()
+      await officer.page.locator('#safety-comment').fill('Exits clear, capacity within limits.')
       await officer.page.getByRole('button', { name: /^Confirm:/ }).click()
       await expect(officer.page.getByText('Approved. The coordinator can now confirm this session.')).toBeVisible()
       await officer.context.close()

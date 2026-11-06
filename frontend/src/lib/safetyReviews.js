@@ -73,10 +73,18 @@ export function filterReviews(reviews, query) {
 
 // -- the three decisions ---------------------------------------------------------
 
+// IS-59 AC3: every decision needs a comment -- approving too, to record
+// what the officer checked (backend: safety_service.COMMENT_REQUIRED).
 export const DECISIONS = Object.freeze({
-  approve: Object.freeze({ path: 'approve', label: 'Approve', commentRequired: false }),
+  approve: Object.freeze({ path: 'approve', label: 'Approve', commentRequired: true }),
   request_changes: Object.freeze({ path: 'request-changes', label: 'Request Changes', commentRequired: true }),
   reject: Object.freeze({ path: 'reject', label: 'Reject', commentRequired: true }),
+})
+
+const COMMENT_PROMPTS = Object.freeze({
+  approve: 'Note what you checked before approving.',
+  request_changes: 'Tell the coordinator what needs to change.',
+  reject: 'Tell the coordinator why the safety arrangement is rejected.',
 })
 
 /** An error message for the comment box, or '' if the decision can be sent. */
@@ -84,9 +92,7 @@ export function decisionCommentError(decisionKey, comment) {
   const decision = DECISIONS[decisionKey]
   if (!decision) return 'Choose a decision.'
   if (decision.commentRequired && !(comment ?? '').trim()) {
-    return decisionKey === 'reject'
-      ? 'Tell the coordinator why the safety arrangement is rejected.'
-      : 'Tell the coordinator what needs to change.'
+    return COMMENT_PROMPTS[decisionKey]
   }
   return ''
 }

@@ -51,11 +51,16 @@ TABLE = "safety_reviews"
 
 REVIEW_STATUSES = frozenset({"pending", "approved", "rejected", "changes_requested"})
 DECIDED_STATUSES = REVIEW_STATUSES - {"pending"}
-# The comment tells the coordinator what to fix, so it is required for
-# these two and optional when approving.
-COMMENT_REQUIRED = frozenset({"rejected", "changes_requested"})
+# IS-59 AC3: every decision needs a comment. Rejecting or requesting
+# changes, it tells the coordinator what to fix; approving, it records what
+# the officer checked.
+COMMENT_REQUIRED = DECIDED_STATUSES
+# These two send the session back to planning; approving leaves it for the
+# coordinator to confirm.
+SENDS_BACK_TO_PLANNING = frozenset({"rejected", "changes_requested"})
 
 _COMMENT_MESSAGES = {
+    "approved": "A comment is required to approve a safety arrangement -- note what you checked.",
     "rejected": "A comment is required to reject a safety arrangement -- tell the coordinator why.",
     "changes_requested": "A comment is required to request changes -- tell the coordinator what to change.",
 }
@@ -371,7 +376,7 @@ def decide_review(review_id: str, review: SimpleNamespace, to_status: str, decid
     if not decided:
         raise ValidationError("This safety review is no longer pending -- refresh to see its current status.")
 
-    if to_status in COMMENT_REQUIRED:
+    if to_status in SENDS_BACK_TO_PLANNING:
         try:
             transition(review.event_id, "planning", decided_by, reason=cleaned, expected_from="safety_review")
         except TransitionConflictError:

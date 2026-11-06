@@ -190,17 +190,17 @@ def test_a_submit_whose_status_change_fails_leaves_no_review_behind(db):
 
 def test_approve_records_the_decision_and_leaves_the_status_for_the_coordinator(db):
     review = _pending_review(db)
-    decided = safety_service.decide_review("review-1", review, "approved", OFFICER, None)
+    decided = safety_service.decide_review("review-1", review, "approved", OFFICER, "Exits clear.")
 
     assert decided["status"] == "approved"
     assert decided["reviewed_by"] == OFFICER
     assert decided["reviewed_at"]
-    assert decided["comment"] is None
+    assert decided["comment"] == "Exits clear."
     assert db.get("event-1")["status"] == "safety_review"
     assert db.tables.get("event_status_log", []) == []
 
 
-def test_approve_keeps_an_optional_comment(db):
+def test_approve_stores_the_comment_trimmed(db):
     review = _pending_review(db)
     decided = safety_service.decide_review("review-1", review, "approved", OFFICER, "  Exits clear.  ")
     assert decided["comment"] == "Exits clear."
@@ -223,9 +223,10 @@ def test_reject_or_request_changes_sends_the_session_back_to_planning_with_the_c
     )
 
 
-@pytest.mark.parametrize("decision", ["rejected", "changes_requested"])
+@pytest.mark.parametrize("decision", ["approved", "rejected", "changes_requested"])
 @pytest.mark.parametrize("comment", [None, "", "   "])
-def test_reject_or_request_changes_needs_a_comment(db, decision, comment):
+def test_every_decision_needs_a_comment(db, decision, comment):
+    """IS-59 AC3: approving too (it records what the officer checked)."""
     review = _pending_review(db)
     with pytest.raises(ValidationError):
         safety_service.decide_review("review-1", review, decision, OFFICER, comment)
@@ -249,7 +250,7 @@ def test_a_session_no_longer_in_safety_review_cannot_be_decided(db):
     """The coordinator cancelled it while it was waiting."""
     review = _pending_review(db, event_status="cancelled")
     with pytest.raises(ValidationError) as exc_info:
-        safety_service.decide_review("review-1", review, "approved", OFFICER, None)
+        safety_service.decide_review("review-1", review, "approved", OFFICER, "Exits clear.")
     assert "no longer waiting" in exc_info.value.message
     assert db.tables["safety_reviews"][0]["status"] == "pending"
 

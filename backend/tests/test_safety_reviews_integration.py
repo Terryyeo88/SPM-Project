@@ -190,7 +190,9 @@ def test_approval_opens_confirmation_and_the_detail_shows_the_venue(world):
     review = submit_for_safety_check(SimpleNamespace(**world.event), world.coordinator["id"])["review"]
     assert is_approved(world.event["id"]) is False
 
-    decide_review(review["id"], SimpleNamespace(**get_review(review["id"])), "approved", world.officer["id"], None)
+    decide_review(
+        review["id"], SimpleNamespace(**get_review(review["id"])), "approved", world.officer["id"], "Exits clear."
+    )
 
     assert is_approved(world.event["id"]) is True
     assert _status(world.event["id"]) == "safety_review"  # the coordinator confirms, not the officer
