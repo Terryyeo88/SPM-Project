@@ -939,9 +939,11 @@ Decisions made where Week 7 and Week 9 were silent (reasoning in
   booking, and no venue booking or equipment request still pending.
   Equipment is optional (a session may need none, and equipment requests
   can't be created in the app yet). Rejected bookings/requests don't block.
-- **The comment is required to reject or request changes, optional to
-  approve.** Week 9 says the officer updates the status "with a comment";
-  read as "a comment where one is needed to act on".
+- **A comment is required for every decision, approving included**
+  (IS-59 AC3). Week 9 says the officer updates the status "with a comment".
+  It was first built optional for approvals and made required on
+  2026-11-06 to match the AC: rejecting or requesting changes, the comment
+  says what to fix; approving, it records what was checked.
 - **The coordinator confirms an approved session** ("Confirm Event"); safety
   approval doesn't confirm it automatically. Week 9: "The co-ordinator will
   decide on the subsequent action." Confirming is refused (400) unless the

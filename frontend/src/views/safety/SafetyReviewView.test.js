@@ -59,15 +59,27 @@ describe('SafetyReviewView', () => {
     expect(wrapper.text()).toContain('Microphones × 2')
   })
 
-  it('approves without a comment', async () => {
+  it('will not approve without a comment (IS-59 AC3)', async () => {
+    const wrapper = await render()
+    await button(wrapper, 'Approve').trigger('click')
+    expect(wrapper.find('label[for="safety-comment"]').text()).not.toContain('optional')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Note what you checked before approving.')
+  })
+
+  it('approves with a comment', async () => {
     const wrapper = await render()
     apiPost.mockResolvedValue({ id: 'review-1', status: 'approved' })
 
     await button(wrapper, 'Approve').trigger('click')
+    await wrapper.find('#safety-comment').setValue('  Exits clear.  ')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledWith('/safety-reviews/review-1/approve', { comment: null })
+    expect(apiPost).toHaveBeenCalledWith('/safety-reviews/review-1/approve', { comment: 'Exits clear.' })
     expect(wrapper.text()).toContain('The coordinator can now confirm this session.')
   })
 
