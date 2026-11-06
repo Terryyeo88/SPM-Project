@@ -557,6 +557,15 @@ request or the organiser of the decision (no notification system), and a
 | The coordinator sees the impacts before deciding | `::test_pending_changes_are_listed_with_their_impact`, `EventChangeRequests.test.js` (impact describe block) | `change_request_service.py::list_change_requests`, `EventChangeRequests.vue` |
 | Nothing is committed until every affected area is acknowledged, including one that appeared after the page loaded; what was acknowledged is recorded | `::test_approval_waits_until_every_affected_area_is_acknowledged`, `::test_an_impact_that_appears_after_the_page_loaded_must_be_acknowledged_too`, `::test_a_change_with_no_impact_is_approved_without_acknowledgement`, `::test_acknowledge_impacts_must_be_a_list_of_areas`, `::test_confirmed_event_changes_only_after_coordinator_approval` (409 then 200) | `change_impact.py::check_acknowledged`, `change_request_service.py::approve_change_request`, `event_change_requests.acknowledged_impacts` |
 
+### IS-21 fix: sessions with no `registration_needs` value (2026-11-06)
+
+Old sessions had NULL there, and their change-request form was refused ("registration_needs is required"). The shared project was fixed by hand on 2026-11-05; the migration puts the same fix in the repo.
+
+| Criterion | Test | Implementation |
+|---|---|---|
+| Existing NULLs become false; a new row left without the field gets false | `test_events_registration_needs_integration.py::test_a_draft_saved_without_registration_needs_stores_false` | `20261106000000_events_registration_needs_not_null.sql` (backfill + `default false`) |
+| The column can't be NULL again | `::test_registration_needs_cannot_be_set_to_null` (guard) | same migration (`not null`) |
+
 ### IS-21 follow-up: event logs (what changed, who changed it, when)
 
 Unit tests: `test_event_logs.py`, `frontend/src/components/EventLogHistory.test.js`. Integration: `test_event_change_requests_integration.py::test_change_request_round_trips_and_approval_writes_the_event`.
