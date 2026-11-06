@@ -2948,3 +2948,25 @@ ACs don't, and the merged backend doesn't check dates. Adding a date check
 only in the UI would just hide a button the API still accepts, so we left
 it out of both and flagged it in `docs/open-questions.md` rather than
 changing another story's route.
+
+## HTTP error status codes (IS-73, Terry, 2026-11-06)
+
+**Codes come from the exception's name.** `NotFound` gives `not_found` and
+`MethodNotAllowed` gives `method_not_allowed`, so any other `HTTPException` is
+covered without a table to maintain. A routing 404 and an authz 404 share
+`not_found`: the frontend treats them alike, and a caller gains nothing from
+telling them apart.
+
+**The message is the name too, never the description.** A caller of `abort()`
+can put anything in `description`, and the catch-all's rule is that nothing
+unplanned reaches the caller.
+
+**`InternalServerError` stays on the 500 path.** It is an `HTTPException`, but
+Flask raises it to wrap a real crash outside the view, such as a view returning
+an invalid value. Left to the `HTTPException` handler it would have come out as
+`internal_server_error` with no `logger.exception`. It's registered on the
+catch-all instead, so that path behaves exactly as it did.
+
+**Client errors log at INFO.** They aren't crashes, and INFO is below the
+production log level, so a scanner can't flood the error log. The path is logged
+with `%r` so a `%0A` in a URL can't forge a log line.
