@@ -215,12 +215,13 @@ npm test                 # Vitest unit and component tests -- no servers needed
 npm run test:e2e         # Playwright end-to-end tests (frontend/e2e/)
 ```
 
-**End-to-end tests need both servers running**: the backend on 5000 and the
-frontend on 5173, against a database with the seed accounts. Start them first
-(see Quick start); Playwright reuses servers that are already running. Its own
-fallback for starting the backend runs `backend/venv/bin/flask`, which
-doesn't match the `.venv` created in Setup, so don't rely on it.
-`frontend/e2e/README.md` has the details.
+**End-to-end tests run against a local Supabase only** (`npx supabase start`,
+Docker), never the shared project: they write real data. Settings come from
+`.env.e2e` at the repo root (copy `.env.e2e.example`), and the suite refuses to
+start if it points anywhere else. Playwright starts its own backend (5000) and
+frontend (5173) with those settings, so stop your normal dev servers first.
+One-time setup (Docker, a local signing key, `.env.e2e`) is in
+`frontend/e2e/README.md`.
 
 ## Secrets
 

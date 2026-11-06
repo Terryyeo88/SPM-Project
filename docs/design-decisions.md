@@ -2996,3 +2996,43 @@ UTC midnight, which assumed days were UTC. At `+00:00` they would be 8 hours off
 the edges they name, and one would still pass without testing its edge. Because
 a `+08:00` input already has Singapore wall-clock time, those tests can't detect
 the conversion being removed, so one new test uses a UTC value, as real rows do.
+
+## E2E tests run against a local Supabase (Justin, 2026-11-06)
+
+The Playwright suite used to run against whatever `backend/.env` and
+`frontend/.env` pointed at, which on every machine is the shared project the
+team demos from. Each run creates real events, bookings and registrations
+there, so a teammate flagged it as unsafe. Every run now goes to a local
+Supabase in Docker (`npx supabase start`), the same place the backend's
+integration tests already write to.
+
+**One settings file, `.env.e2e`, overriding both servers.** Playwright loads it
+(`frontend/e2e/support/env.js`) and starts the backend and Vite with its values
+in the environment. Neither `.env` file has to change: python-dotenv and Vite
+both leave an already-set variable alone, so the e2e values win only for that
+run, and manual testing keeps using the shared project.
+
+**Refuse, don't warn.** `assertSafeTarget` stops the run before any test unless
+`SUPABASE_URL` and `VITE_SUPABASE_URL` are the same local (localhost /
+loopback) URL. A remote project needs an exact opt-in value, as the integration
+tests do, and the shared project's ref is refused even with it. Both the config
+and the API setup helper (`support/api.js`) call it, so neither the browser
+nor the setup calls can reach the shared project.
+
+**Playwright never reuses running servers.** It used to attach to servers
+already running on 5000 and 5173, which are the dev servers pointing at the
+shared project, so the safety check on `.env.e2e` would not have mattered. It
+now always starts its own and stops with "port is already used" if yours are
+up. The frontend has to stay on 5173 because that is the only origin the
+backend's CORS allows.
+
+**A local ES256 signing key.** `app/auth/jwt.py` verifies tokens only against
+the project's JWKS (asymmetric keys, no HS256 fallback). Local Supabase signs
+with the legacy shared secret unless given a key, so the backend would reject
+every local login. `supabase/config.toml` now sets `signing_keys_path`, and
+each developer generates the (gitignored) key once with
+`npx supabase gen signing-key --algorithm ES256`.
+
+**Seed data comes from `supabase/seed.sql`**, which `npx supabase db reset`
+loads, with the same accounts and `Password123!` as `backend/seed.py`. No
+script has to run against the local database.

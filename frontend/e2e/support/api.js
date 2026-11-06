@@ -6,36 +6,22 @@
 // Same endpoints and bodies the screens themselves send (see the comment on
 // each helper), signed in the same way the app signs in: Supabase password
 // login with the anon key, then a Bearer token on every API call. Reads
-// frontend/.env for the Supabase URL, anon key and API base URL (or the same
-// names from the environment, e.g. in CI).
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+// .env.e2e at the repo root for the Supabase URL and anon key (see
+// support/env.js, which refuses anything but a local Supabase), and calls
+// the backend playwright.config.js starts.
 import { SEED_PASSWORD, USERS } from './auth.js'
+import { backendUrl, loadE2EEnv } from './env.js'
 
-function loadEnv() {
-  const env = { ...process.env }
-  try {
-    const text = readFileSync(fileURLToPath(new URL('../../.env', import.meta.url)), 'utf8')
-    for (const line of text.split(/\r?\n/)) {
-      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
-      if (match && env[match[1]] === undefined) env[match[1]] = match[2].replace(/^['"]|['"]$/g, '')
-    }
-  } catch {
-    // No .env file (CI): everything comes from process.env.
-  }
-  return env
-}
-
-const env = loadEnv()
+const env = loadE2EEnv()
 const SUPABASE_URL = env.VITE_SUPABASE_URL
 const ANON_KEY = env.VITE_SUPABASE_ANON_KEY
-const API_BASE_URL = env.VITE_API_BASE_URL || 'http://127.0.0.1:5000'
+const API_BASE_URL = backendUrl(env)
 
 const tokens = new Map()
 
 async function tokenFor(user) {
   if (tokens.has(user.email)) return tokens.get(user.email)
-  if (!SUPABASE_URL || !ANON_KEY) throw new Error('VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing (frontend/.env).')
+  if (!SUPABASE_URL || !ANON_KEY) throw new Error('VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing (.env.e2e).')
   const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST',
     headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },

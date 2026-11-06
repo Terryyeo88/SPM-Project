@@ -12,13 +12,13 @@
 // hand the request from role to role exactly as people would. test.step()
 // names every handoff, so a failure report says WHICH one broke.
 //
-// Runs against the real stack and whatever Supabase .env points at (the
-// shared one for now): every run creates a fresh request named
+// Runs against the real stack on a LOCAL Supabase (.env.e2e; see
+// support/env.js): every run creates a fresh request named
 // "E2E Golden <timestamp>" on a far-future date, so runs don't collide with
 // each other's venue bookings or with real data, and are easy to spot.
 //
-// Needs seed.py's accounts (support/auth.js), its "Grand Ballroom" venue
-// and its projector stock.
+// Needs the seeded accounts (support/auth.js), the "Grand Ballroom" venue
+// and the projector stock -- all loaded by `npx supabase db reset`.
 import { expect, test } from '@playwright/test'
 import { USERS, loginAs } from './support/auth.js'
 

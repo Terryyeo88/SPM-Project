@@ -4,7 +4,7 @@
 // what follows it in the browser. The golden path (golden-path.spec.js)
 // already proves every screen on the way there works.
 //
-// Like the golden path, these run against whatever Supabase .env points at;
+// Like the golden path, these run against a local Supabase (.env.e2e);
 // every request is named "E2E Reject <...> <timestamp>" on a random
 // far-future day.
 import { expect, test } from '@playwright/test'

@@ -63,9 +63,10 @@ test('the password field is masked', async ({ page }) => {
   await expect(page.getByLabel('Password')).toHaveAttribute('type', 'password')
 })
 
-test.skip('seed password constant stays in sync with backend/seed.py', () => {
+test.skip('seed password constant stays in sync with backend/seed.py and supabase/seed.sql', () => {
   // Reminder, not an automated check: if backend/seed.py's SEED_PASSWORD
-  // ever changes, update support/auth.js's SEED_PASSWORD (currently
+  // or supabase/seed.sql's crypt('Password123!', ...) (what e2e runs
+  // against locally) ever changes, update support/auth.js's SEED_PASSWORD (currently
   // 'Password123!') to match, or every test above starts failing for a
   // reason that has nothing to do with the app itself.
   expect(SEED_PASSWORD).toBe('Password123!')
