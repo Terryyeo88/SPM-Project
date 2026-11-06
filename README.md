@@ -54,8 +54,12 @@ in as one of them (emails and the shared password are in `backend/seed.py`).
 
 ## Setup
 
+Prerequisites: Python 3.12+ (CI runs 3.13), Node `^22.18.0 || >=24.12.0`,
+and Docker Desktop if you want to run the local Supabase stack (needed for
+integration and end-to-end tests).
+
 ```bash
-git clone <repo-url>
+git clone https://github.com/Terryyeo88/SPM-Project.git
 cd SPM-Project/backend
 python -m venv .venv
 
@@ -82,9 +86,17 @@ python check_env.py
 
 ### Apply migrations
 
-Migrations live in `supabase/migrations/`. **There is currently no tooling
-applying them automatically** — each one is pasted by hand into the Supabase
-SQL Editor (Project -> SQL Editor -> paste the file's contents -> Run), in
+Migrations live in `supabase/migrations/`. How they get applied depends on
+where:
+
+- **Local Supabase (Docker):** automatic. `npx supabase db reset` applies
+  every migration in order and loads `supabase/seed.sql` (see "Reproducible
+  from empty" below).
+- **The hosted Supabase project:** manual, by pasting each file into the SQL
+  Editor (details below).
+
+**For the hosted project there is no tooling applying them automatically** —
+each one is pasted by hand into the Supabase SQL Editor (Project -> SQL Editor -> paste the file's contents -> Run), in
 filename order. Nothing enforces that every environment (your local dev
 project, a teammate's, staging) is actually at the same migration version —
 if you've just pulled new commits, check `supabase/migrations/` for new
@@ -118,8 +130,8 @@ deleting it in the dashboard.
 **Reproducible from empty: verified.** As of 2026-09-27 the migration set
 builds the full schema from an empty database with `npx supabase db reset`.
 All migrations apply in order with no errors, the reconcile migration is a
-verified no-op on a second run, and all 20 integration tests pass against
-the result. To run it yourself (needs Docker Desktop running; the CLI runs
+verified no-op on a second run, and the integration tests pass against the
+result (20 at the time; 206 as of 2026-11-06, all passing). To run it yourself (needs Docker Desktop running; the CLI runs
 through `npx`, so there's nothing to install globally):
 
 ```bash
@@ -141,8 +153,9 @@ tables/columns actually exist before assuming a migration ran.
 ### Seed data
 
 Either run the Python seeder or paste the SQL version into the SQL Editor —
-both create the same throwaway accounts (3 coordinators, 1 coordinator lead,
-1 organiser, 3 attendees), the sample events (including a confirmed
+both create the same 11 throwaway accounts (3 coordinators, 1 coordinator
+lead, 1 organiser, 3 attendees, 1 technical support, 1 safety officer,
+1 venue staff; all share the password in `backend/seed.py`), the sample events (including a confirmed
 "Registration Demo" request for testing registration, recreated fresh on
 every run, registrations included), and the venues,
 and are safe to re-run:
@@ -189,6 +202,21 @@ npx supabase start && npx supabase db reset       # from the repo root
 eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/LOCAL_/')"
 SUPABASE_URL="$LOCAL_API_URL" SUPABASE_SERVICE_ROLE_KEY="$LOCAL_SERVICE_ROLE_KEY"   pytest -m integration                           # from backend/
 ```
+
+Windows PowerShell equivalent (from the repo root, after `start` + `db reset`):
+
+```powershell
+npx supabase status -o env | Select-String '^(API_URL|SERVICE_ROLE_KEY)=' | ForEach-Object {
+  $k, $v = $_.Line -split '=', 2; Set-Item "env:LOCAL_$k" $v.Trim('"') }
+$env:SUPABASE_URL = $env:LOCAL_API_URL
+$env:SUPABASE_SERVICE_ROLE_KEY = $env:LOCAL_SERVICE_ROLE_KEY
+cd backend
+.\.venv\Scripts\python.exe -m pytest -m integration
+```
+
+These variables override your `.env` for that terminal only (python-dotenv
+never overwrites a variable that's already set), so your `.env` can keep
+pointing at the shared project.
 
 If `supabase start` can't bind its ports on Windows, a reserved port range is in the way. The range changes (reboots, updates), so check it with `netsh interface ipv4 show excludedportrange protocol=tcp`, move the ports in `supabase/config.toml` outside it for that session, and don't commit the change.
 
