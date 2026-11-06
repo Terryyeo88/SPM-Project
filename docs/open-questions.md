@@ -164,12 +164,30 @@ decisions worth double-checking.
   undefined. It needs its own ticket and a definition of which changes are
   permitted.
 
-- **IS-36: "status gates venue/equipment search" could not be gated.** No
-  route requests a venue *for an event*. The venue catalogue is read-only
-  and per-venue, so there's nothing event-scoped to put a status check on,
-  and equipment doesn't exist at all. Once the Venue Booking Request story
-  adds a request-a-venue-for-this-event route, its rule should require
-  status `planning`.
+- **IS-36: venue/equipment requests are tied to planning (updated
+  2026-11-06).** When this was first written there was no venue-request
+  route and no equipment, so the original "status gates venue/equipment
+  search" couldn't be built. Both exist now, and the team reworded the ACs
+  to be about requests:
+  - *AC1, "planning" only from "approved"*: met (`rule_event_start_planning`).
+  - *AC2 and AC4, requests only while in planning; requesting otherwise is
+    blocked*: met. `rule_venue_booking_create` and
+    `rule_equipment_request_create` refuse (403) unless the event is in
+    `planning`, whatever page or tool sends the request.
+  - *AC3, planning unlocks the request actions*: met. "Request Venue
+    Booking" and "Request Equipment" are offered on the event page only in
+    `planning`.
+
+  Browsing the venue list (`/venues`) and the equipment calendar is not
+  gated. They aren't tied to any one event (a coordinator usually has events
+  in several statuses at once, so there's no single status to check), and
+  Venue Staff and Technical Support use them too.
+
+  Small difference, not an AC gap: the equipment request page hides its form
+  outside planning, while the venue request page
+  (`/events/<id>/request-venue-booking`), if opened directly by URL, still
+  shows its form and only refuses on submit. Hiding it would match the two;
+  please say if that's wanted.
 
 - **Should reassignment also be refused for `cancelled` / `rejected`
   events?** IS-38 made reassignment refuse `completed` events ("completed
