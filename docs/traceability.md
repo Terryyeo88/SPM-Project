@@ -386,10 +386,18 @@ Integration tests: `test_transitions_integration.py` (real Postgres; only what a
 | Error messages shown to users contain no raw status values | `test_transitions.py::test_no_transition_error_message_contains_a_raw_status_value` | `transitions.py::label` / `_REASON_MESSAGES` |
 
 Not covered, because the feature doesn't exist: IS-39's "Organizer is
-notified of cancellation and reason" (no notification system); IS-36's
-"status gates venue/equipment search" (no venue-request-for-event route, no
-equipment); the Confirmed Status story's field-locking. All are tracked in
+notified of cancellation and reason" (no notification system); the
+Confirmed Status story's field-locking. Both are tracked in
 `docs/open-questions.md`.
+
+IS-36's venue/equipment ACs (as reworded by the team), now that both request
+routes exist:
+
+| Acceptance criterion | Test | Implementation |
+|---|---|---|
+| Venue/equipment requests are only possible while the event is in planning status | `test_authz_venue_bookings.py::test_assigned_coordinator_can_create_when_event_planning`, `test_authz_equipment_create.py::test_assigned_coordinator_can_create_when_event_planning` | `rules.py::rule_venue_booking_create`, `::rule_equipment_request_create` |
+| Status change unlocks venue/equipment request actions | `VenueBookingStatus.test.js` ("offers no venue request outside planning", and the planning cases), `EquipmentBookingStatus.test.js` ("offers Request Equipment while the event is in planning") | `VenueBookingStatus.vue`, `EquipmentBookingStatus.vue` |
+| Attempting to request a venue/equipment while not in "planning" is blocked | `test_authz_venue_bookings.py::test_assigned_coordinator_cannot_create_outside_planning[*]`, `test_authz_equipment_create.py::test_assigned_coordinator_cannot_create_outside_planning[*]`, `RequestEquipmentView.test.js` ("refuses to show the form unless the event is in planning") | same rules (403); `RequestEquipmentView.vue` (`canRequest`) |
 
 ## Sprint 2 — Check Equipment Availability (IS-18, Nawaz)
 
