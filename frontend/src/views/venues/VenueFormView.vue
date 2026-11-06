@@ -8,8 +8,10 @@
  * changedFields). Bookings already made keep the setup/turnaround minutes
  * they were made with -- a changed buffer applies to new bookings only.
  *
- * No operating hours here: nothing but the venue calendar's note reads them,
- * so a new venue has no set hours and an edit leaves existing ones alone.
+ * Operating hours (IS-11 AC5, 6 Nov) are optional: both empty means no set
+ * hours. The venue calendar shows the time outside them as unavailable, and
+ * new booking requests must fit inside them; existing bookings are left as
+ * they are when they change.
  *
  * No status either: a new venue is always "available" (lib/venueCatalogue.js
  * sends it), and an edit leaves the venue's status as it is.
@@ -207,6 +209,31 @@ onMounted(load)
           </section>
 
           <section class="section">
+            <h2 class="section-title">Operating hours</h2>
+
+            <!-- One error for the pair; leaving either box counts as leaving the field. -->
+            <div class="row" data-field="operating_hours">
+              <div class="field">
+                <label for="venue-opens">Opens at</label>
+                <input id="venue-opens" v-model="form.operating_hours_start" type="time"
+                  :aria-invalid="Boolean(shownError('operating_hours'))" @blur="touch('operating_hours')" />
+              </div>
+              <div class="field">
+                <label for="venue-closes">Closes at</label>
+                <input id="venue-closes" v-model="form.operating_hours_end" type="time"
+                  :aria-invalid="Boolean(shownError('operating_hours'))" @blur="touch('operating_hours')" />
+              </div>
+            </div>
+            <p v-if="shownError('operating_hours')" class="field-error" data-error="operating_hours">
+              {{ shownError('operating_hours') }}
+            </p>
+            <p class="hint">
+              The same every day. Leave both empty if the venue has no set hours. New bookings must fit inside these
+              hours, setup and turnaround included; existing bookings are not changed.
+            </p>
+          </section>
+
+          <section class="section">
             <h2 class="section-title">Booking buffers</h2>
 
             <div class="row">
@@ -279,7 +306,7 @@ onMounted(load)
 /* Field labels and group names: regular weight, normal case. */
 .field > label, legend { font-size: var(--cs-text-sm); font-weight: 400; color: var(--cs-ink-soft); padding: 0; }
 .required { color: var(--cs-occupied); }
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="number"], input[type="time"] {
   box-sizing: border-box; width: 100%; padding: var(--cs-space-2) var(--cs-space-3); border: 1px solid var(--cs-line-strong); border-radius: var(--cs-radius-sm);
   font: inherit; font-size: var(--cs-text-base); background: var(--cs-surface);
 }

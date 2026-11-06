@@ -174,6 +174,31 @@ describe('VenueFormView -- add (IS-61 AC1)', () => {
     })
   })
 
+  it('adds a venue with operating hours (IS-11 AC5)', async () => {
+    apiPost.mockResolvedValue({ id: 'venue-new' })
+    const wrapper = await render()
+
+    await fillRequired(wrapper)
+    await wrapper.find('#venue-opens').setValue('08:00')
+    await wrapper.find('#venue-closes').setValue('20:00')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    const [[, body]] = apiPost.mock.calls
+    expect([body.operating_hours_start, body.operating_hours_end]).toEqual(['08:00', '20:00'])
+  })
+
+  it('needs both an opening and a closing time, or neither', async () => {
+    const wrapper = await render()
+
+    await fillRequired(wrapper)
+    await wrapper.find('#venue-opens').setValue('08:00')
+    await wrapper.find('#venue-opens').trigger('blur')
+
+    expect(shownError(wrapper, 'operating_hours')).toBe('Set both an opening and a closing time, or leave both empty.')
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
   it('a forced submit of an incomplete form shows every problem and calls nothing', async () => {
     const wrapper = await render()
 
@@ -211,11 +236,45 @@ describe('VenueFormView -- edit (IS-61 AC2)', () => {
     expect(wrapper.find('#venue-capacity').element.value).toBe('300')
   })
 
-  it('has no operating hours fields', async () => {
+  it("shows the venue's operating hours, editable (IS-11 AC5)", async () => {
     const wrapper = await render()
 
-    expect(wrapper.find('input[type="time"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Opens')
+    expect(wrapper.find('#venue-opens').element.value).toBe('07:00')
+    expect(wrapper.find('#venue-closes').element.value).toBe('23:59')
+  })
+
+  it('sends a changed closing time', async () => {
+    apiPost.mockResolvedValue({ id: 'venue-1' })
+    const wrapper = await render()
+
+    await wrapper.find('#venue-closes').setValue('22:00')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/venues/venue-1', { operating_hours_end: '22:00' })
+  })
+
+  it('refuses a closing time before the opening time, once the field is left', async () => {
+    const wrapper = await render()
+
+    await wrapper.find('#venue-closes').setValue('06:00')
+    expect(shownError(wrapper, 'operating_hours')).toBeNull()
+    await wrapper.find('#venue-closes').trigger('blur')
+
+    expect(shownError(wrapper, 'operating_hours')).toBe('Closing time must be later than opening time.')
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  it('can clear the operating hours', async () => {
+    apiPost.mockResolvedValue({ id: 'venue-1' })
+    const wrapper = await render()
+
+    await wrapper.find('#venue-opens').setValue('')
+    await wrapper.find('#venue-closes').setValue('')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/venues/venue-1', { operating_hours_start: null, operating_hours_end: null })
   })
 
   it('sends only what changed (never the status)', async () => {

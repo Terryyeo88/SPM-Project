@@ -3036,3 +3036,57 @@ each developer generates the (gitignored) key once with
 **Seed data comes from `supabase/seed.sql`**, which `npx supabase db reset`
 loads, with the same accounts and `Password123!` as `backend/seed.py`. No
 script has to run against the local database.
+
+## Operating hours (IS-11 AC5, Nawaz, 6 Nov)
+
+IS-11 AC5 ("periods outside the venue's operating hours are shown as
+unavailable on the calendar") was still open: the hours were stored and
+shown as a note, nothing more, and Venue Staff couldn't set them (IS-61
+left them out on purpose, because nothing relied on them). Aaralyn, as
+product owner, asked for both halves on 6 Nov and added that bookings
+outside the hours must be refused. Her answers are recorded in
+docs/open-questions.md.
+
+- **No migration.** `venues.operating_hours_start/end` (`time`, both or
+  neither) already exist from `20261007000000_venue_calendar.sql`. The
+  backend now accepts them through the same `create_venue`/`update_venue`
+  path as every other venue field (`venue_service._operating_hours`), and
+  writes the pair together whenever either is sent, so a check made on the
+  pair is never undone by writing only half of it.
+- **The booking check lives in `booking_service.create_booking_request`,
+  next to the setup/turnaround maths**, using the venue row it already
+  reads, before the insert -- so a refused request writes nothing and
+  notifies no one. It is a service check, not a database rule, like the
+  existing confirm-time checks (`_confirmed_overlap_exists`,
+  `_blocked_period_exists`): the hours only change when Venue Staff edit
+  the venue, so a race between the two isn't worth a trigger.
+- **Only new requests are checked.** `confirm_booking` doesn't re-check the
+  hours, which keeps the existing invariant that editing a venue never
+  changes what an existing booking may do (`venue_service`'s module
+  docstring).
+- **The calendar works the closed periods out in the browser**
+  (`lib/venueHours.js`) rather than having the backend return them:
+  they follow directly from two values the calendar response already
+  carries, and the backend's entries stay "things stored in the database".
+  They are written as UTC ISO strings, like the backend's timestamps, so
+  the day/week list still sorts by time.
+- **Month grid: one entry a day ("Open 08:00-20:00 only")**, because the
+  grid has no hour axis to shade. The shared `AvailabilityCalendar` grid
+  columns became `minmax(0, 1fr)` so a long label is cut short instead of
+  widening its column (it pushed Saturday off the page); this changes
+  nothing for the equipment calendar except that.
+- **Mutation-tested by hand (6 Nov).** Each guard was broken in turn and the
+  tests run; every change was caught:
+
+  | Change | Caught by |
+  |---|---|
+  | Booking check: drop `start.date() == end.date()` | `test_a_booking_running_past_midnight_is_refused`, `test_a_multi_day_session_is_refused_at_a_venue_with_hours` |
+  | Booking check: `opens <= start` becomes `opens < start` | `test_a_request_filling_the_hours_exactly_is_accepted` |
+  | Booking check: `end <= closes` becomes `end < closes` | `test_a_request_filling_the_hours_exactly_is_accepted` |
+  | Booking check: compare the session times, not the padded booking | `test_setup_time_before_opening_is_refused`, `test_turnaround_time_after_closing_is_refused` |
+  | Booking check: not called | every refusal test in `test_booking_operating_hours.py` |
+  | Venue form: allow half a pair | `test_ac1_invalid_details_are_refused[change14/15]`, `test_ac2_clearing_only_one_operating_hours_field_is_refused` |
+  | Venue form: allow closing == opening (`<` instead of `<=`) | `test_ac1_invalid_details_are_refused[change17]` |
+  | `update_venue`: write only the field sent | `test_ac2_operating_hours_can_be_edited` |
+  | Calendar: no evening entry | `venueHours.test.js` ("marks the time before opening and after closing" and three more), `VenueCalendarView.test.js` ("day view lists the closed periods") |
+

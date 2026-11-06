@@ -157,7 +157,7 @@ def test_ac1_an_added_venue_is_stored_and_listed(f):
     stored = service.get_venue(venue["id"])
     assert stored["facilities"] == ["wifi"]
     assert stored["supported_layouts"] == ["theatre"]
-    # Not part of the form: a new venue has no set hours.
+    # No hours given: a new venue has no set hours (IS-11 AC5 made them optional).
     assert (stored["operating_hours_start"], stored["operating_hours_end"]) == (None, None)
     assert venue["id"] in _catalogue_ids()
 

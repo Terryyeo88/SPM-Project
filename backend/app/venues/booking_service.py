@@ -172,6 +172,31 @@ def _blocked_period_exists(venue_id: str, booking_start: datetime, booking_end: 
     return False
 
 
+def _check_operating_hours(venue: dict, booking_start: datetime, booking_end: datetime) -> None:
+    """IS-11 AC5 (6 Nov): a new booking request must fit inside the venue's
+    daily operating hours -- the whole booked period, setup and turnaround
+    included, because staff are at the venue for those too. A venue with no
+    hours set takes any time.
+
+    The hours are one window per day, so a booked period that runs past
+    midnight (including a multi-day session) is outside them. Only new
+    requests are checked: existing bookings stay as they are when the hours
+    change."""
+    opens = _parse_time(venue.get("operating_hours_start"))
+    closes = _parse_time(venue.get("operating_hours_end"))
+    if opens is None or closes is None:
+        return
+    start = booking_start.astimezone(SINGAPORE_TZ)
+    end = booking_end.astimezone(SINGAPORE_TZ)
+    if start.date() == end.date() and opens <= start.time() and end.time() <= closes:
+        return
+    raise ValidationError(
+        f"{venue['name']} is open {opens:%H:%M}-{closes:%H:%M} daily. This booking, including "
+        f"{venue['setup_minutes']} minutes of setup and {venue['turnaround_minutes']} minutes of "
+        f"turnaround, runs from {start:%d %b %H:%M} to {end:%d %b %H:%M}, which is outside those hours."
+    )
+
+
 def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) -> dict:
     """Creates a pending venue booking for one event session.
 
@@ -189,6 +214,7 @@ def create_booking_request(event: SimpleNamespace, venue_id, requested_by: str) 
     turnaround = venue["turnaround_minutes"]
     booking_start = session_start - timedelta(minutes=setup)
     booking_end = session_end + timedelta(minutes=turnaround)
+    _check_operating_hours(venue, booking_start, booking_end)
 
     try:
         result = (

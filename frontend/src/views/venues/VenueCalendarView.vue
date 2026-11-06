@@ -9,12 +9,18 @@
 // math is lib/calendar.js, shared with the equipment calendar; this view
 // owns the venue-specific parts: the fetch, the state colours and the
 // entry labels.
-import { onMounted, ref, watch } from 'vue'
+//
+// AC5 (6 Nov): the time outside the venue's operating hours is shown as
+// unavailable, worked out here from the venue's hours (lib/venueHours.js)
+// rather than fetched -- the backend stores no entry for it.
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiGet } from '../../lib/api'
 import { CALENDAR_VIEWS, rangeQuery, useCalendarRange } from '../../lib/calendar'
 import AppNavBar from '../../components/AppNavBar.vue'
 import AvailabilityCalendar from '../../components/AvailabilityCalendar.vue'
+import { OUTSIDE_HOURS_STATE, outsideHoursEntries, outsideHoursLabel } from '../../lib/venueHours'
+import { formatOperatingHours } from '../../lib/venueCatalogue'
 
 const route = useRoute()
 const venueId = route.params.venueId
@@ -53,6 +59,7 @@ const STATES = {
   tentatively_held: { label: 'Tentatively held', color: '#1f5fae', background: '#e4eefb' },
   confirmed: { label: 'Confirmed', color: '#2f6b3f', background: '#eaf5ec' },
   blocked: { label: 'Blocked', color: '#a33f3f', background: '#f5e6e6' },
+  [OUTSIDE_HOURS_STATE]: { label: 'Outside operating hours', color: '#5b6370', background: '#eceef1' },
 }
 const REASON_LABELS = {
   maintenance: 'Maintenance',
@@ -62,7 +69,21 @@ const REASON_LABELS = {
   other: 'Other',
 }
 
+// The venue's bookings and blocks, plus the time outside its hours. Only
+// once something has loaded: the range can change before the fetch returns.
+const shownEntries = computed(() => {
+  if (!venue.value) return entries.value
+  const closed = outsideHoursEntries(
+    range.value,
+    venue.value.operating_hours_start,
+    venue.value.operating_hours_end,
+    view.value,
+  )
+  return [...closed, ...entries.value]
+})
+
 function entryLabel(entry) {
+  if (entry.type === 'outside_hours') return outsideHoursLabel(entry)
   if (entry.type === 'block') return REASON_LABELS[entry.reason] || 'Blocked'
   return entry.event_name || 'Booked'
 }
@@ -103,14 +124,14 @@ function entryLabel(entry) {
 
         <template v-else>
           <p v-if="venue?.operating_hours_start" class="hours-note">
-            Operating hours: {{ venue.operating_hours_start }}–{{ venue.operating_hours_end }} daily. Periods outside
-            these hours are unavailable.
+            Operating hours: {{ formatOperatingHours(venue.operating_hours_start, venue.operating_hours_end) }}. The
+            venue is unavailable outside these hours.
           </p>
 
           <AvailabilityCalendar
             :view="view"
             :range="range"
-            :entries="entries"
+            :entries="shownEntries"
             :states="STATES"
             :entry-label="entryLabel"
             empty-message="No bookings or blocked periods in this range."

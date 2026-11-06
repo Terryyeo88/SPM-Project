@@ -78,7 +78,8 @@ function dotStyle(state) {
 .message { margin: 0; padding: var(--cs-space-4) 0; font-size: var(--cs-text-base); color: var(--cs-ink-soft); }
 
 .month-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--cs-line); border: 1px solid var(--cs-line);
+  /* minmax(0, ...): a long label is cut short (ellipsis) instead of widening its column. */
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--cs-line); border: 1px solid var(--cs-line);
   border-radius: var(--cs-radius-sm); overflow: hidden;
 }
 .day-header { background: var(--cs-paper); padding: 6px var(--cs-space-2); font-size: 10px; font-weight: 700; color: var(--cs-ink-soft); text-align: center; }
